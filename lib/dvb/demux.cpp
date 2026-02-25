@@ -434,6 +434,7 @@ eDVBRecordFileThread::eDVBRecordFileThread(int packetsize, int bufferCount, int 
 	 m_current_offset(0),
 	 m_fd_dest(-1),
 	 m_sync_mode(sync_mode),
+	 m_discard_on_timeout(false),
 	 m_aio(bufferCount),
 	 m_current_buffer(m_aio.begin()),
 	 m_buffer_use_histogram(bufferCount+1, 0)
@@ -588,10 +589,12 @@ int eDVBRecordFileThread::AsyncIO::poll()
 {
 	if (aio.aio_buf == NULL)
 		return 0;
-	if (aio_error(&aio) == EINPROGRESS)
+	int err = aio_error(&aio);
+	if (err == EINPROGRESS)
 	{
 		return 1;
 	}
+
 	int r = aio_return(&aio);
 
 	if (r >= 0 && (size_t)r != aio.aio_nbytes)
@@ -612,7 +615,14 @@ int eDVBRecordFileThread::AsyncIO::poll()
 	aio.aio_buf = NULL;
 	if (r < 0)
 	{
-		eWarning("[eDVBRecordFileThread] poll: aio_return returned failure: %d %m", r);
+		if (err == 0 || err == ECANCELED)
+		{
+			/* aio_error() reported success/cancel but aio_return() failed.
+			 * This happens on DVR/socket devices with incomplete POSIX AIO.
+			 * The operation itself completed - treat as done. */
+			return 0;
+		}
+		eDebug("[eDVBRecordFileThread] poll: aio failed (error=%d): %s", err, strerror(err));
 		return -1;
 	}
 	return 0;
@@ -627,6 +637,10 @@ int eDVBRecordFileThread::AsyncIO::start(int fd, off_t offset, size_t nbytes, vo
 	aio.aio_buf = buffer;
 	return aio_write(&aio);
 }
+
+// AIO write mode state - locked after first determination for entire session.
+// -1 = unknown (not yet tested), 0 = not supported, 1 = supported
+static int s_aio_state = -1;
 
 int eDVBRecordFileThread::asyncWrite(int len)
 {
@@ -661,6 +675,11 @@ int eDVBRecordFileThread::asyncWrite(int len)
 	{
 		eWarning("[eDVBRecordFileThread] aio_write failed: %m");
 		return r;
+	}
+	if (s_aio_state != 1)
+	{
+		s_aio_state = 1;
+		eDebug("[eDVBRecordFileThread] AIO supported - locked for session");
 	}
 	m_current_offset += len;
 
@@ -701,17 +720,13 @@ int eDVBRecordFileThread::asyncWrite(int len)
 	return len;
 }
 
-// Static flag: Once AIO is detected as unsupported (ENOSYS), all future threads use sync mode
-// This persists until Enigma2 restart - no point retrying AIO on every channel change
-static bool s_aio_not_supported = false;
-
 int eDVBRecordFileThread::writeData(int len)
 {
 	if (!len || !m_buffer)
 		return 0;
 
 	// Use sync mode if: explicitly configured OR AIO was detected as unsupported
-	if (m_sync_mode || s_aio_not_supported)
+	if (m_sync_mode || s_aio_state == 0)
 	{
 		// Synchronous write mode with timeout to prevent blocking forever
 		struct pollfd pfd = {};
@@ -721,6 +736,11 @@ int eDVBRecordFileThread::writeData(int len)
 
 		if (poll_ret == 0)
 		{
+			if (m_discard_on_timeout)
+			{
+				eDebug("[eDVBRecordFileThread] sync write poll timeout - discarding %d bytes", len);
+				return len;
+			}
 			eDebug("[eDVBRecordFileThread] sync write poll timeout");
 			return 0; // Timeout - return 0 to retry
 		}
@@ -764,18 +784,36 @@ int eDVBRecordFileThread::writeData(int len)
 	else
 	{
 		// Asynchronous write mode - better performance with buffer rotation
+		// When DVR is busy (e.g. CW loss), skip write to prevent 5s blocking
+		if (m_discard_on_timeout)
+		{
+			AsyncIOvector::iterator next_it = m_current_buffer;
+			++next_it;
+			if (next_it == m_aio.end())
+				next_it = m_aio.begin();
+
+			if (next_it->poll() > 0)
+			{
+				// Next slot still has pending AIO - DVR is busy
+				// Discard data instead of blocking in wait()
+				return len;
+			}
+		}
 		len = asyncWrite(len);
 		if (len < 0)
 		{
 			if (m_stop)
 				return len;
-			// Check for ENOSYS (AIO not supported by kernel) - automatic fallback to sync
 			if (errno == ENOSYS)
 			{
+				if (s_aio_state == 1)
+				{
+					eDebug("[eDVBRecordFileThread] ENOSYS ignored - AIO confirmed for session");
+					return -1;
+				}
+				s_aio_state = 0;
 				eWarning("[eDVBRecordFileThread] AIO not supported (ENOSYS), falling back to sync mode");
-				s_aio_not_supported = true;  // Remember globally for all future threads
 				m_sync_mode = true;
-				// Retry this write in sync mode (recursive call, now using sync path)
 				return writeData(m_buffersize);
 			}
 			eWarning("[eDVBRecordFileThread] asyncWrite failed: %d", len);
@@ -787,14 +825,16 @@ int eDVBRecordFileThread::writeData(int len)
 		{
 			if (m_stop)
 				return len;
-			// Check for ENOSYS in wait (aio_return) - automatic fallback to sync
 			if (errno == ENOSYS)
 			{
+				if (s_aio_state == 1)
+				{
+					eDebug("[eDVBRecordFileThread] ENOSYS in wait ignored - AIO confirmed for session");
+					return len;
+				}
+				s_aio_state = 0;
 				eWarning("[eDVBRecordFileThread] AIO not supported (ENOSYS in wait), falling back to sync mode");
-				s_aio_not_supported = true;  // Remember globally for all future threads
 				m_sync_mode = true;
-				// Data was already submitted to asyncWrite, but we can't get the result
-				// Future writes will use sync mode
 				return len;
 			}
 			eWarning("[eDVBRecordFileThread] wait failed: %d", r);
@@ -959,8 +999,8 @@ eDVBRecordScrambledThread::eDVBRecordScrambledThread(int packetsize, int buffers
 {
 	pthread_mutex_init(&m_data_ready_mutex, NULL);
 	pthread_cond_init(&m_data_ready_cond, NULL);
-	// Note: s_aio_not_supported may override sync_mode at runtime in writeData()
-	const char* mode = sync_mode ? "sync" : (s_aio_not_supported ? "sync (AIO unavailable)" : "async");
+	// Note: s_aio_state may override sync_mode at runtime in writeData()
+	const char* mode = sync_mode ? "sync" : (s_aio_state == 0 ? "sync (AIO unavailable)" : "async");
 	eDebug("[eDVBRecordScrambledThread] %s allocated %zu buffers of %zu kB (streaming=%d)",
 		mode, m_aio.size(), m_buffersize>>10, is_streaming);
 }
@@ -1395,6 +1435,11 @@ RESULT eDVBTSRecorder::setDescrambler(ePtr<iServiceScrambled> serviceDescrambler
 {
 	m_thread->setDescrambler(serviceDescrambler);
 	return 0;
+}
+
+void eDVBTSRecorder::setDiscardOnTimeout(bool discard)
+{
+	m_thread->setDiscardOnTimeout(discard);
 }
 
 bool eDVBTSRecorder::waitForFirstData(int timeout_ms)

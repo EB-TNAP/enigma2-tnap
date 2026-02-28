@@ -39,6 +39,8 @@ eDVBSoftDecoder::~eDVBSoftDecoder()
 		m_start_timer->stop();
 	if (m_health_timer)
 		m_health_timer->stop();
+	if (m_buffer_timer)
+		m_buffer_timer->stop();
 	if (m_first_cw_conn.connected())
 		m_first_cw_conn.disconnect();
 
@@ -93,7 +95,7 @@ void eDVBSoftDecoder::onFirstCwReceived()
 	if (m_first_cw_conn.connected())
 		m_first_cw_conn.disconnect();
 
-	startDecoder();
+	startDecoderOrBuffer();
 }
 
 void eDVBSoftDecoder::onWaitForFirstDataTimeout()

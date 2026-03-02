@@ -27,7 +27,9 @@ eDVBSoftDecoder::eDVBSoftDecoder(eDVBServicePMTHandler& source_handler,
 	, m_paused(false)
 	, m_last_health_check(0)
 {
-	eDebug("[SoftDecoder] Created for decoder %d", decoder_index);
+	m_buffer_timer = eTimer::create(eApp);
+	CONNECT(m_buffer_timer->timeout, eDVBSoftDecoder::onBufferTimerExpired);
+	eDebug("[eDVBSoftDecoder] Created for decoder %d", decoder_index);
 }
 
 eDVBSoftDecoder::~eDVBSoftDecoder()
@@ -41,7 +43,7 @@ eDVBSoftDecoder::~eDVBSoftDecoder()
 		m_first_cw_conn.disconnect();
 
 	stop();
-	eDebug("[SoftDecoder] Destroyed");
+	eDebug("[eDVBSoftDecoder] Destroyed");
 }
 
 void eDVBSoftDecoder::setSession(ePtr<eDVBCSASession> session)
@@ -64,14 +66,14 @@ void eDVBSoftDecoder::setSession(ePtr<eDVBCSASession> session)
 
 void eDVBSoftDecoder::onSessionActivated(bool active)
 {
-	eDebug("[SoftDecoder] Session activated: %d", active);
+	eDebug("[eDVBSoftDecoder] Session activated: %d", active);
 
 	// Note: Don't start here automatically!
 	// eDVBServicePlay::onSessionActivated will call start() after stopping
 	// the old hardware decoder to ensure correct ordering.
 	if (!active && m_running)
 	{
-		eDebug("[SoftDecoder] Session deactivated - stopping decoder");
+		eDebug("[eDVBSoftDecoder] Session deactivated - stopping decoder");
 		stop();
 	}
 }
@@ -81,7 +83,7 @@ void eDVBSoftDecoder::onFirstCwReceived()
 	if (m_decoder_started)
 		return;  // Already started
 
-	eDebug("[SoftDecoder] First CW received - starting decoder");
+	eDebug("[eDVBSoftDecoder] First CW received - starting decoder");
 
 	// Stop timer
 	if (m_start_timer)
@@ -99,12 +101,29 @@ void eDVBSoftDecoder::onWaitForFirstDataTimeout()
 	if (m_decoder_started)
 		return;  // Already started
 
-	eWarning("[SoftDecoder] CW timeout - starting decoder anyway");
+	eWarning("[eDVBSoftDecoder] CW timeout - starting decoder anyway");
 
 	// Disconnect signal
 	if (m_first_cw_conn.connected())
 		m_first_cw_conn.disconnect();
 
+	startDecoderOrBuffer();
+}
+
+void eDVBSoftDecoder::startDecoderOrBuffer()
+{
+	if (int bufferTime = eSimpleConfig::getInt("config.softcsa.bufferTime", 0); bufferTime > 0)
+	{
+		eDebug("[eDVBSoftDecoder] Pre-buffering %dms before decoder start", bufferTime);
+		m_buffer_timer->start(bufferTime, true);
+		return;
+	}
+	startDecoder();
+}
+
+void eDVBSoftDecoder::onBufferTimerExpired()
+{
+	eDebug("[eDVBSoftDecoder] Pre-buffer complete - starting decoder");
 	startDecoder();
 }
 
@@ -114,7 +133,7 @@ void eDVBSoftDecoder::startDecoder()
 		return;
 
 	// Start decoder
-	eDebug("[SoftDecoder] Starting decoder");
+	eDebug("[eDVBSoftDecoder] Starting decoder");
 	updatePids(true);
 	m_decoder_started = true;
 
@@ -136,7 +155,7 @@ int eDVBSoftDecoder::start()
 	if (m_running)
 		return 0;
 
-	eDebug("[SoftDecoder] Starting");
+	eDebug("[eDVBSoftDecoder] Starting");
 
 	// Connect to source PMT handler for program info updates (e.g. new audio tracks)
 	m_source_event_conn = m_source_handler.serviceEvent.connect(
@@ -145,7 +164,7 @@ int eDVBSoftDecoder::start()
 	int ret = setupRecorder();
 	if (ret < 0)
 	{
-		eWarning("[SoftDecoder] setupRecorder failed");
+		eWarning("[eDVBSoftDecoder] setupRecorder failed");
 		m_source_event_conn.disconnect();
 		return ret;
 	}
@@ -160,7 +179,7 @@ void eDVBSoftDecoder::stop()
 	if (!m_running)
 		return;
 
-	eDebug("[SoftDecoder] Stopping");
+	eDebug("[eDVBSoftDecoder] Stopping");
 	m_stopping = true;
 
 	// Stop timers and disconnect signals
@@ -185,7 +204,7 @@ void eDVBSoftDecoder::stop()
 	// In sync mode poll() times out after 1s, then thread sees m_stop and exits.
 	if (m_record)
 	{
-		eDebug("[SoftDecoder] Stopping recorder thread");
+		eDebug("[eDVBSoftDecoder] Stopping recorder thread");
 		m_record->stop();
 		m_record->setDescrambler(nullptr);
 		m_record = nullptr;
@@ -201,7 +220,7 @@ void eDVBSoftDecoder::stop()
 	// Stop decoder - release PID filters and pause
 	if (m_decoder)
 	{
-		eDebug("[SoftDecoder] Stopping decoder");
+		eDebug("[eDVBSoftDecoder] Stopping decoder");
 		m_decoder->pause();
 		m_decoder->setVideoPID(-1, -1);
 		m_decoder->setAudioPID(-1, -1);
@@ -211,18 +230,18 @@ void eDVBSoftDecoder::stop()
 	// Release decode demux
 	if (m_decode_demux)
 	{
-		eDebug("[SoftDecoder] Releasing decode demux");
+		eDebug("[eDVBSoftDecoder] Releasing decode demux");
 		m_decode_demux = nullptr;
 	}
 
 	// Free PVR handler before releasing the decoder
-	eDebug("[SoftDecoder] Freeing PVR handler");
+	eDebug("[eDVBSoftDecoder] Freeing PVR handler");
 	m_pvr_handler.free();
 
 	// Release decoder
 	if (m_decoder)
 	{
-		eDebug("[SoftDecoder] Releasing decoder");
+		eDebug("[eDVBSoftDecoder] Releasing decoder");
 		m_decoder = nullptr;
 	}
 
@@ -234,26 +253,26 @@ void eDVBSoftDecoder::stop()
 	m_stream_stalled = false;
 	m_paused = false;
 	m_last_health_check = 0;
-	eDebug("[SoftDecoder] Stop complete");
+	eDebug("[eDVBSoftDecoder] Stop complete");
 }
 
 int eDVBSoftDecoder::setupRecorder()
 {
-	eDebug("[SoftDecoder] setupRecorder");
+	eDebug("[eDVBSoftDecoder] setupRecorder");
 
 	if (!m_record)
 	{
 		ePtr<iDVBDemux> demux;
 		if (m_source_handler.getDataDemux(demux))
 		{
-			eDebug("[SoftDecoder] NO DEMUX available");
+			eDebug("[eDVBSoftDecoder] NO DEMUX available");
 			return -1;
 		}
 
 		// Debug: Show data demux ID
 		uint8_t data_demux_id = 0;
 		demux->getCADemuxID(data_demux_id);
-		eDebug("[SoftDecoder] Data demux ID: %d (reads from tuner)", data_demux_id);
+		eDebug("[eDVBSoftDecoder] Data demux ID: %d (reads from tuner)", data_demux_id);
 
 		// Use streaming=false to get ScrambledThread (supports descrambling)
 		// sync_mode is configurable via GUI:
@@ -261,11 +280,11 @@ int eDVBSoftDecoder::setupRecorder()
 		// 1 - "Synchronous": force sync (poll + write)
 		int sync_mode_cfg = eSimpleConfig::getInt("config.softcsa.syncMode", 0);
 		bool sync_mode = (sync_mode_cfg == 1);  // 1 = Synchronous forced
-		eDebug("[SoftDecoder] Using %s mode (config=%d)", sync_mode ? "synchronous" : "automatic", sync_mode_cfg);
+		eDebug("[eDVBSoftDecoder] Using %s mode (config=%d)", sync_mode ? "synchronous" : "automatic", sync_mode_cfg);
 		demux->createTSRecorder(m_record, 188, false, sync_mode);
 		if (!m_record)
 		{
-			eDebug("[SoftDecoder] no ts recorder available.");
+			eDebug("[eDVBSoftDecoder] no ts recorder available.");
 			return -1;
 		}
 
@@ -275,13 +294,13 @@ int eDVBSoftDecoder::setupRecorder()
 		// Allocate separate PVR channel for decode demux (critical!)
 		// This ensures we have a different demux for PVR playback
 		m_pvr_handler.allocatePVRChannel();
-		eDebug("[SoftDecoder] PVR channel allocated");
+		eDebug("[eDVBSoftDecoder] PVR channel allocated");
 
 		// Get decode demux from PVR handler (NOT from source_handler!)
 		m_pvr_handler.getDecodeDemux(m_decode_demux);
 		if (!m_decode_demux)
 		{
-			eWarning("[SoftDecoder] No decode demux from PVR handler - aborting!");
+			eWarning("[eDVBSoftDecoder] No decode demux from PVR handler - aborting!");
 			m_record = nullptr;
 			return -2;
 		}
@@ -289,18 +308,26 @@ int eDVBSoftDecoder::setupRecorder()
 		// Get demux ID
 		uint8_t demux_id = 0;
 		m_decode_demux->getCADemuxID(demux_id);
-		eDebug("[SoftDecoder] Decode demux ID: %d (from PVR handler)", demux_id);
+		eDebug("[eDVBSoftDecoder] Decode demux ID: %d (from PVR handler)", demux_id);
+
+		// Set demux source to PVR (critical for decoder to read from DVR)
+		eDVBDemux *demux_raw = (eDVBDemux*)m_decode_demux.operator->();
+		if (demux_raw)
+		{
+			demux_raw->setSourcePVR(demux_id);
+			eDebug("[eDVBSoftDecoder] Set demux %d source to PVR (DVR%d)", demux_id, demux_id);
+		}
 
 		int fd = m_decode_demux->openDVR(O_WRONLY);
 		if (fd >= 0)
 		{
 			m_dvr_fd = fd;  // Save for closing before thread stop
 			m_record->setTargetFD(fd);
-			eDebug("[SoftDecoder] DVR opened for writing (fd=%d)", fd);
+			eDebug("[eDVBSoftDecoder] DVR opened for writing (fd=%d)", fd);
 		}
 		else
 		{
-			eWarning("[SoftDecoder] Failed to open DVR for writing - aborting!");
+			eWarning("[eDVBSoftDecoder] Failed to open DVR for writing - aborting!");
 			m_decode_demux = nullptr;
 			m_record = nullptr;
 			return -3;
@@ -313,11 +340,11 @@ int eDVBSoftDecoder::setupRecorder()
 	// Attach session as descrambler
 	if (m_session)
 	{
-		eDebug("[SoftDecoder] Attaching session as descrambler (active=%d)", m_session->isActive());
+		eDebug("[eDVBSoftDecoder] Attaching session as descrambler (active=%d)", m_session->isActive());
 		m_record->setDescrambler(ePtr<iServiceScrambled>(m_session.operator->()));
 	}
 	else
-		eWarning("[SoftDecoder] No session attached!");
+		eWarning("[eDVBSoftDecoder] No session attached!");
 
 
 	updatePids(false);     // Add PIDs only, no decoder yet
@@ -333,16 +360,16 @@ int eDVBSoftDecoder::setupRecorder()
 	// Disabled (0): start decoder immediately, no CW waiting
 	if (wait_timeout == 0)
 	{
-		eDebug("[SoftDecoder] CW wait disabled - starting decoder immediately");
-		startDecoder();
+		eDebug("[eDVBSoftDecoder] CW wait disabled - starting decoder immediately");
+		startDecoderOrBuffer();
 		return 0;
 	}
 
 	// Check if CW is already available (e.g. fast channel switch)
 	if (m_session && m_session->hasKeys())
 	{
-		eDebug("[SoftDecoder] First CW already available - starting decoder");
-		startDecoder();
+		eDebug("[eDVBSoftDecoder] First CW already available - starting decoder");
+		startDecoderOrBuffer();
 		return 0;
 	}
 
@@ -354,7 +381,7 @@ int eDVBSoftDecoder::setupRecorder()
 	}
 
 	// Start timeout timer for CW
-	eDebug("[SoftDecoder] Waiting for first CW (timeout=%dms)", wait_timeout);
+	eDebug("[eDVBSoftDecoder] Waiting for first CW (timeout=%dms)", wait_timeout);
 
 	m_start_timer = eTimer::create(eApp);
 	CONNECT(m_start_timer->timeout, eDVBSoftDecoder::onWaitForFirstDataTimeout);
@@ -371,10 +398,10 @@ void eDVBSoftDecoder::recordEvent(int event)
 	switch (event)
 	{
 	case iDVBTSRecorder::eventWriteError:
-		eDebug("[SoftDecoder] TS write error");
+		eDebug("[eDVBSoftDecoder] TS write error");
 		break;
 	default:
-		eDebug("[SoftDecoder] Unhandled record event %d", event);
+		eDebug("[eDVBSoftDecoder] Unhandled record event %d", event);
 		break;
 	}
 }
@@ -400,7 +427,7 @@ void eDVBSoftDecoder::streamHealthCheck()
 		int64_t elapsed = now - m_last_health_check;
 		if (elapsed > 2000)
 		{
-			eDebug("[SoftDecoder] MainLoop was blocked for %lldms, skipping stall check", elapsed);
+			eDebug("[eDVBSoftDecoder] MainLoop was blocked for %lldms, skipping stall check", elapsed);
 			m_stall_count = 0;
 			m_stream_stalled = false;
 			m_last_pts = 0;
@@ -426,7 +453,7 @@ void eDVBSoftDecoder::streamHealthCheck()
 		m_stall_count++;
 		if (m_stall_count == 3)
 		{
-			eWarning("[SoftDecoder] Stream stalled (PTS=%lld)", current_pts);
+			eWarning("[eDVBSoftDecoder] Stream stalled (PTS=%lld)", current_pts);
 			m_stream_stalled = true;
 		}
 		else if (m_stall_count == 6)
@@ -459,7 +486,7 @@ void eDVBSoftDecoder::streamHealthCheck()
 	else
 	{
 		if (m_stream_stalled)
-			eDebug("[SoftDecoder] Stream recovered (PTS: %lld -> %lld)", m_last_pts, current_pts);
+			eDebug("[eDVBSoftDecoder] Stream recovered (PTS: %lld -> %lld)", m_last_pts, current_pts);
 		m_stall_count = 0;
 		m_stream_stalled = false;
 		m_recovery_attempts = 0;
@@ -474,7 +501,7 @@ void eDVBSoftDecoder::serviceEventSource(int event)
 	switch (event)
 	{
 	case eDVBServicePMTHandler::eventNewProgramInfo:
-		eDebug("[SoftDecoder] Source: eventNewProgramInfo");
+		eDebug("[eDVBSoftDecoder] Source: eventNewProgramInfo");
 		if (m_running)
 			updatePids(true);  // Decoder already running, update it
 		break;
@@ -492,7 +519,7 @@ void eDVBSoftDecoder::updatePids(bool withDecoder)
 	eDVBServicePMTHandler::program program;
 	if (m_source_handler.getProgramInfo(program))
 	{
-		eDebug("[SoftDecoder] getting program info failed.");
+		eDebug("[eDVBSoftDecoder] getting program info failed.");
 		return;
 	}
 
@@ -502,7 +529,7 @@ void eDVBSoftDecoder::updatePids(bool withDecoder)
 	if (program.pmtPid != -1)
 		pids_to_record.insert(program.pmtPid); // PMT
 
-	eDebugNoNewLineStart("[SoftDecoder] have %zd video stream(s)", program.videoStreams.size());
+	eDebugNoNewLineStart("[eDVBSoftDecoder] have %zd video stream(s)", program.videoStreams.size());
 	if (!program.videoStreams.empty())
 	{
 		eDebugNoNewLine(" (");
@@ -613,22 +640,22 @@ void eDVBSoftDecoder::updateDecoder(int vpid, int vpidtype, int pcrpid)
 		m_pvr_handler.getDecodeDemux(m_decode_demux);
 		if (!m_decode_demux)
 		{
-			eWarning("[SoftDecoder] updateDecoder: No decode demux available!");
+			eWarning("[eDVBSoftDecoder] updateDecoder: No decode demux available!");
 			return;
 		}
 
 		uint8_t demux_id = 0;
 		m_decode_demux->getCADemuxID(demux_id);
-		eDebug("[SoftDecoder] Getting decoder from demux %d", demux_id);
+		eDebug("[eDVBSoftDecoder] Getting decoder from demux %d", demux_id);
 
 		m_decode_demux->getMPEGDecoder(m_decoder, m_decoder_index);
 		if (!m_decoder)
 		{
-			eWarning("[SoftDecoder] updateDecoder: getMPEGDecoder failed!");
+			eWarning("[eDVBSoftDecoder] updateDecoder: getMPEGDecoder failed!");
 			return;
 		}
 
-		eDebug("[SoftDecoder] Decoder created on demux %d", demux_id);
+		eDebug("[eDVBSoftDecoder] Decoder created on demux %d", demux_id);
 		// Connect to video events to forward them to parent
 		m_decoder->connectVideoEvent(sigc::mem_fun(*this, &eDVBSoftDecoder::videoEvent), m_video_event_conn);
 		mustPlay = true;
@@ -636,7 +663,7 @@ void eDVBSoftDecoder::updateDecoder(int vpid, int vpidtype, int pcrpid)
 
 	if (m_decoder)
 	{
-		eDebug("[SoftDecoder] Setting decoder: vpid=%04x vpidtype=%d pcrpid=%04x", vpid, vpidtype, pcrpid);
+		eDebug("[eDVBSoftDecoder] Setting decoder: vpid=%04x vpidtype=%d pcrpid=%04x", vpid, vpidtype, pcrpid);
 		m_decoder->setVideoPID(vpid, vpidtype);
 
 		// Select audio stream - first check service cache, then fall back to language preferences
@@ -664,7 +691,7 @@ void eDVBSoftDecoder::updateDecoder(int vpid, int vpidtype, int pcrpid)
 								apid = cached_apid;
 								atype = program.audioStreams[s].type;
 								audio_index = s;
-								eDebug("[SoftDecoder] Using cached audio: apid=%04x atype=%d (stream %u)", apid, atype, audio_index);
+								eDebug("[eDVBSoftDecoder] Using cached audio: apid=%04x atype=%d (stream %u)", apid, atype, audio_index);
 								break;
 							}
 						}
@@ -683,7 +710,7 @@ void eDVBSoftDecoder::updateDecoder(int vpid, int vpidtype, int pcrpid)
 
 				apid = program.audioStreams[audio_index].pid;
 				atype = program.audioStreams[audio_index].type;
-				eDebug("[SoftDecoder] Using default audio: apid=%04x atype=%d (stream %u of %zu)",
+				eDebug("[eDVBSoftDecoder] Using default audio: apid=%04x atype=%d (stream %u of %zu)",
 				       apid, atype, audio_index, program.audioStreams.size());
 			}
 
@@ -700,7 +727,7 @@ void eDVBSoftDecoder::updateDecoder(int vpid, int vpidtype, int pcrpid)
 					bool mpeg = (atype == eDVBServicePMTHandler::audioStream::atMPEG);
 					size_t threshold = mpeg ? eFilePushThreadRecorder::minWriteMPEG : eFilePushThreadRecorder::minWriteDefault;
 					m_record->setMinWrite(threshold);
-					eDebug("[SoftDecoder] Write threshold set to %zu KB (%s audio)",
+					eDebug("[eDVBSoftDecoder] Write threshold set to %zu KB (%s audio)",
 						threshold >> 10, mpeg ? "MPEG" : "non-MPEG");
 				}
 #endif
@@ -716,7 +743,7 @@ void eDVBSoftDecoder::updateDecoder(int vpid, int vpidtype, int pcrpid)
 		if (mustPlay)
 		{
 			m_decoder->play();
-			eDebug("[SoftDecoder] Decoder PLAY with vpid=%04x vpidtype=%d", vpid, vpidtype);
+			eDebug("[eDVBSoftDecoder] Decoder PLAY with vpid=%04x vpidtype=%d", vpid, vpidtype);
 			m_decoder_ready();
 		}
 		else
@@ -840,7 +867,7 @@ int eDVBSoftDecoder::setAudioPID(int pid, int type)
 		bool mpeg = (type == eDVBServicePMTHandler::audioStream::atMPEG);
 		size_t threshold = mpeg ? eFilePushThreadRecorder::minWriteMPEG : eFilePushThreadRecorder::minWriteDefault;
 		m_record->setMinWrite(threshold);
-		eDebug("[SoftDecoder] Write threshold set to %zu KB (%s audio)",
+		eDebug("[eDVBSoftDecoder] Write threshold set to %zu KB (%s audio)",
 			threshold >> 10, mpeg ? "MPEG" : "non-MPEG");
 	}
 #endif
@@ -855,13 +882,13 @@ int eDVBSoftDecoder::selectAudioTrack(unsigned int i)
 	eDVBServicePMTHandler::program program;
 	if (m_source_handler.getProgramInfo(program))
 	{
-		eDebug("[SoftDecoder] selectAudioTrack: getProgramInfo failed");
+		eDebug("[eDVBSoftDecoder] selectAudioTrack: getProgramInfo failed");
 		return -1;
 	}
 
 	if (i >= program.audioStreams.size())
 	{
-		eDebug("[SoftDecoder] selectAudioTrack: invalid track %u (have %zu)",
+		eDebug("[eDVBSoftDecoder] selectAudioTrack: invalid track %u (have %zu)",
 		       i, program.audioStreams.size());
 		return -2;
 	}
@@ -869,7 +896,7 @@ int eDVBSoftDecoder::selectAudioTrack(unsigned int i)
 	int pid = program.audioStreams[i].pid;
 	int type = program.audioStreams[i].type;
 
-	eDebug("[SoftDecoder] selectAudioTrack(%u): pid=%04x type=%d", i, pid, type);
+	eDebug("[eDVBSoftDecoder] selectAudioTrack(%u): pid=%04x type=%d", i, pid, type);
 
 	// Set audio PID on our decoder
 	int ret = setAudioPID(pid, type);

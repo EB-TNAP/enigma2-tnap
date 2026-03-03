@@ -285,12 +285,11 @@ public:
 		std::string language_code; /* iso-639, if available. */
 		std::string title;
 		subtitleStream() : pad(0) {}
-		bool operator==(const subtitleStream& lhs) const {
-			return (lhs.type == type) && (lhs.language_code == language_code) && (lhs.title == title);
-		}
-		bool operator!=(const subtitleStream& lhs) const {
-			return (lhs.type != type) || (lhs.language_code != language_code) || (lhs.title != title);
-		}
+
+
+		bool operator==(const subtitleStream& rhs) const { return type == rhs.type && language_code == rhs.language_code && title == rhs.title; }
+
+		bool operator!=(const subtitleStream& rhs) const { return !(*this == rhs); }
 	};
 	struct sourceStream {
 		audiotype_t audiotype = atUnknown;

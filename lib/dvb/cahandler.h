@@ -188,6 +188,8 @@ DECLARE_REF(eDVBCAHandler);
 	uint32_t serviceIdCounter;
 	bool m_protocol3_established;  // SERVER_INFO received from at least one client
 
+	std::unique_ptr<eDVBCAService> m_pending_sr_service; // deferred CMD_NOT_SELECTED for SR channel change
+
 	void newConnection(int socket);
 	void processPMTForService(eDVBCAService *service, eTable<ProgramMapSection> *ptr);
 	void distributeCAPMT();

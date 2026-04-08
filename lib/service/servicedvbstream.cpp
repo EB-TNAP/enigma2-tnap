@@ -465,12 +465,6 @@ bool eDVBServiceStream::recordCachedPids()
 void eDVBServiceStream::recordPids(std::set<int> pids_to_record, int timing_pid,
 	int timing_stream_type, iDVBTSRecorder::timing_pid_type timing_pid_type)
 {
-	/* Compute which PIDs are new and which are obsolete, but DO NOT issue
-	 * ioctls here. On services with many PIDs (e.g. a 91-audio radio mux)
-	 * issuing all DMX_ADD_PID / DMX_REMOVE_PID calls synchronously blocks
-	 * the main thread long enough to trigger the spinner and make the
-	 * receiver appear frozen. Instead, queue the changes and apply them in
-	 * small batches across successive event-loop iterations via eTimer. */
 	std::set<int> new_pids, obsolete_pids;
 
 	std::set_difference(pids_to_record.begin(), pids_to_record.end(),
@@ -482,19 +476,6 @@ void eDVBServiceStream::recordPids(std::set<int> pids_to_record, int timing_pid,
 			pids_to_record.begin(), pids_to_record.end(),
 			std::inserter(obsolete_pids, obsolete_pids.begin()));
 
-	/* Merge into pending queues — a later call before the timer fires
-	 * overrides an earlier one, which is correct: apply the latest PID set. */
-	for (const int pid : obsolete_pids)
-	{
-		m_pids_to_add.erase(pid);   /* cancel any pending add for this PID */
-		m_pids_to_remove.insert(pid);
-	}
-	for (const int pid : new_pids)
-	{
-		m_pids_to_remove.erase(pid); /* cancel any pending remove for this PID */
-		m_pids_to_add.insert(pid);
-	}
-
 	if (timing_pid != -1)
 		m_record->setTimingPID(timing_pid, timing_pid_type, timing_stream_type);
 
@@ -502,13 +483,42 @@ void eDVBServiceStream::recordPids(std::set<int> pids_to_record, int timing_pid,
 
 	if (m_state != stateRecording)
 	{
+		/* First call: recorder has not started yet. Apply all PIDs synchronously
+		 * so the recorder starts with a complete, working filter set. Deferred
+		 * updates are only safe while the recorder is already running. */
+		for (const int pid : obsolete_pids)
+		{
+			eDebug("[eDVBServiceStream] REMOVED PID: %04x", pid);
+			m_record->removePID(pid);
+		}
+		for (const int pid : new_pids)
+		{
+			eDebug("[eDVBServiceStream] ADD PID: %04x", pid);
+			m_record->addPID(pid);
+		}
 		m_record->start();
 		m_state = stateRecording;
 	}
-
-	/* Kick off deferred PID application if not already scheduled */
-	if (!m_pids_to_add.empty() || !m_pids_to_remove.empty())
-		m_pid_update_timer->start(0, true);
+	else
+	{
+		/* Already recording: defer PID changes across event-loop iterations.
+		 * On services with many PIDs (e.g. a 91-audio radio mux) issuing all
+		 * DMX_ADD_PID / DMX_REMOVE_PID ioctls synchronously blocks the main
+		 * thread long enough to trigger the spinner. Batching via eTimer(0)
+		 * spreads the work without losing any PIDs or breaking the stream. */
+		for (const int pid : obsolete_pids)
+		{
+			m_pids_to_add.erase(pid);    /* cancel any pending add */
+			m_pids_to_remove.insert(pid);
+		}
+		for (const int pid : new_pids)
+		{
+			m_pids_to_remove.erase(pid); /* cancel any pending remove */
+			m_pids_to_add.insert(pid);
+		}
+		if (!m_pids_to_add.empty() || !m_pids_to_remove.empty())
+			m_pid_update_timer->start(0, true);
+	}
 }
 
 void eDVBServiceStream::applyPidUpdates()

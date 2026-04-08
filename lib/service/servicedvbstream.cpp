@@ -329,28 +329,12 @@ int eDVBServiceStream::doRecord()
 		eDebugNoNewLine(", and %zd audio stream(s)", program.audioStreams.size());
 		if (!program.audioStreams.empty())
 		{
-			/* Limit audio PIDs added to the stream to avoid exhausting the kernel
-			 * DMX PID filter table. Services with unusually many audio tracks
-			 * (e.g. 91 PIDs for a multi-language radio mux) would otherwise fill
-			 * the hardware filter table, causing DMX_ADD_PID failures and a
-			 * synchronous ioctl storm on every audio-track scroll that blocks the
-			 * main thread long enough to trigger the spinner / apparent lockup.
-			 * 32 audio tracks is generous for any real-world streaming use case. */
-			const size_t MAX_AUDIO_PIDS_FOR_STREAM = 32;
-			size_t audio_pid_count = 0;
 			eDebugNoNewLine(" (");
 			for (std::vector<eDVBServicePMTHandler::audioStream>::const_iterator
 				i(program.audioStreams.begin());
 				i != program.audioStreams.end(); ++i)
 			{
-				if (audio_pid_count >= MAX_AUDIO_PIDS_FOR_STREAM)
-				{
-					eDebugNoNewLine(", ... [%zd more audio PIDs capped]",
-						program.audioStreams.size() - MAX_AUDIO_PIDS_FOR_STREAM);
-					break;
-				}
 				pids_to_record.insert(i->pid);
-				++audio_pid_count;
 
 				if (timing_pid == -1)
 				{

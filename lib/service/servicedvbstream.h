@@ -5,6 +5,7 @@
 
 #include <lib/dvb/pmt.h>
 #include <lib/dvb/eit.h>
+#include <lib/base/ebase.h>
 #include <set>
 
 #include <lib/service/servicedvb.h>
@@ -38,6 +39,15 @@ protected:
 	std::set<int> m_pids_active;
 
 	int m_target_fd;
+
+	/* Deferred PID update: spread DMX ioctls across event-loop iterations
+	 * so the main thread is never blocked for more than one batch at a time.
+	 * Prevents spinner when services have unusually many PIDs (e.g. 91-audio muxes). */
+	ePtr<eTimer> m_pid_update_timer;
+	ePtr<eConnection> m_pid_timer_conn;
+	std::set<int> m_pids_to_add;
+	std::set<int> m_pids_to_remove;
+	void applyPidUpdates();
 
 	int doPrepare();
 	int doRecord();

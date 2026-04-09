@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <signal.h>
+#include <pthread.h>
 #include <sys/sysinfo.h>
 #include <sys/mman.h>
 #include <linux/dvb/dmx.h>
@@ -423,7 +424,10 @@ eDVBRecordFileThread::eDVBRecordFileThread(int packetsize, int bufferCount, int 
 	 * completely, the default declaration).
 	 */
 	eFilePushThreadRecorder(
-		/*buffer*/ (unsigned char*) ::mmap(NULL, (buffersize > 0) ? (buffersize * bufferCount) : (bufferCount * packetsize * 1024), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, /*ignored*/-1, 0),
+		/* Use malloc instead of mmap: munmap(~752KB) takes ~2.8 s on HiSilicon/kernel-4.4.35
+		 * due to slow TLB flush, blocking the main thread after every stream stop.
+		 * malloc/free has no such overhead and AIO works fine on malloc'd buffers. */
+		/*buffer*/ (unsigned char*) ::malloc((buffersize > 0) ? (buffersize * bufferCount) : (bufferCount * packetsize * 1024)),
 		/*buffersize*/ (buffersize > 0) ? buffersize : (packetsize * 1024)),
 	 m_ts_parser(packetsize),
 	 m_current_offset(0),
@@ -433,7 +437,7 @@ eDVBRecordFileThread::eDVBRecordFileThread(int packetsize, int bufferCount, int 
 	 m_current_buffer(m_aio.begin()),
 	 m_buffer_use_histogram(bufferCount+1, 0)
 {
-	if (m_buffer == MAP_FAILED)
+	if (m_buffer == NULL)
 		eFatal("[eDVBRecordFileThread] Failed to allocate filepush buffer, contact MiLo\n");
 	// m_buffer actually points to a data block large enough to hold ALL buffers. m_buffer will
 	// move around during writes, so we must remember where the "head" is.
@@ -450,7 +454,7 @@ eDVBRecordFileThread::eDVBRecordFileThread(int packetsize, int bufferCount, int 
 
 eDVBRecordFileThread::~eDVBRecordFileThread()
 {
-	::munmap(m_allocated_buffer, m_aio.size() * m_buffersize);
+	::free(m_allocated_buffer);
 }
 
 void eDVBRecordFileThread::setTimingPID(int pid, iDVBTSRecorder::timing_pid_type pidtype, int streamtype)
@@ -837,8 +841,8 @@ void eDVBRecordFileThread::flush()
 	}
 }
 
-eDVBRecordStreamThread::eDVBRecordStreamThread(int packetsize, int buffersize, bool sync_mode) :
-	eDVBRecordFileThread(packetsize, recordingBufferCount, buffersize, sync_mode)
+eDVBRecordStreamThread::eDVBRecordStreamThread(int packetsize, int buffersize, bool sync_mode, int bufferCount) :
+	eDVBRecordFileThread(packetsize, (bufferCount > 0) ? bufferCount : recordingBufferCount, buffersize, sync_mode)
 {
 	eDebug("[eDVBRecordStreamThread] allocated %zu buffers of %zu kB", m_aio.size(), m_buffersize>>10);
 }
@@ -857,20 +861,24 @@ int eDVBRecordStreamThread::writeData(int len)
 		{
 			pfd.fd = m_fd_dest;
 			pfd.events = POLLOUT;
-			poll(&pfd, 1, -1);
+			/* Use 100 ms timeout — SIGUSR1 (from stop()) will interrupt this
+			 * poll and allow the thread to notice m_stop without waiting 10s+ */
+			int poll_ret = poll(&pfd, 1, 100);
+			if (m_stop) return -1;
+			if (poll_ret <= 0) return 0; /* timeout or signal, skip write */
 
 			w = write(m_fd_dest, m_buffer + pos, len - pos);
 
 			if(w < 0)
 			{
 				eWarning("[eDVBRecordStreamThread] writedata write error len: %d return: %d %m", len, w);
-				return(len);
+				return -1; /* signal write error to trigger evtWriteError */
 			}
 
 			if(w == 0)
 			{
 				eWarning("[eDVBRecordStreamThread] writedata write eof: %d %m", len);
-				return(len);
+				return -1; /* signal write error to trigger evtWriteError */
 			}
 
 			pos += w;
@@ -1048,12 +1056,17 @@ eDVBTSRecorder::eDVBTSRecorder(eDVBDemux *demux, int packetsize, bool streaming,
 	m_demux(demux),
 	m_running(0),
 	m_target_fd(-1),
+	m_dmx_channel_count(0),
 	m_packetsize(packetsize)
 {
 	if (streaming)
 		// For streaming: use StreamThread for FTA (no descrambling needed)
 		// Encrypted streams use streaming=false and get ScrambledThread
-		m_thread = new eDVBRecordStreamThread(packetsize);
+		// Use 4 buffers, sync_mode=true for socket streaming:
+		//   - AIO (aio_write) returns ENOSYS on socket fds on HiSilicon/kernel-4.4.35
+		//   - sync writes are correct and clean for socket output
+		//   - 4 buffers reduces malloc size vs 40 (recording default)
+		m_thread = new eDVBRecordStreamThread(packetsize, -1, /*sync_mode=*/true, 4);
 	else
 		// Use ScrambledThread for file recording - supports optional descrambling
 		// Buffer size 256*188 = 47kB - larger buffers cause latency issues
@@ -1086,7 +1099,7 @@ RESULT eDVBTSRecorder::start()
 	char filename[128];
 	snprintf(filename, 128, "/dev/dvb/adapter%d/demux%d", m_demux->adapter, m_demux->demux);
 
-	m_source_fd = ::open(filename, O_RDONLY | O_CLOEXEC);
+	m_source_fd = ::open(filename, O_RDONLY | O_CLOEXEC | O_NONBLOCK); // HiSilicon MV300: O_NONBLOCK prevents AV/DMX cmd queue overflow
 
 	if (m_source_fd < 0)
 	{
@@ -1113,6 +1126,7 @@ RESULT eDVBTSRecorder::start()
 	}
 
 	::ioctl(m_source_fd, DMX_START);
+	m_dmx_channel_count = 1; /* first PID set via DMX_SET_PES_FILTER counts as 1 channel */
 
 	if (!m_target_filename.empty())
 		m_thread->startSaveMetaInformation(m_target_filename);
@@ -1189,45 +1203,61 @@ RESULT eDVBTSRecorder::setBoundary(off_t max)
 	return -1; // not yet implemented
 }
 
+static void *close_dmx_fd_background(void *arg)
+{
+	/*
+	 * On HiSilicon/kernel-4.4.35, close() on a demux fd with N active feeds
+	 * takes ~30ms per feed (hardware channel teardown in dvb_dmxdev_filter_reset).
+	 * With 89 feeds that is ~2.5s. Run in a detached thread so the main event
+	 * loop is not blocked. The recording/streaming thread has already been joined
+	 * before this is called, so no one is reading from this fd.
+	 */
+	int fd = (int)(intptr_t)arg;
+	::close(fd);
+	return NULL;
+}
+
 RESULT eDVBTSRecorder::stop()
 {
-	int state=3;
-
-	for (std::map<int,int>::iterator i(m_pids.begin()); i != m_pids.end(); ++i)
-		stopPID(i->first);
-
 	if (!m_running)
 		return -1;
 
-	/* workaround for record thread stop */
+	int fd_to_close = -1;
+
 	if (m_source_fd >= 0)
 	{
+		/*
+		 * DMX_STOP stops all feeds atomically. No ts=NULL feeds exist thanks
+		 * to the m_dmx_channel_count cap in startPID(), so this is safe.
+		 * After DMX_STOP the filter state drops below DMXDEV_STATE_GO so the
+		 * subsequent close() skips dvb_dmxdev_filter_stop() (no double-stop).
+		 */
 		if (::ioctl(m_source_fd, DMX_STOP) < 0)
 			eWarning("[eDVBTSRecorder] DMX_STOP: %m");
-		else
-			state &= ~1;
-
-		if (::close(m_source_fd) < 0)
-			eWarning("[eDVBTSRecorder] close: %m");
-		else
-			state &= ~2;
+		fd_to_close = m_source_fd;
 		m_source_fd = -1;
 	}
 
+	/* Join the push thread first — it must not be reading fd_to_close any more
+	 * before we hand that fd to the background closer. */
 	m_thread->stop();
 
-	if (state & 3)
+	m_running = 0;
+	m_dmx_channel_count = 0;
+	m_thread->stopSaveMetaInformation();
+
+	if (fd_to_close >= 0)
 	{
-		if (m_source_fd >= 0)
+		pthread_t t;
+		if (pthread_create(&t, NULL, close_dmx_fd_background, (void*)(intptr_t)fd_to_close) == 0)
+			pthread_detach(t);
+		else
 		{
-			::close(m_source_fd);
-			m_source_fd = -1;
+			eWarning("[eDVBTSRecorder] background close thread failed: %m, closing inline");
+			::close(fd_to_close);
 		}
 	}
 
-	m_running = 0;
-
-	m_thread->stopSaveMetaInformation();
 	return 0;
 }
 
@@ -1259,6 +1289,18 @@ RESULT eDVBTSRecorder::connectEvent(const sigc::slot<void(int)> &event, ePtr<eCo
 
 RESULT eDVBTSRecorder::startPID(int pid)
 {
+	/*
+	 * HiSilicon/kernel-4.4.35 bug: DMX_ADD_PID beyond hardware limit (~96 channels)
+	 * fails in dvb_dmxdev_ts_feed_set() but dvb_dmxdev_feed_add_pid() still adds the
+	 * feed to the filter's list with ts=NULL. Later, DMX_STOP calls dvb_dmxdev_feed_stop()
+	 * which iterates feeds and dereferences ts->stop_filtering() → NULL pointer crash.
+	 * Cap at 90 channels (conservative margin below 96 hardware limit) to prevent this.
+	 */
+	if (m_dmx_channel_count >= 90)
+	{
+		eWarning("[eDVBTSRecorder] DMX channel limit reached (%d), skipping pid=%04x", m_dmx_channel_count, pid);
+		return -1;
+	}
 	while(true) {
 		uint16_t p = pid;
 		if (::ioctl(m_source_fd, DMX_ADD_PID, &p) < 0) {
@@ -1267,8 +1309,10 @@ RESULT eDVBTSRecorder::startPID(int pid)
 				eDebug("[eDVBTSRecorder] retry!");
 				continue;
 			}
-		} else
+		} else {
 			m_pids[pid] = 1;
+			++m_dmx_channel_count;
+		}
 		break;
 	}
 	return 0;
@@ -1286,6 +1330,9 @@ void eDVBTSRecorder::stopPID(int pid)
 					eDebug("[eDVBTSRecorder] retry!");
 					continue;
 				}
+			} else {
+				if (m_dmx_channel_count > 0)
+					--m_dmx_channel_count;
 			}
 			break;
 		}

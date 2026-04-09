@@ -20,8 +20,6 @@ eDVBServiceStream::eDVBServiceStream()
 	m_stream_ait = false;
 	m_tuned = 0;
 	m_target_fd = -1;
-	m_pid_update_timer = eTimer::create(eApp);
-	CONNECT(m_pid_update_timer->timeout, eDVBServiceStream::applyPidUpdates);
 }
 
 eDVBServiceStream::~eDVBServiceStream()
@@ -132,11 +130,6 @@ RESULT eDVBServiceStream::stop()
 {
 	eDebug("[eDVBServiceStream] stop streaming m_state %d", m_state);
 
-	/* Cancel any pending deferred PID updates — recorder is about to stop */
-	m_pid_update_timer->stop();
-	m_pids_to_add.clear();
-	m_pids_to_remove.clear();
-
 	// FIRST: Clean up CSA session BEFORE stopping recorder
 	// This ensures descrambling thread stops using the session
 	cleanupCSASession();
@@ -167,9 +160,6 @@ int eDVBServiceStream::doPrepare()
 		m_stream_ecm = eConfigManager::getConfigBoolValue("config.streaming.stream_ecm");
 		m_stream_eit = eConfigManager::getConfigBoolValue("config.streaming.stream_eit");
 		m_stream_ait = eConfigManager::getConfigBoolValue("config.streaming.stream_ait");
-		m_pid_update_timer->stop();
-		m_pids_to_add.clear();
-		m_pids_to_remove.clear();
 		m_pids_active.clear();
 		m_state = statePrepared;
 		bool descramble = eConfigManager::getConfigBoolValue("config.streaming.descramble", true);
@@ -481,81 +471,29 @@ void eDVBServiceStream::recordPids(std::set<int> pids_to_record, int timing_pid,
 
 	m_pids_active = pids_to_record;
 
+	/*
+	 * DMX_ADD_PID takes ~0.1ms each on HiSilicon/4.4.35, so 89 PIDs costs ~11ms —
+	 * well within the main-thread budget. Apply all PID changes synchronously so
+	 * the transport stream contains every PID immediately after the PMT update.
+	 * A deferred/batched approach was previously used but caused the phone player
+	 * to see an incomplete PID set during the batching window.
+	 */
+	for (const int pid : obsolete_pids)
+	{
+		eDebug("[eDVBServiceStream] REMOVED PID: %04x", pid);
+		m_record->removePID(pid);
+	}
+	for (const int pid : new_pids)
+	{
+		eDebug("[eDVBServiceStream] ADD PID: %04x", pid);
+		m_record->addPID(pid);
+	}
+
 	if (m_state != stateRecording)
 	{
-		/* First call: recorder has not started yet. Apply all PIDs synchronously
-		 * so the recorder starts with a complete, working filter set. Deferred
-		 * updates are only safe while the recorder is already running. */
-		for (const int pid : obsolete_pids)
-		{
-			eDebug("[eDVBServiceStream] REMOVED PID: %04x", pid);
-			m_record->removePID(pid);
-		}
-		for (const int pid : new_pids)
-		{
-			eDebug("[eDVBServiceStream] ADD PID: %04x", pid);
-			m_record->addPID(pid);
-		}
 		m_record->start();
 		m_state = stateRecording;
 	}
-	else
-	{
-		/* Already recording: defer PID changes across event-loop iterations.
-		 * On services with many PIDs (e.g. a 91-audio radio mux) issuing all
-		 * DMX_ADD_PID / DMX_REMOVE_PID ioctls synchronously blocks the main
-		 * thread long enough to trigger the spinner. Batching via eTimer(0)
-		 * spreads the work without losing any PIDs or breaking the stream. */
-		for (const int pid : obsolete_pids)
-		{
-			m_pids_to_add.erase(pid);    /* cancel any pending add */
-			m_pids_to_remove.insert(pid);
-		}
-		for (const int pid : new_pids)
-		{
-			m_pids_to_remove.erase(pid); /* cancel any pending remove */
-			m_pids_to_add.insert(pid);
-		}
-		if (!m_pids_to_add.empty() || !m_pids_to_remove.empty())
-			m_pid_update_timer->start(0, true);
-	}
-}
-
-void eDVBServiceStream::applyPidUpdates()
-{
-	if (!m_record)
-	{
-		m_pids_to_add.clear();
-		m_pids_to_remove.clear();
-		return;
-	}
-
-	/* Process one batch of PIDs per call to keep each main-loop iteration
-	 * short. With BATCH_SIZE=8 and 91 audio PIDs the work is spread across
-	 * ~12 event-loop iterations (~25 ms each), so the UI stays responsive. */
-	const int BATCH_SIZE = 8;
-	int processed = 0;
-
-	auto it = m_pids_to_remove.begin();
-	while (it != m_pids_to_remove.end() && processed < BATCH_SIZE)
-	{
-		eDebug("[eDVBServiceStream] REMOVED PID: %04x", *it);
-		m_record->removePID(*it);
-		it = m_pids_to_remove.erase(it);
-		++processed;
-	}
-
-	auto jt = m_pids_to_add.begin();
-	while (jt != m_pids_to_add.end() && processed < BATCH_SIZE)
-	{
-		eDebug("[eDVBServiceStream] ADD PID: %04x", *jt);
-		m_record->addPID(*jt);
-		jt = m_pids_to_add.erase(jt);
-		++processed;
-	}
-
-	if (!m_pids_to_add.empty() || !m_pids_to_remove.empty())
-		m_pid_update_timer->start(0, true); /* more work — reschedule immediately */
 }
 
 void eDVBServiceStream::recordEvent(int event)

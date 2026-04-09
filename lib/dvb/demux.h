@@ -142,7 +142,7 @@ protected:
 class eDVBRecordStreamThread: public eDVBRecordFileThread
 {
 public:
-	eDVBRecordStreamThread(int packetsize, int buffersize = -1, bool sync_mode = false);
+	eDVBRecordStreamThread(int packetsize, int buffersize = -1, bool sync_mode = false, int bufferCount = -1);
 
 protected:
 	int writeData(int len);
@@ -221,6 +221,7 @@ private:
 	int m_running;
 	int m_target_fd;
 	int m_source_fd;
+	int m_dmx_channel_count; /* tracks active DMX channels; capped to prevent kernel ts=NULL crash */
 	eDVBRecordFileThread *m_thread;
 	std::string m_target_filename;
 	int m_packetsize;

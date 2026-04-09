@@ -535,6 +535,15 @@ void eFilePushThreadRecorder::thread()
 	act.sa_handler = signal_handler; // no, SIG_IGN doesn't do it. we want to receive the -EINTR
 	act.sa_flags = 0;
 	sigaction(SIGUSR1, &act, 0);
+	/* Unblock SIGUSR1 so that stop()'s pthread_kill() actually interrupts poll().
+	 * Without this the signal is delivered but blocked (inherited mask), so poll()
+	 * runs its full 100 ms timeout before m_stop is noticed — causing ~0.9 s join. */
+	{
+		sigset_t unblock;
+		sigemptyset(&unblock);
+		sigaddset(&unblock, SIGUSR1);
+		pthread_sigmask(SIG_UNBLOCK, &unblock, NULL);
+	}
 	hasStarted();
 #endif
 

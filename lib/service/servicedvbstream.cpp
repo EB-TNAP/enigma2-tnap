@@ -385,13 +385,12 @@ int eDVBServiceStream::doRecord()
 			if (program.aitPid >= 0) pids_to_record.insert(program.aitPid);
 		}
 
-		if (m_stream_eit)
-		{
-			pids_to_record.insert(0x12);
-		}
-
-		/* include TDT pid, really low bandwidth, should not hurt anyone */
-		pids_to_record.insert(0x14);
+		/* EIT (0x12) and TDT (0x14) are deliberately excluded from the streaming
+		 * PID set.  Phone/tablet players streaming audio have no use for EPG
+		 * data or time tables, and each PID consumes one scarce hardware DMX
+		 * channel slot (hardware limit ~96, safe cap 90).  On large radio muxes
+		 * with 91+ audio PIDs these two slots make the difference between
+		 * several audio stations being available or not. */
 
 		recordPids(pids_to_record, timing_pid, timing_stream_type, timing_pid_type);
 	}

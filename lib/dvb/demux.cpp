@@ -855,17 +855,16 @@ int eDVBRecordStreamThread::writeData(int len)
 		struct pollfd pfd = {};
 		int pos = 0;
 		int w = 0;
-		int count = 0;
 
-		do
+		while (pos < len)
 		{
 			pfd.fd = m_fd_dest;
 			pfd.events = POLLOUT;
-			/* Use 100 ms timeout — SIGUSR1 (from stop()) will interrupt this
-			 * poll and allow the thread to notice m_stop without waiting 10s+ */
+			/* 100 ms timeout so stop() is noticed promptly via m_stop.
+			 * On timeout we loop back and re-check m_stop — no data is dropped. */
 			int poll_ret = poll(&pfd, 1, 100);
 			if (m_stop) return -1;
-			if (poll_ret <= 0) return 0; /* timeout or signal, skip write */
+			if (poll_ret <= 0) continue; /* timeout: re-check m_stop and retry */
 
 			w = write(m_fd_dest, m_buffer + pos, len - pos);
 
@@ -882,8 +881,7 @@ int eDVBRecordStreamThread::writeData(int len)
 			}
 
 			pos += w;
-			count++;
-		} while (pos < len && count < 3); // Streams should not be held up. So stop after 3 tries.
+		}
 		len = pos;
 	}
 	else
@@ -1056,6 +1054,7 @@ eDVBTSRecorder::eDVBTSRecorder(eDVBDemux *demux, int packetsize, bool streaming,
 	m_demux(demux),
 	m_running(0),
 	m_target_fd(-1),
+	m_streaming(streaming ? 1 : 0),
 	m_dmx_channel_count(0),
 	m_packetsize(packetsize)
 {
@@ -1107,7 +1106,10 @@ RESULT eDVBTSRecorder::start()
 		return -3;
 	}
 
-	setBufferSize(1024*1024);
+	/* Streaming with many PIDs (e.g. 85-PID radio mux) requires a larger kernel
+	 * DMX ring buffer to absorb bursts while the socket write catches up.
+	 * 1 MB filled in <400 ms at ~15 Mbps; 8 MB gives ~3 s of headroom. */
+	setBufferSize(m_streaming ? 8*1024*1024 : 1024*1024);
 
 	dmx_pes_filter_params flt = {};
 	flt.pes_type = DMX_PES_OTHER;

@@ -219,6 +219,7 @@ private:
 	ePtr<eDVBDemux> m_demux;
 
 	int m_running;
+	int m_streaming; /* 1 when used for network streaming (not file recording) */
 	int m_target_fd;
 	int m_source_fd;
 	int m_dmx_channel_count; /* tracks active DMX channels; capped to prevent kernel ts=NULL crash */

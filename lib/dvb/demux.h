@@ -223,6 +223,8 @@ private:
 	int m_target_fd;
 	int m_source_fd;
 	int m_dmx_channel_count; /* tracks active DMX channels; capped to prevent kernel ts=NULL crash */
+	pthread_t m_close_thread;       /* background close() thread from previous stop() */
+	bool m_close_thread_valid;      /* true if m_close_thread must be joined */
 	eDVBRecordFileThread *m_thread;
 	std::string m_target_filename;
 	int m_packetsize;

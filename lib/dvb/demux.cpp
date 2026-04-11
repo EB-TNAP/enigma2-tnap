@@ -1056,6 +1056,7 @@ eDVBTSRecorder::eDVBTSRecorder(eDVBDemux *demux, int packetsize, bool streaming,
 	m_target_fd(-1),
 	m_streaming(streaming ? 1 : 0),
 	m_dmx_channel_count(0),
+	m_close_thread_valid(false),
 	m_packetsize(packetsize)
 {
 	if (streaming)
@@ -1079,11 +1080,29 @@ eDVBTSRecorder::eDVBTSRecorder(eDVBDemux *demux, int packetsize, bool streaming,
 eDVBTSRecorder::~eDVBTSRecorder()
 {
 	stop();
+	if (m_close_thread_valid)
+	{
+		pthread_join(m_close_thread, NULL);
+		m_close_thread_valid = false;
+	}
 	delete m_thread;
 }
 
 RESULT eDVBTSRecorder::start()
 {
+	/* If a previous stop() left a background close thread running, join it now
+	 * before opening a new demux fd.  On HiSilicon/kernel-4.4.35 hardware DMX
+	 * channels may not be released until close() completes, so starting a new
+	 * session while the old close is still in flight can silently starve
+	 * high-PID audio streams of hardware channels. */
+	if (m_close_thread_valid)
+	{
+		eDebug("[eDVBTSRecorder] waiting for previous close thread before start...");
+		pthread_join(m_close_thread, NULL);
+		m_close_thread_valid = false;
+		eDebug("[eDVBTSRecorder] previous close thread done");
+	}
+
 	std::map<int,int>::iterator i(m_pids.begin());
 
 	if (m_running)
@@ -1094,6 +1113,8 @@ RESULT eDVBTSRecorder::start()
 
 	if (i == m_pids.end())
 		return -3;
+
+	eDebug("[eDVBTSRecorder] starting with %zu PIDs (cap=%d)", m_pids.size(), 90);
 
 	char filename[128];
 	snprintf(filename, 128, "/dev/dvb/adapter%d/demux%d", m_demux->adapter, m_demux->demux);
@@ -1252,7 +1273,14 @@ RESULT eDVBTSRecorder::stop()
 	{
 		pthread_t t;
 		if (pthread_create(&t, NULL, close_dmx_fd_background, (void*)(intptr_t)fd_to_close) == 0)
-			pthread_detach(t);
+		{
+			/* Do NOT detach — destructor (or next start()) will join this thread.
+			 * This ensures hardware DMX channels are fully released before the
+			 * next session allocates new ones, preventing channel starvation when
+			 * restarting a stream quickly (e.g. stop→restart within 2-3 seconds). */
+			m_close_thread = t;
+			m_close_thread_valid = true;
+		}
 		else
 		{
 			eWarning("[eDVBTSRecorder] background close thread failed: %m, closing inline");

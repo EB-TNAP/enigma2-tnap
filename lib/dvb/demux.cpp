@@ -1114,7 +1114,7 @@ RESULT eDVBTSRecorder::start()
 	if (i == m_pids.end())
 		return -3;
 
-	eDebug("[eDVBTSRecorder] starting with %zu PIDs (cap=%d, %s)", m_pids.size(), m_streaming ? 93 : 90, m_streaming ? "streaming" : "recording");
+	eDebug("[eDVBTSRecorder] starting with %zu PIDs (cap=%d)", m_pids.size(), 90);
 
 	char filename[128];
 	snprintf(filename, 128, "/dev/dvb/adapter%d/demux%d", m_demux->adapter, m_demux->demux);
@@ -1324,21 +1324,11 @@ RESULT eDVBTSRecorder::startPID(int pid)
 	 * fails in dvb_dmxdev_ts_feed_set() but dvb_dmxdev_feed_add_pid() still adds the
 	 * feed to the filter's list with ts=NULL. Later, DMX_STOP calls dvb_dmxdev_feed_stop()
 	 * which iterates feeds and dereferences ts->stop_filtering() → NULL pointer crash.
-	 * Cap below the 96-channel hardware limit to prevent this.
-	 *
-	 * For streaming (socket output, no simultaneous file recording):
-	 *   cap=93 — leaves 3 free for section readers (PAT/PMT/EIT monitors).
-	 *   When watching TV simultaneously the TV decoder claims those 3 slots and
-	 *   the streaming fd naturally gets fewer channels via ioctl errors, which
-	 *   are handled safely (skip, no ts=NULL feed created).
-	 *
-	 * For recording (file output):
-	 *   cap=90 — leaves 6 free for TV decoder + section readers running in parallel.
+	 * Cap at 90 channels (conservative margin below 96 hardware limit) to prevent this.
 	 */
-	const int pid_limit = m_streaming ? 93 : 90;
-	if (m_dmx_channel_count >= pid_limit)
+	if (m_dmx_channel_count >= 90)
 	{
-		eWarning("[eDVBTSRecorder] DMX channel limit reached (%d/%d), skipping pid=%04x", m_dmx_channel_count, pid_limit, pid);
+		eWarning("[eDVBTSRecorder] DMX channel limit reached (%d), skipping pid=%04x", m_dmx_channel_count, pid);
 		return -1;
 	}
 	while(true) {

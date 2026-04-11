@@ -106,7 +106,7 @@ class SkinSelector(Screen):
 		displayGrautec = join(dirname(DEFAULT_DISPLAY_SKIN), "skin_display_grautec.xml")
 		skinList = []
 		# Find and list the available skins...
-		for dir in [dir for dir in listdir(self.rootDir) if isdir(join(self.rootDir, dir))]:
+		for dir in [dir for dir in (listdir(self.rootDir) if isdir(self.rootDir) else []) if isdir(join(self.rootDir, dir))]:
 			previewPath = join(self.rootDir, dir)
 			for skinFile in self.xmlList:
 				skin = join(dir, skinFile)

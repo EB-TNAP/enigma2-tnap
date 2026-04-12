@@ -216,15 +216,11 @@ class SoftwareTools(PackageInfoHandler):
 	def countUpdates(self, callback=None):
 		self.available_updates = 0
 		self.available_updatelist = []
-		for package in self.packagesIndexlist[:]:
-			attributes = package[0]["attributes"]
-			packagename = attributes["packagename"]
-			for x in self.available_packetlist:
-				if x[0] == packagename:
-					if packagename in self.installed_packetlist:
-						if self.installed_packetlist[packagename] != x[1]:
-							self.available_updates += 1
-							self.available_updatelist.append([packagename])
+		available = {x[0]: x[1] for x in self.available_packetlist}
+		for packagename, installed_version in self.installed_packetlist.items():
+			if packagename in available and available[packagename] != installed_version:
+				self.available_updates += 1
+				self.available_updatelist.append([packagename])
 
 		self.list_updating = False
 		if self.UpdateConsole:

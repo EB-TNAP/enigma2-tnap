@@ -3175,7 +3175,11 @@ RESULT eDVBServicePlay::startTimeshift()
 void eDVBServicePlay::recordEvent(int event) {
 	switch (event) {
 		case iDVBTSRecorder::eventWriteError:
-			eWarning("[eDVBServicePlay] recordEvent write error");
+			eWarning("[eDVBServicePlay] recordEvent write error - stopping timeshift to prevent crashes");
+			if (m_timeshift_enabled)
+			{
+				stopTimeshift(false);
+			}
 			return;
 		case iDVBTSRecorder::eventStreamCorrupt: {
 			// Do not re-trigger if a recovery is already in progress.

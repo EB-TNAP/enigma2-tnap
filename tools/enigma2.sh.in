@@ -118,6 +118,30 @@ if [ "$(grep config.crash.debug_path= /etc/enigma2/settings | sed 's/config.cras
 	LOGFOLDER=$(grep config.crash.debug_path= /etc/enigma2/settings | sed 's/config.crash.debug_path=//g')
 fi
 
+# USB debug capture - insert USB drive with file 'ENIGMA2_DEBUG.trigger' in root to activate
+USB_MOUNT="/media/usb-debug"
+for _dev in /dev/sda1 /dev/sdb1 /dev/sdc1 /dev/sda /dev/sdb; do
+	if [ -b "$_dev" ]; then
+		mkdir -p "$USB_MOUNT"
+		mount "$_dev" "$USB_MOUNT" 2>/dev/null
+		if [ -f "${USB_MOUNT}/ENIGMA2_DEBUG.trigger" ]; then
+			_TS=$(date +%Y-%m-%d_%H-%M-%S)
+			LOGFOLDER="${USB_MOUNT}/tnap-debug/"
+			mkdir -p "$LOGFOLDER"
+			dmesg > "${LOGFOLDER}dmesg_${_TS}.log"
+			lsmod > "${LOGFOLDER}lsmod_${_TS}.log"
+			{ ip addr; ip link; cat /proc/net/wireless 2>/dev/null; } > "${LOGFOLDER}network_${_TS}.log" 2>&1
+			ENIGMA_DEBUG=1
+			DEBUG_LVL=4
+			sync
+		else
+			umount "$USB_MOUNT" 2>/dev/null
+		fi
+		break
+	fi
+done
+unset USB_MOUNT _dev _TS
+
 # Enable and configure gstreamer debug log of category and level without color
 if [ "$(grep -i config.crash.gstdebug=true /etc/enigma2/settings)" != "" ]; then
 	GSTDEBUGCATEGORY="*"
@@ -155,11 +179,24 @@ if [ "$(grep -i config.crash.coredump=true /etc/enigma2/settings)" != "" ]; then
 fi
 
 ulimit -n 16384 2>/dev/null || ulimit -n 8192
+
+# Rotate logs - keep only the last 5 in LOGFOLDER to protect flash storage.
+# Also remove any single log that grew beyond 20MB (long-running session without restart).
+ls -1t "${LOGFOLDER}"Enigma2_*.log 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null
+for _f in "${LOGFOLDER}"Enigma2_*.log; do
+	[ -f "$_f" ] || continue
+	_sz=$(wc -c < "$_f" 2>/dev/null || echo 0)
+	[ "${_sz}" -gt 20971520 ] && rm -f "$_f"
+done
+unset _f _sz
+
 # Start enigma2 with or without debug
+# Always write a log file so the crash handler has output to include in crash reports.
+# Without a log file, crash reports contain only 3 lines of enigma output and are useless.
 if [ -n "$ENIGMA_DEBUG" ]; then
-	(LD_PRELOAD=$LIBS ENIGMA_DEBUG_TIME="${DEBUG_TIME}" /usr/bin/enigma2 &> ${LOGFOLDER}Enigma2_debug_$(date +%Y-%m-%d_%H-%M-%S).log) &
+	(LD_PRELOAD=$LIBS ENIGMA_DEBUG_LVL=$DEBUG_LVL ENIGMA_DEBUG_TIME="${DEBUG_TIME}" /usr/bin/enigma2 &> ${LOGFOLDER}Enigma2_debug_$(date +%Y-%m-%d_%H-%M-%S).log) &
 else
-	(LD_PRELOAD=$LIBS ENIGMA_DEBUG_TIME="${DEBUG_TIME}" /usr/bin/enigma2) &
+	(LD_PRELOAD=$LIBS ENIGMA_DEBUG_LVL=$DEBUG_LVL ENIGMA_DEBUG_TIME="${DEBUG_TIME}" /usr/bin/enigma2 &> ${LOGFOLDER}Enigma2_crash_$(date +%Y-%m-%d_%H-%M-%S).log) &
 fi
 
 enigma2pid=$!
@@ -193,6 +230,13 @@ wait ${enigma2pid}
 # >128 signal
 
 ret=$?
+
+# USB debug - capture post-run dmesg if active
+if [ -f "/media/usb-debug/ENIGMA2_DEBUG.trigger" ]; then
+    dmesg > "/media/usb-debug/tnap-debug/dmesg_post_$(date +%Y-%m-%d_%H-%M-%S).log"
+    sync
+fi
+
 case $ret in
 	1)
 		if [ -f /proc/stb/fp/led_color ]; then

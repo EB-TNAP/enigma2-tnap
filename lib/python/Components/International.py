@@ -559,6 +559,8 @@ class International:
 		self.installedDirectories = self.getInstalledDirectories(update=True)
 		if len(self.installedDirectories) != len(self.installedPackages):
 			print("[International] Warning: Count of installed locale/language packages and locale/language directory entries do not match!")
+		self.localeList = ["en_US"]
+		self.languageList = ["en"]
 		self.packageLocales = {}
 		for package in self.installedPackages:
 			locales = self.packageToLocales(package)

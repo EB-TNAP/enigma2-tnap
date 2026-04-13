@@ -425,6 +425,15 @@ class SecConfigure:
 					sec.setLNBLOFL(5150000)
 					sec.setLNBLOFH(5150000)
 					sec.setLNBThreshold(5150000)
+				elif currLnb.lof.value == "c_band_5750":
+					sec.setLNBLOFL(5750000)
+					sec.setLNBLOFH(5750000)
+					sec.setLNBThreshold(5750000)
+				elif currLnb.lof.value == "c_band_bandstack":
+					# Initialize to default values - these will be adjusted based on voltage
+					sec.setLNBLOFL(5150000)
+					sec.setLNBLOFH(5750000)
+					sec.setLNBThreshold(5450000)  # Set a high threshold initially                
 				elif currLnb.lof.value == "user_defined":
 					sec.setLNBLOFL(currLnb.lofl.value * 1000)
 					sec.setLNBLOFH(currLnb.lofh.value * 1000)
@@ -437,6 +446,10 @@ class SecConfigure:
 					sec.setLNBLOFL(21200000)
 					sec.setLNBLOFH(21200000)
 					sec.setLNBThreshold(21200000)
+				elif currLnb.lof.value == "ka_sat_20357":
+					sec.setLNBLOFL(20357000)
+					sec.setLNBLOFH(20357000)
+					sec.setLNBThreshold(20357000)
 
 				if currLnb.increased_voltage.value:
 					sec.setLNBIncreasedVoltage(True)
@@ -1384,11 +1397,14 @@ def InitNimManager(nimmgr, update_slots=[]):
 			config.Nims.append(ConfigSubsection())
 
 	lnb_choices = {
-		"universal_lnb": _("Universal LNB"),
-		"unicable": _("SCR (Unicable/JESS)"),
-		"c_band": _("C-Band"),
-		"circular_lnb": _("Circular LNB"),
+		"circular_lnb": _("KU STD 10750"),
+		"universal_lnb": _("KU UNV 9750/10600"),
+		"c_band": _("C-band 5150"),
+		"c_band_5750": _("C-band 5750"),
+		"c_band_bandstack": _("C-band bandstack 5150/5750"),
 		"ka_sat": _("KA-SAT"),
+		"ka_sat_20357": _("KA-SAT-20357MHz"),
+		"unicable": _("SCR (Unicable/JESS)"),
 		"user_defined": _("User defined")}
 
 	lnb_choices_default = "universal_lnb"
@@ -1849,6 +1865,8 @@ def InitNimManager(nimmgr, update_slots=[]):
 			continue
 		nim = config.Nims[slot_id]
 		nim.force_legacy_signal_stats = ConfigYesNo(default=False)
+		nim.show_signal_below_lock = ConfigYesNo(default=False)
+		nim.allow_unlocked_transponder = ConfigYesNo(default=True)
 
 		if slot.isCombined():
 			nim.configModeDVBS = ConfigYesNo()

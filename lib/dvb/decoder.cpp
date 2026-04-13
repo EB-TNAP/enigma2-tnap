@@ -404,16 +404,20 @@ eDVBVideo::eDVBVideo(eDVBDemux *demux, int dev, bool fcc_enable)
 		m_fd_demux = -1;
 	}
 
-std::string zapmodeDM = eConfigManager::getConfigValue("config.misc.zapmodeDM");
-if (zapmodeDM == "hold")
-{
 #ifndef DREAMNEXTGEN
 	if (m_fd >= 0)
 	{
 		::ioctl(m_fd, VIDEO_SELECT_SOURCE, demux ? VIDEO_SOURCE_DEMUX : VIDEO_SOURCE_HDMI);
 	}
 #endif
-}
+
+	// zapmodeDM "hold" mode check moved after basic initialization
+	std::string zapmodeDM = eConfigManager::getConfigValue("config.misc.zapmodeDM");
+	if (zapmodeDM == "hold")
+	{
+		// Additional "hold" mode specific initialization could go here if needed
+	}
+
 	if (m_close_invalidates_attributes < 0)
 	{
 		/*

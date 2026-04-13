@@ -5,7 +5,7 @@ from os import R_OK, access
 from os.path import exists as fileAccess, isdir, isfile, join
 from re import findall
 
-from enigma import eAVControl, Misc_Options, eDVBCIInterfaces, eDVBResourceManager, eGetEnigmaDebugLvl, eDVBCSAEngine
+from enigma import eAVControl, Misc_Options, eDVBCIInterfaces, eDVBResourceManager, eGetEnigmaDebugLvl
 from Tools.Directories import SCOPE_PLUGINS, SCOPE_LIBDIR, SCOPE_SKIN, fileCheck, fileReadLine, fileReadLines, resolveFilename, fileExists, fileHas, fileReadLine, pathExists
 from Tools.MultiBoot import MultiBoot
 
@@ -355,7 +355,6 @@ BoxInfo.setItem("HasColordepthChoices", fileCheck("/proc/stb/video/hdmi_colordep
 BoxInfo.setItem("HasHDMIin", BoxInfo.getItem("hdmifhdin") or BoxInfo.getItem("hdmihdin"))
 BoxInfo.setItem("HasHDMIinFHD", MODEL in ("dm900", "dm920", "dreamone", "dreamtwo"))
 BoxInfo.setItem("HasHDMIinPiP", BoxInfo.getItem("HasHDMIin") and BRAND != "dreambox")
-BoxInfo.setItem("HasSoftCSA", eDVBCSAEngine.isAvailable())
 BoxInfo.setItem("DreamBoxAudio", MODEL in ("dm7080", "dm800", "dm900", "dm920", "dreamone", "dreamtwo"))
 BoxInfo.setItem("DreamBoxDVI", MODEL in ("dm8000", "dm800"))
 BoxInfo.setItem("VFDSymbol", BoxInfo.getItem("vfdsymbol"))
@@ -390,7 +389,26 @@ BoxInfo.setItem("HDMIAudioSource", fileCheck("/proc/stb/hdmi/audio_source"))
 BoxInfo.setItem("CanAC3Transcode", fileHas("/proc/stb/audio/ac3plus_choices", "force_ac3"))
 BoxInfo.setItem("CanDTSHD", fileHas("/proc/stb/audio/dtshd_choices", "downmix"))
 BoxInfo.setItem("CanDownmixAACPlus", fileHas("/proc/stb/audio/aacplus_choices", "downmix"))
-BoxInfo.setItem("CanAACTranscode", fileHas("/proc/stb/audio/aac_transcode_choices", "off"))
+# CanAACTranscode needs to be a list of choices, not a boolean
+# Read the actual choices from the proc file and convert to ConfigSelection format
+aac_transcode_choices = None
+if fileExists("/proc/stb/audio/aac_transcode_choices"):
+	choices_raw = fileReadLine("/proc/stb/audio/aac_transcode_choices", default="", source=MODULE_NAME)
+	if choices_raw:
+		# Parse space-separated choices and create tuples for ConfigSelection
+		# Map common choice values to user-friendly names (no translations at this stage)
+		choice_map = {
+			"off": "Off",
+			"on": "On",
+			"passthrough": "Pass-through",
+			"downmix": "Downmix",
+			"multichannel": "Multi-channel PCM",
+			"force_ac3": "Convert to AC3",
+			"force_dts": "Convert to DTS",
+			"use_hdmi_caps": "Use HDMI capabilities"
+		}
+		aac_transcode_choices = [(c.strip(), choice_map.get(c.strip(), c.strip().capitalize())) for c in choices_raw.split() if c.strip()]
+BoxInfo.setItem("CanAACTranscode", aac_transcode_choices)
 BoxInfo.setItem("CanWMAPRO", fileHas("/proc/stb/audio/wmapro_choices", "downmix"))
 BoxInfo.setItem("CanBTAudio", fileHas("/proc/stb/audio/btaudio_choices", "off"))
 BoxInfo.setItem("CanBTAudioDelay", fileCheck("/proc/stb/audio/btaudio_delay") or fileCheck("/proc/stb/audio/btaudio_delay_pcm"))
@@ -420,7 +438,6 @@ BoxInfo.setItem("FrontpanelLEDBlinkControl", fileExists("/proc/stb/fp/led_blink"
 BoxInfo.setItem("FrontpanelLEDBrightnessControl", fileExists("/proc/stb/fp/led_brightness"))
 BoxInfo.setItem("FrontpanelLEDColorControl", fileExists("/proc/stb/fp/led_color"))
 BoxInfo.setItem("FrontpanelLEDFadeControl", fileExists("/proc/stb/fp/led_fade"))
-BoxInfo.setItem("DM9X0", MODEL in ("dm900", "dm920"))
 
 # Network services.
 BoxInfo.setItem("inadyn", fileExists("/etc/init.d/inadyn-mt"))

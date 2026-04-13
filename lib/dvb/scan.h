@@ -15,20 +15,12 @@
 struct service
 {
 	service(unsigned short pmtPid)
-		:pmtPid(pmtPid), serviceType(0xFF), scrambled(false),
-		 pcrPid(0xFFFF), videoPid(0xFFFF), audioPid(0xFFFF),
-		 audioCacheId(eDVBService::cMPEGAPID), videoType(-1)
+		:pmtPid(pmtPid), serviceType(0xFF), scrambled(false)
 	{
 	}
 	unsigned short pmtPid;
 	unsigned char serviceType;
 	bool scrambled;
-	unsigned short pcrPid;
-	unsigned short videoPid;
-	unsigned short audioPid;
-	eDVBService::cacheID audioCacheId;
-	int videoType;  // -1 = MPEG2 (default), 1 = H.264, 4 = MPEG4 Part2, 7 = H.265/HEVC
-	CAID_LIST caids;
 };
 
 class eDVBScan: public sigc::trackable, public iObject
@@ -54,7 +46,7 @@ class eDVBScan: public sigc::trackable, public iObject
 
 	RESULT startFilter();
 	enum { readyPAT=1, readySDT=2, readyNIT=4, readyBAT=8,
-	       validPAT=16, validSDT=32, validNIT=64, validBAT=128, validVCT=256};
+	       validPAT=16, validSDT=32, validNIT=64, validBAT=128, validVCT=256, readySDT_retry=512};
 
 		/* scan state variables */
 	int m_channel_state;
@@ -94,7 +86,7 @@ class eDVBScan: public sigc::trackable, public iObject
 	void addKnownGoodChannel(const eDVBChannelID &chid, iDVBFrontendParameters *feparm);
 	void addChannelToScan(iDVBFrontendParameters *feparm);
 
-	int sameChannel(iDVBFrontendParameters *ch1, iDVBFrontendParameters *ch2, bool exact, int offset) const;
+	int sameChannel(iDVBFrontendParameters *ch1, iDVBFrontendParameters *ch2, bool exact=false) const;
 
 	void channelDone();
 
@@ -106,8 +98,6 @@ class eDVBScan: public sigc::trackable, public iObject
 	int m_networkid;
 	bool m_usePAT;
 	bool m_scan_debug;
-	bool m_updateLCN;
-
 public:
 	eDVBScan(iDVBChannel *channel, bool usePAT=true, bool debug=true );
 	~eDVBScan();

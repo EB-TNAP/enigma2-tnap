@@ -217,7 +217,9 @@ void eDVBServicePMTHandler::sendEventNoPatEntry()
 	if (!m_channel->getFrontend(fe))
 	{
 		eDVBFrontend *frontend = (eDVBFrontend*)&(*fe);
-		frontend->checkRetune();
+		// COMMENTED OUT: checkRetune() not available in this API version
+		// This is a Dreambox-specific extension
+		// frontend->checkRetune();
 	}
 }
 

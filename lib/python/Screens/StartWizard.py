@@ -6,7 +6,7 @@ from Screens.MessageBox import MessageBox
 from Screens.Wizard import wizardManager, Wizard
 from Screens.Time import TimeWizard
 from Screens.HelpMenu import Rc
-from Screens.Standby import TryQuitMainloop, QUIT_RESTART
+from Screens.Standby import TryQuitMainloop, QUIT_RESTART, QUIT_REBOOT
 from Components.SystemInfo import BoxInfo
 try:
 	from Plugins.SystemPlugins.OSDPositionSetup.overscanwizard import OverscanWizard
@@ -88,26 +88,202 @@ def setLanguageFromBackup(backupfile):
 
 
 def checkForAvailableAutoBackup():
-	for backupfile in ["/media/%s/backup/PLi-AutoBackup.tar.gz" % media for media in os.listdir("/media/") if os.path.isdir(os.path.join("/media/", media))]:
-		if os.path.isfile(backupfile):
-			setLanguageFromBackup(backupfile)
-			return True
+	from os import listdir
+	backupfiles = []
+	try:
+		for media in os.listdir("/media/"):
+			mediapath = os.path.join("/media/", media)
+			if os.path.isdir(mediapath):
+				backupdir = os.path.join(mediapath, "backup")
+				if os.path.isdir(backupdir):
+					for filename in listdir(backupdir):
+						if filename.endswith(".tar.gz"):
+							fullpath = os.path.join(backupdir, filename)
+							try:
+								# Get stat info now to avoid race condition
+								mtime = os.stat(fullpath).st_mtime
+								backupfiles.append((fullpath, mtime))
+							except OSError:
+								# File disappeared between listdir and stat - skip it
+								pass
+	except:
+		pass
+
+	if backupfiles:
+		# Sort by modification time (newest first)
+		backupfiles.sort(key=lambda x: x[1], reverse=True)
+		# Use the most recent backup file
+		setLanguageFromBackup(backupfiles[0][0])
+		return True
+	return False
 
 
-class AutoRestoreWizard(MessageBox):
+
+class AutoRestoreWizard(Screen):
+	skin = """
+		<screen name="AutoRestoreWizard" position="center,center" size="560,400" title="Restore settings">
+			<ePixmap pixmap="buttons/red.png" position="0,0" size="140,40" alphaTest="on" />
+			<ePixmap pixmap="buttons/green.png" position="140,0" size="140,40" alphaTest="on" />
+			<widget source="key_red" render="Label" position="0,0" zPosition="1" size="140,40" font="Regular;20" horizontalAlignment="center" verticalAlignment="center" backgroundColor="#9f1313" transparent="1" />
+			<widget source="key_green" render="Label" position="140,0" zPosition="1" size="140,40" font="Regular;20" horizontalAlignment="center" verticalAlignment="center" backgroundColor="#1f771f" transparent="1" />
+			<widget name="info" position="10,50" size="540,50" font="Regular;20" halign="center" valign="center"/>
+			<widget name="filelist" position="10,110" size="540,230" scrollbarMode="showOnDemand" />
+		</screen>"""
+
 	def __init__(self, session):
-		MessageBox.__init__(self, session, _("Do you want to autorestore settings?"), type=MessageBox.TYPE_YESNO, timeout=20, default=True, simple=True)
+		Screen.__init__(self, session)
+		self.setTitle(_("Restore settings from backup"))
 
-	def close(self, value):
-		if value:
-			if os.path.isfile("/etc/.doNotAutoinstall"):
-				os.unlink("/etc/.doNotAutoinstall")
-				MessageBox.close(self, 44)
-			else:
-				# restore network config first, we need it to autoinstall
-				open('/etc/.doAutoinstall', 'w')
-				MessageBox.close(self, 43)
-		MessageBox.close(self)
+		from Components.ActionMap import ActionMap
+		from Components.Sources.StaticText import StaticText
+		from Components.MenuList import MenuList
+		from Components.Label import Label
+
+		self["key_red"] = StaticText(_("Skip"))
+		self["key_green"] = StaticText(_("Restore"))
+		self["info"] = Label(_("Select a backup to restore:"))
+
+		self.backupfiles = []
+		self.buildFileList()
+
+		self["filelist"] = MenuList(self.backupfiles)
+
+		self["actions"] = ActionMap(["OkCancelActions", "ColorActions"],
+		{
+			"cancel": self.skip,
+			"red": self.skip,
+			"green": self.restore,
+			"ok": self.restore,
+		}, -1)
+
+		# TNAP: Check for restore mode flags (but don't auto-restore, let user pick backup)
+		self.restoreAllPlugins = False
+		self.restoreNoPlugins = False
+		self.checkAutoRestore()
+
+	def checkAutoRestore(self):
+		"""Check for restore mode flags created by RestoreOptionsWizard"""
+		# Check for settings restore flag in /media/hdd/images/config/
+		autoRestorePaths = ["/media/hdd/images/config", "/media/usb/images/config"]
+
+		for basePath in autoRestorePaths:
+			settingsFlag = os.path.join(basePath, "settings")
+			pluginsFlag = os.path.join(basePath, "plugins")
+			noPluginsFlag = os.path.join(basePath, "noplugins")
+
+			if os.path.isfile(settingsFlag):
+				print("[AutoRestoreWizard] Found settings restore flag at:", settingsFlag)
+
+				if os.path.isfile(pluginsFlag):
+					print("[AutoRestoreWizard] Found plugins restore flag - will restore all plugins")
+					self.restoreAllPlugins = True
+				elif os.path.isfile(noPluginsFlag):
+					print("[AutoRestoreWizard] Found noplugins restore flag - will NOT restore plugins")
+					self.restoreNoPlugins = True
+
+				# Update info label to show restore mode
+				if self.restoreAllPlugins:
+					self["info"].setText(_("Select backup to restore (with all plugins):"))
+				elif self.restoreNoPlugins:
+					self["info"].setText(_("Select backup to restore (settings only):"))
+				else:
+					self["info"].setText(_("Select backup to restore:"))
+
+				# Clean up flag files after reading them
+				try:
+					os.unlink(settingsFlag)
+					if os.path.isfile(pluginsFlag):
+						os.unlink(pluginsFlag)
+					if os.path.isfile(noPluginsFlag):
+						os.unlink(noPluginsFlag)
+					# Clean up restore mode flags too
+					for mode in ["slow", "fast", "turbo"]:
+						modeFlag = os.path.join(basePath, mode)
+						if os.path.isfile(modeFlag):
+							os.unlink(modeFlag)
+				except:
+					pass
+
+				break
+
+	def buildFileList(self):
+		from os import listdir
+		backuplist = []
+		try:
+			for media in os.listdir("/media/"):
+				mediapath = os.path.join("/media/", media)
+				if os.path.isdir(mediapath):
+					backupdir = os.path.join(mediapath, "backup")
+					if os.path.isdir(backupdir):
+						for filename in listdir(backupdir):
+							if filename.endswith(".tar.gz"):
+								fullpath = os.path.join(backupdir, filename)
+								# Skip symlinks to avoid showing duplicates
+								if not os.path.islink(fullpath):
+									backuplist.append((fullpath, filename, os.stat(fullpath).st_mtime))
+		except:
+			pass
+
+		# Sort by modification time, newest first
+		backuplist.sort(key=lambda x: x[2], reverse=True)
+		self.backupfiles = [(item[1], item[0]) for item in backuplist]  # (display name, full path)
+
+	def skip(self):
+		self.close()
+
+	def restore(self):
+		if self.backupfiles:
+			selected = self["filelist"].getCurrent()
+			if selected:
+				filename = selected[1]  # full path
+				self.session.openWithCallback(self.doRestore, MessageBox,
+					_("Are you sure you want to restore this backup:\n%s\n\nYour receiver will restart after restore!") % selected[0],
+					MessageBox.TYPE_YESNO)
+
+	def doRestore(self, answer):
+		if answer:
+			selected = self["filelist"].getCurrent()
+			if selected:
+				self.filename = selected[1]
+				from Screens.Console import Console
+
+				# Set autoinstall flags based on restore mode
+				if self.restoreAllPlugins:
+					# User wants all plugins restored
+					print("[AutoRestore] Restore mode: Settings + All plugins")
+					if os.path.isfile("/etc/.doNotAutoinstall"):
+						os.unlink("/etc/.doNotAutoinstall")
+					open('/etc/.doAutoinstall', 'w').close()
+				elif self.restoreNoPlugins:
+					# User wants settings only, no plugins
+					print("[AutoRestore] Restore mode: Settings only (no plugins)")
+					if os.path.isfile("/etc/.doAutoinstall"):
+						os.unlink("/etc/.doAutoinstall")
+					open('/etc/.doNotAutoinstall', 'w').close()
+				else:
+					# Default: restore with autoinstall
+					print("[AutoRestore] Restore mode: Default (with autoinstall)")
+					if os.path.isfile("/etc/.doNotAutoinstall"):
+						os.unlink("/etc/.doNotAutoinstall")
+					open('/etc/.doAutoinstall', 'w').close()
+
+				# TNAP: Extract backup and immediately kill Enigma2 to prevent race condition
+				# Same method as RestoreMenu - no stages, no config reloading
+				# This prevents Enigma2's autosave from overwriting restored settings (losing LNB configs)
+				# After extraction: reset RestartUI=False and sync before kill.
+				# Backups made before the doBackup() fix may contain RestartUI=True, causing an
+				# immediate crash on the next start (enigma2 enters "UI restart mode" expecting
+				# prior session shared state that no longer exists after SIGKILL).
+				print("[AutoRestore] Restoring backup:", self.filename)
+				self.session.open(Console, title=_("Restoring..."),
+					cmdlist=[
+						"tar -xzvf " + self.filename + " -C /",
+						"sed -i 's/config\\.misc\\.RestartUI=.*/config.misc.RestartUI=False/' /etc/enigma2/settings 2>/dev/null || true",
+						"sync",
+						"killall -9 enigma2",
+					])
+		else:
+			self.skip()
 
 
 class AutoInstallWizard(Screen):
@@ -127,7 +303,7 @@ class AutoInstallWizard(Screen):
 		self["progress"] = ProgressBar()
 		self["progress"].setRange((0, 100))
 		self["progress"].setValue(0)
-		self["AboutScrollLabel"] = ScrollLabel("", showscrollbar=False)
+		self["AboutScrollLabel"] = ScrollLabel("")
 		self["header"] = Label(_("Autoinstalling please wait for packages being updated"))
 
 		self.logfile = open('/home/root/autoinstall.log', 'w')
@@ -135,6 +311,9 @@ class AutoInstallWizard(Screen):
 		self.container.appClosed.append(self.appClosed)
 		self.container.dataAvail.append(self.dataAvail)
 		self.package = None
+		self.update_retries = 0
+		self.start_timer = None
+		self.retry_timer = None
 
 		import glob
 		mac_address = open('/sys/class/net/eth0/address', 'r').readline().strip().replace(":", "")
@@ -148,11 +327,18 @@ class AutoInstallWizard(Screen):
 				self.packages = [package.strip() for package in open(autoinstallfile).readlines()] + [os.path.join(autoinstalldir, file) for file in os.listdir(autoinstalldir) if file.endswith(".ipk")]
 				if self.packages:
 					self.number_of_packages = len(self.packages)
-					# make sure we have a valid package list before attempting to restore packages
-					self.container.execute("opkg update")
+					# Delay the initial opkg update to avoid lock contention with the
+					# module-level "opkg list_installed" that runs asynchronously at
+					# enigma2 startup to create /etc/installed.
+					self.start_timer = eTimer()
+					self.start_timer.callback.append(self._doUpdate)
+					self.start_timer.start(5000, True)
 					return
 
 		self.abort()
+
+	def _doUpdate(self):
+		self.container.execute("opkg update")
 
 	def run_console(self):
 		self["progress"].setValue(100 * (self.number_of_packages - len(self.packages)) / self.number_of_packages)
@@ -181,6 +367,16 @@ class AutoInstallWizard(Screen):
 				self.dataAvail("An error occurred during installing %s - Please try again later\n" % self.package)
 			else:
 				self.dataAvail("An error occurred during opkg update - Please try again later\n")
+				# Retry opkg update: the most common cause is lock contention with
+				# the asynchronous "opkg list_installed" that runs at enigma2 startup.
+				if self.update_retries < 3:
+					self.update_retries += 1
+					self.dataAvail("[AutoInstall] Retrying opkg update in 5s (attempt %d/3)...\n" % self.update_retries)
+					self.retry_timer = eTimer()
+					self.retry_timer.callback.append(self._doUpdate)
+					self.retry_timer.start(5000, True)
+					return
+				self.dataAvail("[AutoInstall] opkg update failed after 3 retries, proceeding with cached package list\n")
 		installed = [line.strip().split(":", 1)[1].strip() for line in open('/var/lib/opkg/status').readlines() if line.startswith('Package:')]
 		self.packages = [package for package in self.packages if package not in installed]
 		if self.packages:
@@ -199,10 +395,21 @@ class AutoInstallWizard(Screen):
 			eActionMap.getInstance().unbindAction('', self.abort)
 			self.container.appClosed.remove(self.appClosed)
 			self.container.dataAvail.remove(self.dataAvail)
+		if self.start_timer is not None:
+			self.start_timer.stop()
+			self.start_timer = None
+		if self.retry_timer is not None:
+			self.retry_timer.stop()
+			self.retry_timer = None
 		self.container = None
 		self.logfile.close()
-		os.unlink("/etc/.doAutoinstall")
-		self.close(44)
+		try:
+			os.unlink("/etc/.doAutoinstall")
+		except OSError:
+			pass
+		# After installing packages, perform full system reboot
+		from Screens.Standby import TryQuitMainloop, QUIT_REBOOT
+		self.session.open(TryQuitMainloop, QUIT_REBOOT)
 
 
 class IncorrectBoxInfoWizard(MessageBox):

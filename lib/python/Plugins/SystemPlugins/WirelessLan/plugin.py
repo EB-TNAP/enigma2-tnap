@@ -140,22 +140,27 @@ class WlanStatus(Screen):
 					if "ESSID" in self:
 						self["ESSID"].setText(essid)
 
-					quality = status[self.iface]["quality"]
+					quality = status[self.iface].get("quality", "N/A")
 					if "quality" in self:
-						self["quality"].setText(quality)
+						self["quality"].setText(str(quality))
 
-					if status[self.iface]["bitrate"] == '0':
+					bitrate_val = status[self.iface].get("bitrate", False)
+					if bitrate_val == '0' or bitrate_val is False:
 						bitrate = _("Unsupported")
 					else:
-						bitrate = str(status[self.iface]["bitrate"])
+						bitrate = str(bitrate_val)
 					if "bitrate" in self:
 						self["bitrate"].setText(bitrate)
 
-					signal = str(status[self.iface]["signal"]) + " dBm"
+					signal_val = status[self.iface].get("signal", False)
+					if signal_val and signal_val is not False:
+						signal = str(signal_val) + " dBm"
+					else:
+						signal = "N/A"
 					if "signal" in self:
 						self["signal"].setText(signal)
 
-					if status[self.iface]["encryption"] == "off":
+					if status[self.iface].get("encryption", "off") == "off":
 						if accesspoint == "Not-Associated":
 							encryption = _("Disabled")
 						else:
@@ -165,21 +170,21 @@ class WlanStatus(Screen):
 					if "enc" in self:
 						self["enc"].setText(encryption)
 
-					channel = str(status[self.iface]["channel"])
+					channel = str(status[self.iface].get("channel", "N/A"))
 					if "channel" in self:
 						self["channel"].setText(channel)
 
-					encryption_type = status[self.iface]["encryption_type"]
+					encryption_type = status[self.iface].get("encryption_type", "N/A")
 					if "encryption_type" in self:
-						self["encryption_type"].setText(encryption_type)
+						self["encryption_type"].setText(str(encryption_type))
 
-					frequency = status[self.iface]["frequency"]
+					frequency = status[self.iface].get("frequency", "N/A")
 					if "frequency" in self:
-						self["frequency"].setText(frequency)
+						self["frequency"].setText(str(frequency))
 
-					frequency_norm = status[self.iface]["frequency_norm"]
+					frequency_norm = status[self.iface].get("frequency_norm", "N/A")
 					if "frequency_norm" in self:
-						self["frequency_norm"].setText(frequency_norm)
+						self["frequency_norm"].setText(str(frequency_norm))
 
 					self.updateStatusLink(status)
 
@@ -242,6 +247,7 @@ class WlanScan(Screen):
 		</screen>"""
 
 	def __init__(self, session, iface):
+		print(f"[WlanScan] __init__ called with iface: {iface}")
 		Screen.__init__(self, session)
 		self.iface = iface
 		self.oldInterfaceState = iNetwork.getAdapterAttribute(self.iface, "up")
@@ -263,8 +269,9 @@ class WlanScan(Screen):
 
 		self["key_red"] = StaticText(_("Close"))
 		self["key_green"] = StaticText(_("Connect"))
-		self["key_yellow"] = StaticText()
+		self["key_yellow"] = StaticText(_("Rescan"))
 
+		print("[WlanScan] Setting up ActionMaps...")
 		self["actions"] = NumberActionMap(["WizardActions", "InputActions", "EPGSelectActions"],
 		{
 			"ok": self.select,
@@ -275,7 +282,9 @@ class WlanScan(Screen):
 		{
 			"red": self.cancel,
 			"green": self.select,
+			"yellow": self.manualRescan,
 		})
+		print("[WlanScan] ActionMaps configured")
 		iWlan.setInterface(self.iface)
 		self.w = iWlan.getInterface()
 		self.onLayoutFinish.append(self.layoutFinished)
@@ -285,26 +294,46 @@ class WlanScan(Screen):
 		self.setTitle(_("Select a wireless network"))
 
 	def select(self):
+		print("[WlanScan] select() called!")
 		cur = self["list"].getCurrent()
+		print(f"[WlanScan] Current item: {cur}")
 		if cur is not None:
+			print(f"[WlanScan] Selecting network: {cur[0]}")
 			iWlan.stopGetNetworkList()
 			self.rescanTimer.stop()
 			del self.rescanTimer
 			if cur[0] is not None:
+				print(f"[WlanScan] Closing with ESSID: {cur[0]}")
 				self.close(cur[0])
 			else:
+				print("[WlanScan] cur[0] is None, closing with None")
 				self.close(None)
 		else:
+			print("[WlanScan] cur is None!")
 			iWlan.stopGetNetworkList()
 			self.rescanTimer.stop()
 			del self.rescanTimer
 			self.close(None)
 
 	def cancel(self):
+		print("[WlanScan] cancel() called!")
 		iWlan.stopGetNetworkList()
 		self.rescanTimer.stop()
 		del self.rescanTimer
 		self.close(None)
+
+	def manualRescan(self):
+		"""TNAP: Manual rescan triggered by yellow button"""
+		print("[WlanScan] Manual rescan requested by yellow button")
+		self.rescanTimer.stop()
+		# Clear the network cache to force a fresh scan
+		self.oldlist = {}
+		self.APList = []
+		self.cleanList = []
+		# Show "Searching..." message during rescan
+		self["info"].setText(_("Rescanning for wireless networks..."))
+		# Trigger fresh scan
+		self.getAccessPoints(refresh=False)
 
 	def rescanTimerFired(self):
 		self.rescanTimer.stop()
@@ -360,7 +389,8 @@ class WlanScan(Screen):
 				a = aps[ap]
 				if a['active']:
 					tmpList.append((a['essid'], a['bssid']))
-					compList.append((a['essid'], a['bssid'], a['encrypted'], a['iface'], a['maxrate'], a['signal'], a['frequency_norm']))
+					# TNAP: Use .get() for safe dictionary access in case frequency_norm is missing
+					compList.append((a['essid'], a['bssid'], a['encrypted'], a['iface'], a['maxrate'], a['signal'], a.get('frequency_norm', 'N/A')))
 
 			for entry in tmpList:
 				if entry[0] == "":
@@ -381,7 +411,9 @@ class WlanScan(Screen):
 			self['list'].setList(self.APList)
 		self.listLength = len(self.APList)
 		self.setInfo()
-		self.rescanTimer.start(5000)
+		# TNAP: Auto-rescan every 15 seconds to keep network list fresh
+		# Only runs while on the network selection screen, stops when user selects a network
+		self.rescanTimer.start(15000)
 		return self.cleanList
 
 	def setInfo(self):

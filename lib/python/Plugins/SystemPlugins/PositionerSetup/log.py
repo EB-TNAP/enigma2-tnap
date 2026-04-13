@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # logging for XMLTV importer
 #
 # One can simply use
@@ -7,8 +6,8 @@
 # because the log unit looks enough like a file!
 
 import sys
-import threading
 from io import StringIO
+import threading
 
 logfile = None
 # Need to make our operations thread-safe.

@@ -46,28 +46,12 @@ BASE_GROUP = "packagegroup-base"
 
 
 def queryWirelessDevice(iface):
-	try:
-		from wifi.scan import Cell
-		import errno
-	except ImportError:
-		return False
-	else:
-		from wifi.exceptions import InterfaceError
-		try:
-			system(f"ifconfig {iface} up")
-			wlanresponse = list(Cell.all(iface))  # noqa F841
-		except InterfaceError as ie:
-			print(f"[NetworkSetup] queryWirelessDevice InterfaceError: {str(ie)}")
-			return False
-		except OSError as xxx_todo_changeme:
-			(error_no, error_str) = xxx_todo_changeme.args
-			if error_no in (errno.EOPNOTSUPP, errno.ENODEV, errno.EPERM):
-				return False
-			else:
-				print(f"[NetworkSetup] queryWirelessDevice OSError: {error_no} '{error_str}'")
-				return True
-		else:
-			return True
+	# Check /sys/class/net/<iface>/phy80211 — exists for any wireless interface
+	# recognised by cfg80211/mac80211, regardless of whether it is up or down.
+	# /proc/net/wireless only lists interfaces that are currently UP, so using
+	# it caused "No working wireless interface" errors on a valid but DOWN wlan0.
+	from os.path import exists
+	return exists("/sys/class/net/%s/phy80211" % iface)
 
 
 class NetworkAdapterSelection(Screen):

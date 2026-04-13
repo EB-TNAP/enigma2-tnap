@@ -9,6 +9,83 @@
 
 #include "absdiff.h"
 
+// Define DTV_STAT_MODCOD if not defined in the DVB API
+#ifndef DTV_STAT_MODCOD
+#define DTV_STAT_MODCOD 92
+#endif
+
+// Define DVB_S2_MODCOD namespace for DVB-S2 MODCOD values
+// This was removed from newer Linux DVB API headers but is still needed for Enigma2
+namespace DVB_S2_MODCOD
+{
+	enum
+	{
+		DUMMY_PLF = 0,
+		QPSK_1_4 = 1,
+		QPSK_1_3 = 2,
+		QPSK_2_5 = 3,
+		QPSK_1_2 = 4,
+		QPSK_3_5 = 5,
+		QPSK_2_3 = 6,
+		QPSK_3_4 = 7,
+		QPSK_4_5 = 8,
+		QPSK_5_6 = 9,
+		QPSK_8_9 = 10,
+		QPSK_9_10 = 11,
+		PSK8_3_5 = 12,
+		PSK8_2_3 = 13,
+		PSK8_3_4 = 14,
+		PSK8_5_6 = 15,
+		PSK8_8_9 = 16,
+		PSK8_9_10 = 17,
+		APSK16_2_3 = 18,
+		APSK16_3_4 = 19,
+		APSK16_4_5 = 20,
+		APSK16_5_6 = 21,
+		APSK16_8_9 = 22,
+		APSK16_9_10 = 23,
+		APSK32_3_4 = 24,
+		APSK32_4_5 = 25,
+		APSK32_5_6 = 26,
+		APSK32_8_9 = 27,
+		APSK32_9_10 = 28
+	};
+
+	// Required SNR values in dB * 10 for each MODCOD (based on DVB-S2 spec)
+	// Index corresponds to MODCOD value above
+	static const int requiredSNR_x10[] = {
+		0,   // 0: DUMMY_PLF
+		-20, // 1: QPSK 1/4   (~-2.0 dB)
+		-14, // 2: QPSK 1/3   (~-1.4 dB)
+		-6,  // 3: QPSK 2/5   (~-0.6 dB)
+		10,  // 4: QPSK 1/2   (~1.0 dB)
+		23,  // 5: QPSK 3/5   (~2.3 dB)
+		33,  // 6: QPSK 2/3   (~3.3 dB)
+		41,  // 7: QPSK 3/4   (~4.1 dB)
+		49,  // 8: QPSK 4/5   (~4.9 dB)
+		54,  // 9: QPSK 5/6   (~5.4 dB)
+		62,  // 10: QPSK 8/9  (~6.2 dB)
+		64,  // 11: QPSK 9/10 (~6.4 dB)
+		58,  // 12: 8PSK 3/5  (~5.8 dB)
+		68,  // 13: 8PSK 2/3  (~6.8 dB)
+		79,  // 14: 8PSK 3/4  (~7.9 dB)
+		90,  // 15: 8PSK 5/6  (~9.0 dB)
+		100, // 16: 8PSK 8/9  (~10.0 dB)
+		102, // 17: 8PSK 9/10 (~10.2 dB)
+		93,  // 18: 16APSK 2/3  (~9.3 dB)
+		104, // 19: 16APSK 3/4  (~10.4 dB)
+		109, // 20: 16APSK 4/5  (~10.9 dB)
+		115, // 21: 16APSK 5/6  (~11.5 dB)
+		124, // 22: 16APSK 8/9  (~12.4 dB)
+		126, // 23: 16APSK 9/10 (~12.6 dB)
+		127, // 24: 32APSK 3/4  (~12.7 dB)
+		132, // 25: 32APSK 4/5  (~13.2 dB)
+		138, // 26: 32APSK 5/6  (~13.8 dB)
+		147, // 27: 32APSK 8/9  (~14.7 dB)
+		149  // 28: 32APSK 9/10 (~14.9 dB)
+	};
+}
+
 #define SEC_DEBUG
 
 #ifdef SEC_DEBUG
@@ -1992,7 +2069,7 @@ PyObject *eDVBSatelliteEquipmentControl::getFrequencyRangeList(int slot_no, int 
 	{
 		if (it->m_frontend->getSlotID() == slot_no)
 		{
-			fe_info = ((eDVBFrontend*)it->m_frontend)->getFrontendInfo(SYS_DVBS);
+			fe_info = ((eDVBFrontend*)it->m_frontend)->getFrontendInfo();
 		}
 	}
 

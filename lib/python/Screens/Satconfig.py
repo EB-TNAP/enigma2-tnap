@@ -337,6 +337,8 @@ class NimSetup(Setup, ServiceStopScreen):
 
 		if self.nimConfig.configMode.value != "nothing" and config.usage.setup_level.index > 1 and not self.nim.isFBCLink():
 			self.list.append((_("Force legacy signal stats"), self.nimConfig.force_legacy_signal_stats, _("If set to 'yes' signal values (SNR, etc) will be calculated from API V3. This is an old API version that has now been superseded.")))
+			self.list.append((_("Allow signal below lock"), self.nimConfig.show_signal_below_lock, _("If set to 'yes' signal values (SNR, etc) will be allowed to go below Lock on supported tuners. Using this setting may cause False signal values to be displayed.")))
+			self.list.append((_("Allow unlocked transponder"), self.nimConfig.allow_unlocked_transponder, _("If set to 'no' Transponders with no signal or Unlocked will have short scan times. Default for this setting is On or True.")))
 
 		self["config"].list = self.list
 		self["key_yellow"].setText(_("Auto DiSEqC") if self.autodiseqc_ports else (_("Configuration mode") if self.configMode else ""))

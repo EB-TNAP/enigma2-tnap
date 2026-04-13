@@ -2273,7 +2273,7 @@ class TunerInformation(InformationBase):
 			tunerData["start"] = tuner
 			tunerData["end"] = tuner
 			tunerData["model"] = model
-			for key, value in [(x.strip(), y.strip()) for x, y in [x.split(":", 1) for x in eDVBResourceManager.getInstance().getFrontendCapabilities(count).splitlines()]]:
+			for key, value in [(x.strip(), y.strip()) for x, y in [x.split(":", 1) for x in eDVBResourceManager.getInstance().getFrontendCapabilities(count).splitlines() if ":" in x]]:
 				if key in self.frontEndFields:
 					tunerData[self.frontEndFields[key]] = value
 				else:
@@ -2293,9 +2293,21 @@ class TunerInformation(InformationBase):
 	def displayInformation(self):
 		def parseValues(data):
 			values = {}
-			for item in data.split(","):
-				key, value = item.split("=", 1)
-				values[key] = formatNumber(value)
+			keys = {"min", "max", "stepsize", "tolerance"}
+			tokens = data.split()
+			i = 0
+			while i < len(tokens):
+				if tokens[i] in keys:
+					key = tokens[i]
+					val_parts = []
+					i += 1
+					while i < len(tokens) and tokens[i] not in keys:
+						val_parts.append(tokens[i])
+						i += 1
+					if val_parts:
+						values[key] = formatNumber(" ".join(val_parts))
+				else:
+					i += 1
 			return values
 
 		def formatNumber(number):
@@ -2355,11 +2367,15 @@ class TunerInformation(InformationBase):
 			frequency = tunerData.get("frequency")
 			if frequency:
 				data = parseValues(frequency)
-				info.append(formatLine("P1", _("Frequency range"), f"{data['min']}  -  {data['max']}  (Step {data['stepsize']})"))
+				if "min" in data and "max" in data and "stepsize" in data:
+					info.append(formatLine("P1", _("Frequency range"), f"{data['min']}  -  {data['max']}  (Step {data['stepsize']})"))
+				elif "min" in data and "max" in data:
+					info.append(formatLine("P1", _("Frequency range"), f"{data['min']}  -  {data['max']}"))
 			symbolrate = tunerData.get("symbolrate")
 			if symbolrate:
 				data = parseValues(symbolrate)
-				info.append(formatLine("P1", _("Symbol rate"), f"{data['min']}  -  {data['max']}"))
+				if "min" in data and "max" in data:
+					info.append(formatLine("P1", _("Symbol rate"), f"{data['min']}  -  {data['max']}"))
 			FEC = extractModes(capabilities, "FEC")
 			if FEC:
 				info.append(formatLine("P1", _("FEC modes"), ", ".join(FEC)))

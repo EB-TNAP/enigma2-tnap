@@ -88,9 +88,12 @@ def makeServiceQueryStr(serviceTypes):
 	return ' || '.join(['(type == %d)' % x for x in serviceTypes])
 
 
+# type 0 = generic/unknown service (custom)
 # type 1 = digital television service
 # type 4 = nvod reference service (NYI)
+# type 11 = unknown service type (custom)
 # type 17 = MPEG-2 HD digital television service
+# type 20 = unknown video service type (custom)
 # type 22 = advanced codec SD digital television
 # type 24 = advanced codec SD NVOD reference service (NYI)
 # type 25 = advanced codec HD digital television
@@ -99,6 +102,9 @@ def makeServiceQueryStr(serviceTypes):
 # type 10 = advanced codec digital radio sound service
 # type 31 = High Efficiency Video Coding digital television
 # type 32 = High Efficiency Video Coding digital television
+# type 134 = user defined (0x86)
+# type 192 = unknown service type (0xC0) (custom)
+# type 195 = user defined (0xC3)
 
 # Generate an eServiceRef query path containing
 # '(type == serviceTypes[0]) || (type == serviceTypes[1]) || ...'
@@ -107,14 +113,18 @@ def makeServiceQueryStr(serviceTypes):
 service_types_tv_ref = eServiceReference(eServiceReference.idDVB, eServiceReference.flagDirectory, eServiceReferenceDVB.dTv)
 
 service_types_tv_ref.setPath(makeServiceQueryStr((
-	eServiceReferenceDVB.dTv,
-	eServiceReferenceDVB.mpeg2HdTv,
-	eServiceReferenceDVB.avcSdTv,
-	eServiceReferenceDVB.avcHdTv,
-	eServiceReferenceDVB.nvecTv,
-	eServiceReferenceDVB.nvecTv20,
-	eServiceReferenceDVB.user134,
-	eServiceReferenceDVB.user195,
+	0,  # generic/unknown service (custom)
+	eServiceReferenceDVB.dTv,  # 1
+	11,  # unknown service type (custom)
+	eServiceReferenceDVB.mpeg2HdTv,  # 17
+	20,  # unknown video service type (custom)
+	eServiceReferenceDVB.avcSdTv,  # 22
+	eServiceReferenceDVB.avcHdTv,  # 25
+	eServiceReferenceDVB.nvecTv,  # 31
+	eServiceReferenceDVB.nvecTv20,  # 32
+	eServiceReferenceDVB.user134,  # 134
+	192,  # unknown service type 0xC0 (custom)
+	eServiceReferenceDVB.user195,  # 195
 )))
 
 service_types_radio_ref = eServiceReference(eServiceReference.idDVB, eServiceReference.flagDirectory, eServiceReferenceDVB.dRadio)

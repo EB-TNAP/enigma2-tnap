@@ -214,9 +214,13 @@ class SoftwareUpdate(Screen, ProtectedScreen):
 					upgradeablePng = LoadPixmap(cached=True, path=resolveFilename(SCOPE_GUISKIN, "icons/upgradeable.png"))
 					divPng = LoadPixmap(cached=True, path=resolveFilename(SCOPE_GUISKIN, "div-h.png"))
 					for fetched in fetchedList:
-						oldVer = fetched[1] if fetched[1] else _("Current version unknown")
-						newVer = fetched[2] if fetched[2] else _("Updated version unknown")
-						self.updateList.append((fetched[0], fetched[1], f"{oldVer}  ->  {newVer}", "upgradeable", upgradeablePng, divPng, fetched[2]))
+						if len(fetched) < 1:
+							continue
+						oldVer = fetched[1] if len(fetched) > 1 and fetched[1] else _("Current version unknown")
+						newVer = fetched[2] if len(fetched) > 2 and fetched[2] else _("Updated version unknown")
+						oldVerRaw = fetched[1] if len(fetched) > 1 else None
+						newVerRaw = fetched[2] if len(fetched) > 2 else None
+						self.updateList.append((fetched[0], oldVerRaw, f"{oldVer}  ->  {newVer}", "upgradeable", upgradeablePng, divPng, newVerRaw))
 					if self.updateList:
 						self.updateList.sort(key=lambda x: x[0])  # Sort by package name.
 						self["list"].setList(self.updateList)

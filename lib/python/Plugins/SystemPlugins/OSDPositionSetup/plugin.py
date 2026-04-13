@@ -2,6 +2,13 @@
 from Screens.Screen import Screen
 from Components.config import config, ConfigSelectionNumber, ConfigSubsection, ConfigInteger
 from Components.SystemInfo import BoxInfo
+from enigma import getDesktop
+
+def getMaxResolution():
+	desktop_size = getDesktop(0).size()
+	max_width = desktop_size.width()
+	max_height = desktop_size.height()
+	return (max_width, max_height)
 
 config.plugins.OSDPositionSetup = ConfigSubsection()
 if BoxInfo.getItem("AmlogicFamily"):
@@ -12,17 +19,19 @@ if BoxInfo.getItem("AmlogicFamily"):
 	config.plugins.OSDPositionSetup.dst_top = ConfigSelectionNumber(default=limits[1], stepwidth=1, min=limits[1] - 255, max=limits[1] + 255, wraparound=False)
 	config.plugins.OSDPositionSetup.dst_height = ConfigSelectionNumber(default=limits[3], stepwidth=1, min=limits[3] - 255, max=limits[3] + 255, wraparound=False)
 else:
-	config.plugins.OSDPositionSetup.dst_left = ConfigSelectionNumber(default=0, stepwidth=1, min=0, max=720, wraparound=False)
-	config.plugins.OSDPositionSetup.dst_width = ConfigSelectionNumber(default=720, stepwidth=1, min=0, max=720, wraparound=False)
-	config.plugins.OSDPositionSetup.dst_top = ConfigSelectionNumber(default=0, stepwidth=1, min=0, max=576, wraparound=False)
-	config.plugins.OSDPositionSetup.dst_height = ConfigSelectionNumber(default=576, stepwidth=1, min=0, max=576, wraparound=False)
+	max_width, max_height = getMaxResolution()
+	config.plugins.OSDPositionSetup.dst_left = ConfigSelectionNumber(default=0, stepwidth=1, min=0, max=max_width, wraparound=False)
+	config.plugins.OSDPositionSetup.dst_width = ConfigSelectionNumber(default=max_width, stepwidth=1, min=0, max=max_width, wraparound=False)
+	config.plugins.OSDPositionSetup.dst_top = ConfigSelectionNumber(default=0, stepwidth=1, min=0, max=max_height, wraparound=False)
+	config.plugins.OSDPositionSetup.dst_height = ConfigSelectionNumber(default=max_height, stepwidth=1, min=0, max=max_height, wraparound=False)
 
 
 def setPosition(dst_left, dst_width, dst_top, dst_height):
-	if dst_left + dst_width > 720:
-		dst_width = 720 - dst_left
-	if dst_top + dst_height > 576:
-		dst_height = 576 - dst_top
+	max_width, max_height = getMaxResolution()
+	if dst_left + dst_width > max_width:
+		dst_width = max_width - dst_left
+	if dst_top + dst_height > max_height:
+		dst_height = max_height - dst_top
 	try:
 		print("[OSDPositionSetup] Write to /proc/stb/fb/dst_left")
 		open("/proc/stb/fb/dst_left", "w").write('%08x' % dst_left)

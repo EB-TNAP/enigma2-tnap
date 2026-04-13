@@ -1,0 +1,109 @@
+# Hidden channels for 101W 12000V SR20000 transponder
+# Format: service_id:service_name:provider_name:service_type:video_pid:audio_pid:pcr_pid
+# service_type: 1=TV, 2=Radio, 25=HD TV
+# PIDs in hex format (video:audio:pcr)
+# For radio services: video_pid=01, audio_pid=hex, pcr_pid=31fff
+# Extracted from lamedb
+
+9278:50's & 60's Hits:Mood Music:2:01:011d48:031fff
+9279:70's Hits:Mood Music:2:01:011d49:031fff
+927a:Songbook:Mood Music:2:01:011d4a:031fff
+927b:80's Hits:Mood Music:2:01:011d4b:031fff
+927c:60's Pop Hits:Mood Music:2:01:011d4c:031fff
+927d:Adult Alternative:Mood Music:2:01:011d4d:031fff
+927e:Cashmere:Mood Music:2:01:011d4e:031fff
+927f:Unforgettable:Mood Music:2:01:011d4f:031fff
+9280:City Lights:Mood Music:2:01:011d50:031fff
+9380:44.1k Test:Mood Music:2:01:011e50:031fff
+9281:The Beach:Mood Music:2:01:011d51:031fff
+9282:Swing Kings:Mood Music:2:01:011d52:031fff
+9283:Lucille:Mood Music:2:01:011d53:031fff
+9284:7890:Mood Music:2:01:011d54:031fff
+9285:Ensemble:Mood Music:2:01:011d55:031fff
+9286:Fiesta Tropical:Mood Music:2:01:011d56:031fff
+9287:Rock Show:Mood Music:2:01:011d57:031fff
+9288:Roadhouse:Mood Music:2:01:011d58:031fff
+9289:Country Gold:Mood Music:2:01:011d59:031fff
+928a:Nashville USA:Mood Music:2:01:011d5a:031fff
+928b:Cntry Music 1:Mood Music:2:01:011d5b:031fff
+928c:Belissimo:Mood Music:2:01:011d5c:031fff
+928d:The Light:Mood Music:2:01:011d5d:031fff
+928e:Plaza:Mood Music:2:01:011d5e:031fff
+928f:Impressions:Mood Music:2:01:011d5f:031fff
+9290:Renegade Cntry:Mood Music:2:01:011d60:031fff
+9291:Easy Instrumentals:Mood Music:2:01:011d61:031fff
+9292:Environmental:Mood Music:2:01:011d62:031fff
+9293:Frequency:Mood Music:2:01:011d63:031fff
+9294:Expressions:Mood Music:2:01:011d64:031fff
+9295:Ambrosia:Mood Music:2:01:011d65:031fff
+9296:FM-1:Mood Music:2:01:011d66:031fff
+9297:Hitline:Mood Music:2:01:011d67:031fff
+9298:Hot FM:Mood Music:2:01:011d68:031fff
+9299:Strobe:Mood Music:2:01:011d69:031fff
+929a:Little Itay:Mood Music:2:01:011d6a:031fff
+929b:Jazz Traditions:Mood Music:2:01:011d6b:031fff
+929c:Classic Hits:Mood Music:2:01:011d6c:031fff
+929d:Kidtunes:Mood Music:2:01:011d6d:031fff
+929e:Martini Time:Mood Music:2:01:011d6e:031fff
+929f:La Musica:Mood Music:2:01:011d6f:031fff
+92a0:Intermezzo:Mood Music:2:01:011d70:031fff
+92a1:Love Songs:Mood Music:2:01:011d71:031fff
+92a2:Feedback:Mood Music:2:01:011d72:031fff
+92a3:Metro:Mood Music:2:01:011d73:031fff
+92a4:Mojito:Mood Music:2:01:011d74:031fff
+92a5:Moodscapes:Mood Music:2:01:011d75:031fff
+92a6:Aura:Mood Music:2:01:011d76:031fff
+92a7:Shine:Mood Music:2:01:011d77:031fff
+92a8:Party Playlist:Mood Music:2:01:011d78:031fff
+92a9:Latin Jazz:Mood Music:2:01:011d79:031fff
+92aa:Piano & Guitar:Mood Music:2:01:011d7a:031fff
+92ab:The Cafe:Mood Music:2:01:011d7b:031fff
+92ac:Mo Soul:Mood Music:2:01:011d7c:031fff
+92ad:Reflections:Mood Music:2:01:011d7d:031fff
+92ae:Kingston:Mood Music:2:01:011d7e:031fff
+92af:Kinetic:Mood Music:2:01:011d7f:031fff
+92b0:Tropical Breezes:Mood Music:2:01:011d80:031fff
+92b1:The Blvd:Mood Music:2:01:011d81:031fff
+92b2:Concrete Beats:Mood Music:2:01:011d82:031fff
+92b3:Viva Mariachi:Mood Music:2:01:011d83:031fff
+92b5:NuLounge:Mood Music:2:01:011d85:031fff
+92b6:Promo-3:Mood Music:2:01:011d86:031fff
+92b7:Mood Overhead:Mood Music:2:01:011d87:031fff
+92b8:Chilltopia:Mood Music:2:01:011d88:031fff
+92ba:RL Music Program:Mood Music:2:01:011d8a:031fff
+92bb:Quebecois:Mood Music:2:01:011d8b:031fff
+92bc:Christmas Message:Mood Music:2:01:011d8c:031fff
+92bd:Popeyes Radio:Mood Music:2:01:011d8d:031fff
+92c0:The Circuit:Mood Music:2:01:011d90:031fff
+92c1:Perimeter:Mood Music:2:01:011d91:031fff
+92c2:New Wave:Mood Music:2:01:011d92:031fff
+92c3:Varsity:Mood Music:2:01:011d93:031fff
+92c4:Stylus:Mood Music:2:01:011d94:031fff
+92c6:Veterans Day:Mood Music:2:01:011d96:031fff
+92c7:Food Lion:Mood Music:2:01:011d97:031fff
+92c8:Mens Wearhouse:Mood Music:2:01:011d98:031fff
+92c9:Boot Classic:Mood Music:2:01:011d99:031fff
+92ca:Holiday Favorites:Mood Music:2:01:011d9a:031fff
+92cb:FM Dos:Mood Music:2:01:011d9b:031fff
+92cc:90s Hits:Mood Music:2:01:011d9c:031fff
+92cd:Boot Modern:Mood Music:2:01:011d9d:031fff
+92ce:Cost Plus:Mood Music:2:01:011d9e:031fff
+92cf:Sheetz:Mood Music:2:01:011d9f:031fff
+92d0:Uptown:Mood Music:2:01:011da0:031fff
+92d1:Heartland Blend:Mood Music:2:01:011da1:031fff
+92d2:Moe's SW Grill:Mood Music:2:01:011da2:031fff
+92d3:McDonalds:Mood Music:2:01:011da3:031fff
+92d5:TBD-3:Mood Music:2:01:011da5:031fff
+92d6:Latin Hits:Mood Music:2:01:011da6:031fff
+92d7:Bed Bath Beyond:Mood Music:2:01:011da7:031fff
+92d8:Chase Campus:Mood Music:2:01:011da8:031fff
+92da:Ulta:Mood Music:2:01:011daa:031fff
+92e0:Chipotle_East:Mood Music:2:01:011db0:031fff
+92e1:Chipotle_Cent:Mood Music:2:01:011db1:031fff
+92e2:Chipotle_West:Mood Music:2:01:011db2:031fff
+92e3:Chipotle_Mtn:Mood Music:2:01:011db3:031fff
+92e4:Acoustic Crossroads:Mood Music:2:01:011db4:031fff
+92e5:Destinations:Mood Music:2:01:011db5:031fff
+92e6:Hawiian:Mood Music:2:01:011db6:031fff
+92e7:Toned:Mood Music:2:01:011db7:031fff
+92eb:Riviera:Mood Music:2:01:011dbb:031fff

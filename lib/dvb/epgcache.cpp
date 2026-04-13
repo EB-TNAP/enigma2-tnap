@@ -543,7 +543,7 @@ bool eEPGCache::FixOverlapping(EventCacheItem &servicemap, time_t TM, int durati
  * @param channel The channel for which the EPG is being updated
  * @return void
  */
-void eEPGCache::sectionRead(const uint8_t *data, int source, eEPGChannelData *channel)
+void eEPGCache::sectionRead(const uint8_t *data, int source, eEPGChannelData *channel, int forced_namespace)
 {
 	const eit_t *eit = (const eit_t*) data;
 
@@ -578,14 +578,23 @@ void eEPGCache::sectionRead(const uint8_t *data, int source, eEPGChannelData *ch
 	 */
 	bool use_transponder_chid = onid != 0x101 && onid != 0x100 && (source == SCHEDULE || (source == NOWNEXT && data[0] == 0x4E));
 
-	if (use_transponder_chid && channel)
+	int dvbnamespace = forced_namespace;
+	if (dvbnamespace == -1)
 	{
-		eDVBChannelID chid = channel->channel->getChannelID();
-
-		onid = chid.original_network_id.get();
-		tsid = chid.transport_stream_id.get();
+		if (use_transponder_chid && channel)
+		{
+			eDVBChannelID chid = channel->channel->getChannelID();
+			onid = chid.original_network_id.get();
+			tsid = chid.transport_stream_id.get();
+			dvbnamespace = chid.dvbnamespace.get();
+		}
+		else if (channel)
+		{
+			eDVBChannelID chid = channel->channel->getChannelID();
+			dvbnamespace = chid.dvbnamespace.get();
+		}
 	}
-	uniqueEPGKey service( eit->getServiceID(), onid, tsid);
+	uniqueEPGKey service( eit->getServiceID(), onid, tsid, dvbnamespace);
 
 	eit_event_struct* eit_event = (eit_event_struct*) (data+ptr);
 	int eit_event_size;
@@ -1930,6 +1939,7 @@ void eEPGCache::submitEventData(const std::vector<eServiceReferenceDVB>& service
 {
 	std::vector<int> sids;
 	std::vector<eDVBChannelID> chids;
+	std::vector<int> namespaces;
 	chids.reserve(serviceRefs.size());
 	for (std::vector<eServiceReferenceDVB>::const_iterator serviceRef = serviceRefs.begin();
 		serviceRef != serviceRefs.end();
@@ -1939,6 +1949,7 @@ void eEPGCache::submitEventData(const std::vector<eServiceReferenceDVB>& service
 		serviceRef->getChannelID(chid);
 		chids.push_back(chid);
 		sids.push_back(serviceRef->getServiceID().get());
+		namespaces.push_back(serviceRef->getDVBNamespace().get());
 
 		// disable EIT event parsing when using EPG_IMPORT
 		ePtr<eDVBService> service;
@@ -1947,10 +1958,10 @@ void eEPGCache::submitEventData(const std::vector<eServiceReferenceDVB>& service
 			service->m_flags |= eDVBService::dxNoEIT;
 		}
 	}
-	submitEventData(sids, chids, start, duration, title, short_summary, long_description, event_types, parental_ratings, eventId, EPG_IMPORT);
+	submitEventData(sids, chids, namespaces, start, duration, title, short_summary, long_description, event_types, parental_ratings, eventId, EPG_IMPORT);
 }
 
-void eEPGCache::submitEventData(const std::vector<int>& sids, const std::vector<eDVBChannelID>& chids, long start,
+void eEPGCache::submitEventData(const std::vector<int>& sids, const std::vector<eDVBChannelID>& chids, const std::vector<int>& namespaces, long start,
 	long duration, const char* title, const char* short_summary,
 	const char* long_description, char event_type, int event_id, int source)
 {
@@ -1960,16 +1971,16 @@ void eEPGCache::submitEventData(const std::vector<int>& sids, const std::vector<
 	{
 		event_types.push_back(event_type);
 	}
-	submitEventData(sids, chids, start, duration, title, short_summary, long_description, event_types, parental_ratings, event_id, source);
+	submitEventData(sids, chids, namespaces, start, duration, title, short_summary, long_description, event_types, parental_ratings, event_id, source);
 }
 
-void eEPGCache::submitEventData(const std::vector<int>& sids, const std::vector<eDVBChannelID>& chids, long start,
+void eEPGCache::submitEventData(const std::vector<int>& sids, const std::vector<eDVBChannelID>& chids, const std::vector<int>& namespaces, long start,
 	long duration, const char* title, const char* short_summary,
 	const char* long_description, std::vector<uint8_t> event_types, std::vector<eit_parental_rating> parental_ratings, int event_id, int source)
 {
 	if (!title)
 		return;
-	if (sids.size() != chids.size())
+	if (sids.size() != chids.size() || sids.size() != namespaces.size())
 		return;
 	static const int EIT_LENGTH = 4108;
 	static const uint8_t codePage = 0x15; // UTF-8 encoding
@@ -2133,7 +2144,7 @@ void eEPGCache::submitEventData(const std::vector<int>& sids, const std::vector<
 		packet->setServiceId(sids[i]);
 		packet->setTransportStreamId(chids[i].transport_stream_id.get());
 		packet->setOriginalNetworkId(chids[i].original_network_id.get());
-		sectionRead(data, source, 0);
+		sectionRead(data, source, 0, namespaces[i]);
 	}
 }
 

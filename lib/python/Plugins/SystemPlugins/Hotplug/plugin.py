@@ -41,7 +41,8 @@ class Hotplug(Protocol):
 		if isinstance(data, bytes):
 			data = data.decode()
 		self.received += data
-		print(f"[Hotplug] Data received: '{", ".join(self.received.split("\0")[:-1])}'.")
+		sep = ", "
+		print(f"[Hotplug] Data received: '{sep.join(self.received.split(chr(0))[:-1])}'.")
 
 	def connectionLost(self, reason):
 		# print(f"[Hotplug] Connection lost reason '{reason}'.")
@@ -114,6 +115,47 @@ class HotPlugManager:
 			mounts = fileReadLines("/proc/mounts")
 			mountPoint = "/media/usb"
 			mountPointDevice = DEVNAME.replace("/dev/", "/media/")
+
+		# Determine if device is internal by checking device path
+		# Internal devices have 'pci', 'ahci', or 'sata' in their physical path
+		# OR are connected via internal USB-to-SATA bridge controllers
+		isInternal = False
+		if DEVNAME:
+			device_base = DEVNAME.replace("/dev/", "").rstrip("0123456789")
+			try:
+				from os.path import realpath, exists
+				phys_path = realpath(f"/sys/block/{device_base}/device")
+
+				# Check for traditional internal buses
+				if "pci" in phys_path or "ahci" in phys_path or "sata" in phys_path:
+					isInternal = True
+				else:
+					# Check for internal USB-to-SATA bridge controllers (common in STBs)
+					# Read USB vendor:product ID
+					vendor_file = f"/sys/block/{device_base}/device/../idVendor"
+					product_file = f"/sys/block/{device_base}/device/../idProduct"
+					if exists(vendor_file) and exists(product_file):
+						with open(vendor_file) as f:
+							vendor = f.read().strip()
+						with open(product_file) as f:
+							product = f.read().strip()
+						usb_id = f"{vendor}:{product}"
+
+						# Known internal USB-to-SATA bridge chips (JMicron, ASMedia, etc.)
+						internal_bridges = [
+							"152d:0583", "152d:0567", "152d:0578", "152d:0579",  # JMicron
+							"174c:5106", "174c:55aa",  # ASMedia
+							"0080:a001", "0080:a025"   # Cypress/Other
+						]
+						if usb_id in internal_bridges:
+							isInternal = True
+							print(f"[Hotplug] Device {device_base} identified as internal USB-to-SATA bridge ({usb_id})")
+			except:
+				pass
+
+		# Only allow /media/hdd for internal devices
+		mountPointHdd = None
+		if isInternal:
 			mountPointHdd = None if [x.split()[1] for x in mounts if "/media/hdd" in x] else "/media/hdd"
 			knownDevices = fileReadLines("/etc/udev/known_devices", default=[])
 			knownDevice = ""
@@ -169,7 +211,7 @@ class HotPlugManager:
 					if DEVPATH.startswith(physdevprefix):
 						description = f"\n{_(pdescription)}"
 
-				text = f"{_("A new storage device has been connected:")}\n{ID_MODEL} - ({scaleNumber(ID_PART_ENTRY_SIZE * 512, format="%.1f")})\n{description}"
+				text = f"{_('A new storage device has been connected:')}\n{ID_MODEL} - ({scaleNumber(ID_PART_ENTRY_SIZE * 512, format='%.1f')})\n{description}"
 
 				def newDeviceCallback(answer):
 					if answer:
@@ -239,11 +281,64 @@ class HotPlugManager:
 		self.removeTimer.stop()
 		cleanMediaDirs()
 
+	def handleDvbDeviceHotplug(self, action, eventData):
+		from enigma import quitMainloop
+		from Components.NimManager import nimmanager
+
+		DEVNAME = eventData.get("DEVNAME", "")
+		DEVPATH = eventData.get("DEVPATH", "")
+
+		if action == "add":
+			# Check if this is a frontend device (tuner)
+			if "frontend" in DEVNAME:
+				print(f"[Hotplug] DVB tuner detected: {DEVNAME}")
+
+				# Get tuner model if available
+				tuner_model = "Unknown"
+				try:
+					adapter_num = DEVNAME.split("/")[-2].replace("adapter", "")
+					model_path = f"/sys/class/dvb/dvb{adapter_num}.frontend0/device/modalias"
+					if exists(model_path):
+						with open(model_path, "r") as f:
+							tuner_model = f.read().strip()
+				except:
+					pass
+
+				text = _("A new DVB tuner has been detected:\n%s\n\nEnigma2 needs to restart to use the new tuner.\n\nRestart now?") % DEVNAME
+
+				def restartCallback(answer):
+					if answer:
+						print("[Hotplug] Restarting enigma2 to detect new tuner")
+						quitMainloop(3)  # 3 = restart enigma2
+					else:
+						print("[Hotplug] User declined restart, tuner will be available after manual restart")
+
+				ModalMessageBox.instance.showMessageBox(
+					text=text,
+					list=[(_("Yes, restart now"), True), (_("No, restart later"), False)],
+					default=True,
+					windowTitle=_("New DVB Tuner Detected"),
+					callback=restartCallback
+				)
+
+		elif action == "remove":
+			if "frontend" in DEVNAME:
+				print(f"[Hotplug] DVB tuner removed: {DEVNAME}")
+				# Note: Tuner removal is handled by the system, but enigma2 may need
+				# restart to properly update the tuner list
+
 	def processHotplugData(self, eventData):
 		mode = eventData.get("mode")
 		if self.debug:
 			print("[Hotplug] DEBUG: ", eventData)
 		action = eventData.get("ACTION")
+		subsystem = eventData.get("SUBSYSTEM")
+
+		# Handle DVB tuner hotplug
+		if subsystem == "dvb" and action in ("add", "remove"):
+			self.handleDvbDeviceHotplug(action, eventData)
+			return
+
 		if mode == 1 and eventData.get("MODE", "") != "CD":
 			if action == "add":
 				self.addTimer.stop()

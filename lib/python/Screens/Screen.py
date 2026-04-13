@@ -131,6 +131,8 @@ class Screen(dict):
 		self.__dict__.clear()  # Really delete all elements now.
 
 	def close(self, *retval):
+		if not hasattr(self, 'execing'):
+			return
 		if not self.execing:
 			self.close_on_next_exec = retval
 		else:
@@ -264,7 +266,12 @@ class Screen(dict):
 	def screenContentChanged(self):
 		for f in self.onContentChanged:
 			if not isinstance(f, type(self.close)):
-				exec(f, globals(), locals())  # Python 3
+				try:
+					exec(f, globals(), locals())  # Python 3
+				except KeyError as e:
+					print(f"[Screen] Warning: onContentChanged applet in '{self.__class__.__name__}' failed with KeyError: {e}. Skin widget name mismatch?")
+				except Exception as e:
+					print(f"[Screen] Warning: onContentChanged applet in '{self.__class__.__name__}' failed: {type(e).__name__}: {e}")
 			else:
 				f()
 
@@ -335,7 +342,12 @@ class Screen(dict):
 		for f in self.onLayoutFinish:
 			if not isinstance(f, type(self.close)):
 				# exec f in globals(), locals()  # Python 2
-				exec(f, globals(), locals())  # Python 3
+				try:
+					exec(f, globals(), locals())  # Python 3
+				except KeyError as e:
+					print(f"[Screen] Warning: onLayoutFinish applet in '{self.__class__.__name__}' failed with KeyError: {e}. Skin widget name mismatch?")
+				except Exception as e:
+					print(f"[Screen] Warning: onLayoutFinish applet in '{self.__class__.__name__}' failed: {type(e).__name__}: {e}")
 			else:
 				f()
 

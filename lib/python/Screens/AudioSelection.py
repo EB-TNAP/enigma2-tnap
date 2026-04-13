@@ -158,8 +158,8 @@ class AudioSelection(ConfigListScreen, Screen):
 				self.settings.downmix_aacplus.addNotifier(self.changeAACDownmixPlus, initial_call=False)
 				conflist.append(getConfigListEntry(_("AAC plus downmix"), self.settings.downmix_aacplus, None))
 
-			if BoxInfo.getItem("CanAACTranscode"):
-				choice_list = BoxInfo.getItem("CanAACTranscode")
+			choice_list = BoxInfo.getItem("CanAACTranscode")
+			if choice_list and isinstance(choice_list, (list, dict)):
 				self.settings.transcodeaac = ConfigSelection(choices=choice_list, default=config.av.transcodeaac.value)
 				self.settings.transcodeaac.addNotifier(self.setAACTranscode, initial_call=False)
 				conflist.append(getConfigListEntry(_("AAC transcoding"), self.settings.transcodeaac, None))

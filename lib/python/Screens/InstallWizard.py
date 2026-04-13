@@ -30,6 +30,7 @@ class InstallWizard(ConfigListScreen, Screen):
 		self.index = args
 		self.list = []
 		self.doNextStep = False
+		self.adapters = []
 		ConfigListScreen.__init__(self, self.list)
 
 		if self.index == self.STATE_UPDATE:

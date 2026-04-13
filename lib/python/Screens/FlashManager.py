@@ -7,7 +7,7 @@ from time import time
 from urllib.request import Request, urlopen
 from zipfile import ZipFile
 
-from enigma import eEPGCache, eTimer, fbClass
+from enigma import eEPGCache, eTimer
 
 from Components.ActionMap import HelpableActionMap
 from Components.ChoiceList import ChoiceEntryComponent, ChoiceList
@@ -62,7 +62,7 @@ class FlashManager(Screen):
 	def __init__(self, session):
 		Screen.__init__(self, session, enableHelp=True)
 		self.skinName = ["FlashManager", "FlashOnline"]
-		self.imageFeed = "OpenPli"
+		self.imageFeed = "TNAP"
 		self.setTitle(_("Flash Manager - %s Images") % self.imageFeed)
 		self.imagesList = {}
 		self.expanded = []
@@ -96,8 +96,13 @@ class FlashManager(Screen):
 		self["key_blue"] = StaticText()
 		self["description"] = StaticText()
 		self["list"] = ChoiceList(list=[ChoiceEntryComponent("", ((_("Retrieving image list, please wait...")), "Loading"))])
+		# TNAP feed contains all versions (5.1, 6.1, 7.x) in single JSON file
+		# Each version appears as expandable category in the UI
+		# Order matters: First in list will be default
+		boxname = BoxInfo.getItem("BoxName")
 		self.feedUrls = [
-			("OpenATV", "https://images.mynonpublic.com/openatv/json/%s" % BoxInfo.getItem("BoxName"))
+			["TNAP", "http://162.216.113.217/json-5/%s.json" % boxname],
+			["OpenATV", "https://images.mynonpublic.com/openatv/json/%s" % boxname]
 		]
 		self.callLater(self.getImagesList)
 
@@ -106,9 +111,23 @@ class FlashManager(Screen):
 			result = [index for index, data in enumerate(self.feedUrls) if data[FEED_DISTRIBUTION] == item]
 			return result[0] if result else None
 
+		# Track seen files by inode to avoid duplicates from symlinks/multiple mount points
+		seenInodes = set()
+
 		def getImages(path, files):
 			for file in [x for x in files if splitext(x)[1] == ".zip" and not basename(x).startswith(".") and (boxname in x or machinebuild in x or model in x)]:
 				try:
+					# Get file inode to detect duplicates
+					fileStat = stat(file)
+					fileId = (fileStat.st_dev, fileStat.st_ino)
+
+					# Skip if we've already seen this file (via different path)
+					if fileId in seenInodes:
+						print("[FlashManager] getImagesList: Skipping duplicate '%s' (already seen via different path)" % file)
+						continue
+
+					seenInodes.add(fileId)
+
 					zipData = ZipFile(file, mode="r")
 					zipFiles = zipData.namelist()
 					zipData.close()
@@ -126,8 +145,8 @@ class FlashManager(Screen):
 					print("[FlashManager] getImagesList Error: Unable to extract file list from Zip file '%s'!" % file)
 
 		def getImagesListCallback(retVal=None):  # The retVal argument absorbs the unwanted return value from MessageBox.
-			if self.imageFeed != "OpenATV":
-				self.keyDistributionCallback("OpenATV")  # No images can be found for the selected distribution so go back to the Unknown default.
+			if self.imageFeed != "TNAP":
+				self.keyDistributionCallback("TNAP")  # No images can be found for the selected distribution so go back to the default.
 
 		machinebuild = BoxInfo.getItem("machinebuild")
 		model = BoxInfo.getItem("model")
@@ -135,8 +154,8 @@ class FlashManager(Screen):
 
 		if not self.imagesList:
 			index = findInList(self.imageFeed)
-			box = machinebuild if index else boxname
-			feedURL = self.feedUrls[index][FEED_JSON_URL] if index else "https://images.mynonpublic.com/openatv/json/%s" % box
+			box = machinebuild if index is not None else boxname
+			feedURL = self.feedUrls[index][FEED_JSON_URL] if index is not None else "https://images.mynonpublic.com/openatv/json/%s" % box
 			try:
 				req = Request(feedURL, None, USER_AGENT)
 				self.imagesList = dict(load(urlopen(req)))
@@ -147,27 +166,39 @@ class FlashManager(Screen):
 				print("[FlashManager] getImagesList Error: Unable to load json data from URL '%s'!" % feedURL)
 				self.imagesList = {}
 			searchFolders = []
-			# Get all folders of /media/ and /media/net/ and only if OpenATV
-			if not index:
-				for media in ["/media/%s" % x for x in listdir("/media")] + (["/media/net/%s" % x for x in listdir("/media/net")] if isdir("/media/net") else []):
-					# print("[FlashManager] getImagesList DEBUG: media='%s'." % media)
-					if not (BoxInfo.getItem("HasMMC") and "/mmc" in media) and isdir(media):
-						getImages(media, [join(media, x) for x in listdir(media) if splitext(x)[1] == ".zip" and (boxname in x or machinebuild in x or model in x)])
-						for folder in ["images", "downloaded_images", "imagebackups"]:
-							if folder in listdir(media):
-								subFolder = join(media, folder)
-								# print("[FlashManager] getImagesList DEBUG: subFolder='%s'." % subFolder)
-								if isdir(subFolder) and not islink(subFolder) and not ismount(subFolder):
-									# print("[FlashManager] getImagesList DEBUG: Next subFolder='%s'." % subFolder)
-									getImages(subFolder, [join(subFolder, x) for x in listdir(subFolder) if splitext(x)[1] == ".zip" and (boxname in x or machinebuild in x or model in x)])
-									for dir in [dir for dir in [join(subFolder, dir) for dir in listdir(subFolder)] if isdir(dir) and splitext(dir)[1] == ".unzipped"]:
-										try:
-											rmtree(dir)
-										except OSError as err:
-											print("[FlashManager] getImagesList Error %d: Unable to remove directory '%s'!  (%s)" % (err.errno, dir, err.strerror))
+			# TNAP: Get all folders of /media/ and /media/net/ for all feeds (not just OpenATV)
+			# This allows Downloaded and Backup images to appear in TNAP feed
+			for media in ["/media/%s" % x for x in listdir("/media")] + (["/media/net/%s" % x for x in listdir("/media/net")] if isdir("/media/net") else []):
+				# print("[FlashManager] getImagesList DEBUG: media='%s'." % media)
+				if not (BoxInfo.getItem("HasMMC") and "/mmc" in media) and isdir(media):
+					getImages(media, [join(media, x) for x in listdir(media) if splitext(x)[1] == ".zip" and (boxname in x or machinebuild in x or model in x)])
+					for folder in ["images", "downloaded_images", "imagebackups"]:
+						if folder in listdir(media):
+							subFolder = join(media, folder)
+							# print("[FlashManager] getImagesList DEBUG: subFolder='%s'." % subFolder)
+							if isdir(subFolder) and not islink(subFolder) and not ismount(subFolder):
+								# print("[FlashManager] getImagesList DEBUG: Next subFolder='%s'." % subFolder)
+								getImages(subFolder, [join(subFolder, x) for x in listdir(subFolder) if splitext(x)[1] == ".zip" and (boxname in x or machinebuild in x or model in x)])
+								for dir in [dir for dir in [join(subFolder, dir) for dir in listdir(subFolder)] if isdir(dir) and splitext(dir)[1] == ".unzipped"]:
+									try:
+										rmtree(dir)
+									except OSError as err:
+										print("[FlashManager] getImagesList Error %d: Unable to remove directory '%s'!  (%s)" % (err.errno, dir, err.strerror))
 
 		imageList = []
-		for catagory in sorted(self.imagesList.keys(), reverse=True):
+		# TNAP: Custom sort order - TNAP online images first, then Downloaded, then Backup
+		# Note: reverse=True is used, so higher priority = higher number
+		def sortCategories(category):
+			downloadedImages = _("Downloaded images")
+			backupImages = _("Backup images")
+			if category == backupImages:
+				return (0, category)  # Backup images last (lowest priority with reverse=True)
+			elif category == downloadedImages:
+				return (1, category)  # Downloaded images second to last
+			else:
+				return (2, category)  # TNAP online images first (highest priority with reverse=True)
+
+		for catagory in sorted(self.imagesList.keys(), key=sortCategories, reverse=True):
 			if catagory in self.expanded:
 				imageList.append(ChoiceEntryComponent("expanded", ((str(catagory)), "Expanded")))
 				for image in sorted(self.imagesList[catagory].keys(), key=lambda x: x.split(sep)[-1], reverse=True):
@@ -235,7 +266,12 @@ class FlashManager(Screen):
 		self.selectionChanged()
 
 	def keyDistribution(self):
-		self.feedUrls = [["OpenATV", "https://images.mynonpublic.com/openatv/json/%s" % BoxInfo.getItem("BoxName")]]
+		boxname = BoxInfo.getItem("BoxName")
+		# Start with TNAP first, then OpenATV
+		self.feedUrls = [
+			["TNAP", "http://162.216.113.217/json-5/%s.json" % boxname],
+			["OpenATV", "https://images.mynonpublic.com/openatv/json/%s" % boxname]
+		]
 		distributionList = []
 		default = 0
 		machine = BoxInfo.getItem("machinebuild")
@@ -357,7 +393,6 @@ class FlashImage(Screen):
 		self.close(True)
 
 	def keyOK(self):
-		fbClass.getInstance().unlock()
 		if self["header"].text == _("Flashing image successful"):
 			if MultiBoot.canMultiBoot():
 				self.session.openWithCallback(self.keyCancel, MultiBootManager)
@@ -470,35 +505,13 @@ class FlashImage(Screen):
 	def flashPostAction(self, retVal=True):
 		if retVal:
 			self.recordCheck = False
-			text = _("Please select what to do after flash of the following image:")
-			text = "%s\n%s" % (text, self.imageName)
-			if BoxInfo.getItem("distro") in self.imageName:
-				if exists(join(self.backupBasePath, "images/config/myrestore.sh")):
-					text = "%s\n%s" % (text, _("(The file '/media/hdd/images/config/myrestore.sh' exists and will be run after the image is flashed.)"))
-				choices = [
-					(_("Upgrade (Flash & restore all)"), "restoresettingsandallplugins"),
-					(_("Clean (Just flash and start clean)"), "wizard"),
-					(_("Flash and restore settings and no plugins"), "restoresettingsnoplugin"),
-					(_("Flash and restore settings and selected plugins (Ask user)"), "restoresettings"),
-					(_("Do not flash image"), "abort")
-				]
-				default = self.selectPrevPostFlashAction()
-				if "backup" in self.imageName:
-					choices = [
-						(_("Only Flash Backup Image"), "nothing"),
-						# (_("Flash & restore all"), "restoresettingsandallplugins"),
-						# (_("Flash and restore settings and no plugins"), "restoresettingsnoplugin"),
-						# (_("Flash and restore settings and selected plugins (Ask user)"), "restoresettings"),
-						(_("Do not flash image"), "abort")
-					]
-					default = 0
-			else:
-				choices = [
-					(_("Clean (Just flash and start clean)"), "wizard"),
-					(_("Do not flash image"), "abort")
-				]
-				default = 0
-			self.session.openWithCallback(self.postFlashActionCallback, MessageBox, text, list=choices, default=default, title=self.getTitle())
+			text = _("Ready to flash the following image:")
+			text = "%s\n%s\n\n%s" % (text, self.imageName, _("Restore options will be shown after flash completes."))
+			choices = [
+				(_("Upgrade or Start image flash"), "flash"),
+				(_("Do not flash image"), "abort")
+			]
+			self.session.openWithCallback(self.postFlashActionCallback, MessageBox, text, list=choices, default=0, title=self.getTitle())
 		else:
 			self.keyCancel()
 
@@ -514,15 +527,12 @@ class FlashImage(Screen):
 
 	def postFlashActionCallback(self, choice):
 		if choice:
-			knownFlagFiles = ("settings", "plugins", "noplugins", "slow", "fast", "turbo")
-			for directory in listdir("/media"):  # Remove known flag files from devices other than self.backupBasePath.
-				if directory not in ("audiocd", "autofs", basename(self.backupBasePath.rstrip("/"))):
-					for flagFile in knownFlagFiles:
-						flagPath = join("/media", directory, "images/config", flagFile)
-						if isfile(flagPath) and getsize(flagPath) == 0:
-							unlink(flagPath)
-			rootFolder = join(self.backupBasePath, "images/config")
-			if choice != "abort" and self.recordCheck:
+			if choice == "abort":
+				self.keyCancel()
+				return
+
+			# Check for recordings before flashing
+			if self.recordCheck:
 				self.recordCheck = False
 				recording = self.session.nav.RecordTimer.isRecording()
 				nextRecordingTime = self.session.nav.RecordTimer.getNextRecordingTime()
@@ -530,49 +540,14 @@ class FlashImage(Screen):
 					self.choice = choice
 					self.session.openWithCallback(self.recordWarning, MessageBox, "%s\n\n%s" % (_("Recording(s) are in progress or coming up in few seconds!"), _("Flash your %s %s and reboot now?") % getBoxDisplayName()), default=False, title=self.getTitle())
 					return
-			restoreSettings = ("restoresettings" in choice)
-			restoreSettingsnoPlugin = (choice == "restoresettingsnoplugin")
-			restoreAllPlugins = (choice == "restoresettingsandallplugins")
-			if restoreSettings:
-				self.saveEPG()
-			if choice != "abort":
-				filesToCreate = []
-				try:
-					if not exists(rootFolder):
-						makedirs(rootFolder)
-				except OSError as err:
-					print("[FlashManager] postFlashActionCallback Error %d: Failed to create '%s' folder!  (%s)" % (err.errno, rootFolder, err.strerror))
-				if restoreSettings:
-					filesToCreate.append("settings")
-				if restoreAllPlugins:
-					filesToCreate.append("plugins")
-				if restoreSettingsnoPlugin:
-					filesToCreate.append("noplugins")
-				for fileName in ["settings", "plugins", "noplugins"]:
-					path = join(rootFolder, fileName)
-					if fileName in filesToCreate:
-						try:
-							open(path, "w").close()
-						except OSError as err:
-							print("[FlashManager] postFlashActionCallback Error %d: failed to create %s! (%s)" % (err.errno, path, err.strerror))
-					else:
-						if exists(path):
-							unlink(path)
-				if restoreSettings:
-					if config.plugins.softwaremanager.restoremode.value is not None:
-						try:
-							for fileName in ["slow", "fast", "turbo"]:
-								path = join(rootFolder, fileName)
-								if fileName == config.plugins.softwaremanager.restoremode.value:
-									if not exists(path):
-										open(path, "w").close()
-								elif exists(path):
-									unlink(path)
-						except OSError as err:
-							print("[FlashManager] postFlashActionCallback Error %d: Failed to create restore mode flag file '%s'!  (%s)" % (err.errno, path, err.strerror))
-				self.startDownload()
-			else:
-				self.keyCancel()
+
+			# TNAP: No custom restore flags - rely on config.misc.firstrun detection
+			# AutoRestoreWizard will automatically appear on first boot of fresh image
+			# AutoBackup plugin handles the backup/restore process
+			print("[FlashManager] Starting flash - AutoRestore will trigger on first boot")
+
+			# Start the flash
+			self.startDownload()
 		else:
 			self.keyCancel()
 
@@ -653,50 +628,19 @@ class FlashImage(Screen):
 		self["summary_header"].setText(self["header"].getText())
 		imageFiles = findImageFiles(self.unzippedImage)
 		if imageFiles:
-			rootSubDir = None
-			bootSlots = MultiBoot.getBootSlots()
-			if bootSlots:
-				mtdKernel = bootSlots[self.slotCode]["kernel"] if BoxInfo.getItem("HasKexecMultiboot") else bootSlots[self.slotCode]["kernel"].split(sep)[2]
-				mtdRootFS = bootSlots[self.slotCode]["device"] if bootSlots[self.slotCode].get("ubi") else bootSlots[self.slotCode]["device"].split(sep)[2]
-				if MultiBoot.hasRootSubdir(self.slotCode):
-					rootSubDir = bootSlots[self.slotCode]["rootsubdir"]
-					currentSlot = MultiBoot.getCurrentSlotCode()
+			# Build ofgwrite command - simplified like working version
+			if MultiBoot.canMultiBoot():
+				command = "%s -k -r -m%s '%s'" % (OFGWRITE, self.slotCode, imageFiles)
 			else:
-				mtdKernel = BoxInfo.getItem("mtdkernel")
-				mtdRootFS = BoxInfo.getItem("mtdrootfs")
-			if BoxInfo.getItem("HasKexecMultiboot"):
-				if self.slotCode == "R":
-					cmdArgs = ["-r", "-k", "-f"]
-					Console().ePopen([UMOUNT, UMOUNT, "/proc/cmdline"])
-				else:
-					cmdArgs = ["-r%s" % mtdRootFS, "-k", "-m%s" % self.slotCode]
-					if "uuid" in bootSlots[self.slotCode] and "mmcblk" not in mtdRootFS:
-						cmdArgs.insert(2, "-s%s/linuxrootfs" % BoxInfo.getItem("model")[2:])
-			elif BoxInfo.getItem("model") in ("dreamone", "dreamtwo") and not BoxInfo.getItem("HasGPT"):  # Temp solution ofgwrite auto detection not ready.
-				cmdArgs = ["-r%s" % mtdRootFS, "-k%s" % mtdKernel]
-			elif BoxInfo.getItem("model") in ("dreamone", "dreamtwo") and BoxInfo.getItem("HasGPT"):  # Temp solution ofgwrite auto detection not ready.
-				cmdArgs = ["-r%s" % mtdRootFS, "-a"]
-			elif BoxInfo.getItem("model") in ("dm820", "dm7080"):  # Temp solution ofgwrite auto detection not ready.
-				cmdArgs = ["-rmmcblk0p1"] if rootSubDir is None else ["-r%s" % mtdRootFS, "-c%s" % currentSlot, "-m%s" % self.slotCode]
-			elif MultiBoot.canMultiBoot() and self.slotCode not in ("R", "F"):  # Receiver with SD card MultiBoot if (rootSubDir) is None.
-				if BoxInfo.getItem("chkrootmb"):
-					cmdArgs = ["-r%s" % mtdRootFS, "-c%s" % currentSlot, "-m%s" % self.slotCode]
-				else:
-					cmdArgs = ["-r%s" % mtdRootFS, "-k%s" % mtdKernel, "-m0"] if (rootSubDir) is None else ["-r", "-k", "-m%s" % self.slotCode]
-			elif BoxInfo.getItem("model") in ("dm800se", "dm500hd"):  # Temp solution ofgwrite auto detection not ready.
-				cmdArgs = ["-r%s" % mtdRootFS, "-f"]
-			elif mtdKernel == mtdRootFS:  # Receiver with kernel and rootfs on one partition.
-				cmdArgs = ["-r"]
-			else:  # Normal non MultiBoot receiver.
-				cmdArgs = ["-r", "-k"]
+				command = "%s -k -r '%s'" % (OFGWRITE, imageFiles)
+
+			print("[FlashManager] Executing: %s" % command)
 			self.containerOFGWrite = Console()
-			self.containerOFGWrite.ePopen([OFGWRITE, OFGWRITE] + cmdArgs + ['%s' % imageFiles], callback=self.flashImageDone)
-			fbClass.getInstance().lock()
+			self.containerOFGWrite.ePopen(command, self.flashImageDone)
 		else:
 			self.session.openWithCallback(self.keyCancel, MessageBox, _("Error: Image '%s' to install is invalid!") % self.imageName, type=MessageBox.TYPE_ERROR, title=self.getTitle())
 
 	def flashImageDone(self, data, retVal, extraArgs):
-		fbClass.getInstance().unlock()
 		self.containerOFGWrite = None
 		if retVal == 0:
 			self["header"].setText(_("Flashing image successful"))

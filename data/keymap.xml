@@ -382,6 +382,10 @@
 		<key id="KEY_CHANNELDOWN" mapto="keyChannelDown" flags="m" />
 		<key id="BTN_0" mapto="zapUp" flags="mr" />
 		<key id="BTN_1" mapto="zapDown" flags="mr" />
+		<key id="KEY_BACK" mapto="historyBack" flags="mr" />
+		<key id="KEY_FORWARD" mapto="historyNext" flags="mr" />
+		<key id="KEY_SAT" mapto="openSatellites" flags="m" />
+		<key id="KEY_F4" mapto="historyNext" flags="mr" />
 	</map>
 
 	<map context="InfobarHDMIActions">
@@ -462,7 +466,7 @@
 	<map context="InfobarActions">
 		<key id="KEY_VIDEO" mapto="showMovies" flags="b" />
 		<key id="KEY_RADIO" mapto="showRadio" flags="b" />
-		<key id="KEY_TV" mapto="showTv" flags="b" />
+		<key id="KEY_TV" mapto="toggleTvRadio" flags="b" />
 		<key id="KEY_TV2" mapto="toggleTvRadio" flags="b" />
 		<key id="KEY_FILE" mapto="showMovies" flags="m" />
 		<key id="KEY_TEXT" mapto="showText" flags="m" />
@@ -685,6 +689,8 @@
 		<key id="KEY_RECORD" mapto="keyRecord" flags="m" />
 		<key id="KEY_FAVORITES" mapto="showFavourites" flags="m" />
 		<key id="KEY_TEXT" mapto="toggleTwoLines" flags="m" />
+		<key id="KEY_TV" mapto="toggleTvRadio" flags="b" />
+		<key id="KEY_TV2" mapto="toggleTvRadio" flags="b" />
 	</map>
 
 	<map context="ChannelSelectEPGActions">
@@ -702,7 +708,7 @@
 	</map>
 
 	<map context="TvRadioActions">
-		<key id="KEY_TV" mapto="keyTV" flags="m" />
+		<key id="KEY_TV" mapto="toggleTvRadio" flags="b" />
 		<key id="KEY_TV2" mapto="toggleTvRadio" flags="b" />
 		<key id="KEY_RADIO" mapto="keyRadio" flags="b" />
 		<key id="KEY_AUDIO" mapto="audio" flags="b" />

@@ -73,6 +73,8 @@ if config.misc.load_unlinked_userbouquets.value.lower() in ("true", "false"):
 
 
 def localeNotifier(configElement):
+	if configElement.value not in international.getLocaleList():
+		international.initInternational()
 	international.activateLocale(configElement.value)
 
 

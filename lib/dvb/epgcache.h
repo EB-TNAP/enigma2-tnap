@@ -29,19 +29,20 @@ class eEPGTransponderDataReader;
 
 struct uniqueEPGKey
 {
-	int sid, onid, tsid;
+	int sid, onid, tsid, dvbnamespace;
 	uniqueEPGKey( const eServiceReference &ref )
 		:sid( ref.type != eServiceReference::idInvalid ? ((eServiceReferenceDVB&)ref).getServiceID().get() : -1 )
 		,onid( ref.type != eServiceReference::idInvalid ? ((eServiceReferenceDVB&)ref).getOriginalNetworkID().get() : -1 )
 		,tsid( ref.type != eServiceReference::idInvalid ? ((eServiceReferenceDVB&)ref).getTransportStreamID().get() : -1 )
+		,dvbnamespace( ref.type != eServiceReference::idInvalid ? ((eServiceReferenceDVB&)ref).getDVBNamespace().get() : -1 )
 	{
 	}
 	uniqueEPGKey()
-		:sid(-1), onid(-1), tsid(-1)
+		:sid(-1), onid(-1), tsid(-1), dvbnamespace(-1)
 	{
 	}
-	uniqueEPGKey( int sid, int onid, int tsid )
-		:sid(sid), onid(onid), tsid(tsid)
+	uniqueEPGKey( int sid, int onid, int tsid, int dvbnamespace = -1 )
+		:sid(sid), onid(onid), tsid(tsid), dvbnamespace(dvbnamespace)
 	{
 	}
 	bool operator <(const uniqueEPGKey &a) const
@@ -54,7 +55,11 @@ struct uniqueEPGKey
 			return true;
 		if (onid != a.onid)
 			return false;
-		return (tsid < a.tsid);
+		if (tsid < a.tsid)
+			return true;
+		if (tsid != a.tsid)
+			return false;
+		return (dvbnamespace < a.dvbnamespace);
 	}
 	operator bool() const
 	{
@@ -62,13 +67,13 @@ struct uniqueEPGKey
 	}
 	bool operator==(const uniqueEPGKey &a) const
 	{
-		return (tsid == a.tsid) && (onid == a.onid) && (sid == a.sid);
+		return (tsid == a.tsid) && (onid == a.onid) && (sid == a.sid) && (dvbnamespace == a.dvbnamespace);
 	}
 	struct equal
 	{
 		bool operator()(const uniqueEPGKey &a, const uniqueEPGKey &b) const
 		{
-			return (a.tsid == b.tsid) && (a.onid == b.onid) && (a.sid == b.sid);
+			return (a.tsid == b.tsid) && (a.onid == b.onid) && (a.sid == b.sid) && (a.dvbnamespace == b.dvbnamespace);
 		}
 	};
 };
@@ -82,7 +87,7 @@ struct hash_uniqueEPGKey
 {
 	inline size_t operator()( const uniqueEPGKey &x) const
 	{
-		return (x.onid << 16) | x.tsid;
+		return (x.onid << 16) | x.tsid | (x.dvbnamespace & 0xFFFF);
 	}
 };
 
@@ -159,12 +164,12 @@ private:
 #ifdef ENABLE_PRIVATE_EPG
 	void privateSectionRead(const uniqueEPGKey &, const uint8_t *);
 #endif
-	void sectionRead(const uint8_t *data, int source, eEPGChannelData *channel);
+	void sectionRead(const uint8_t *data, int source, eEPGChannelData *channel, int forced_namespace = -1);
 
 	void gotMessage(const Message &message);
 	void cleanLoop();
-	void submitEventData(const std::vector<int>& sids, const std::vector<eDVBChannelID>& chids, long start, long duration, const char* title, const char* short_summary, const char* long_description, char event_type, int event_id, int source);
-	void submitEventData(const std::vector<int>& sids, const std::vector<eDVBChannelID>& chids, long start, long duration, const char* title, const char* short_summary, const char* long_description, std::vector<uint8_t> event_types, std::vector<eit_parental_rating> parental_ratings, int event_id, int source);
+	void submitEventData(const std::vector<int>& sids, const std::vector<eDVBChannelID>& chids, const std::vector<int>& namespaces, long start, long duration, const char* title, const char* short_summary, const char* long_description, char event_type, int event_id, int source);
+	void submitEventData(const std::vector<int>& sids, const std::vector<eDVBChannelID>& chids, const std::vector<int>& namespaces, long start, long duration, const char* title, const char* short_summary, const char* long_description, std::vector<uint8_t> event_types, std::vector<eit_parental_rating> parental_ratings, int event_id, int source);
 	void clearCompleteEPGCache();
 
 	eServiceReferenceDVB *m_timeQueryRef;

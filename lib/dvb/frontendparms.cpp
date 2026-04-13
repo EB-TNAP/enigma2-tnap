@@ -9,15 +9,83 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 
-#ifdef HAVE_OLDE2_API
-#ifndef NO_STREAM_ID_FILTER
-#define NO_STREAM_ID_FILTER    (~0U)
+// Define DTV_STAT_MODCOD if not defined in the DVB API
+#ifndef DTV_STAT_MODCOD
+#define DTV_STAT_MODCOD 92
 #endif
 
-#ifndef DTV_STREAM_ID
-#define DTV_STREAM_ID DTV_ISDBS_TS_ID
-#endif
-#endif
+// Define DVB_S2_MODCOD namespace for DVB-S2 MODCOD values
+// This was removed from newer Linux DVB API headers but is still needed for Enigma2
+namespace DVB_S2_MODCOD
+{
+	enum
+	{
+		DUMMY_PLF = 0,
+		QPSK_1_4 = 1,
+		QPSK_1_3 = 2,
+		QPSK_2_5 = 3,
+		QPSK_1_2 = 4,
+		QPSK_3_5 = 5,
+		QPSK_2_3 = 6,
+		QPSK_3_4 = 7,
+		QPSK_4_5 = 8,
+		QPSK_5_6 = 9,
+		QPSK_8_9 = 10,
+		QPSK_9_10 = 11,
+		PSK8_3_5 = 12,
+		PSK8_2_3 = 13,
+		PSK8_3_4 = 14,
+		PSK8_5_6 = 15,
+		PSK8_8_9 = 16,
+		PSK8_9_10 = 17,
+		APSK16_2_3 = 18,
+		APSK16_3_4 = 19,
+		APSK16_4_5 = 20,
+		APSK16_5_6 = 21,
+		APSK16_8_9 = 22,
+		APSK16_9_10 = 23,
+		APSK32_3_4 = 24,
+		APSK32_4_5 = 25,
+		APSK32_5_6 = 26,
+		APSK32_8_9 = 27,
+		APSK32_9_10 = 28
+	};
+
+	// Required SNR values in dB * 10 for each MODCOD (based on DVB-S2 spec)
+	// Index corresponds to MODCOD value above
+	static const int requiredSNR_x10[] = {
+		0,   // 0: DUMMY_PLF
+		-20, // 1: QPSK 1/4   (~-2.0 dB)
+		-14, // 2: QPSK 1/3   (~-1.4 dB)
+		-6,  // 3: QPSK 2/5   (~-0.6 dB)
+		10,  // 4: QPSK 1/2   (~1.0 dB)
+		23,  // 5: QPSK 3/5   (~2.3 dB)
+		33,  // 6: QPSK 2/3   (~3.3 dB)
+		41,  // 7: QPSK 3/4   (~4.1 dB)
+		49,  // 8: QPSK 4/5   (~4.9 dB)
+		54,  // 9: QPSK 5/6   (~5.4 dB)
+		62,  // 10: QPSK 8/9  (~6.2 dB)
+		64,  // 11: QPSK 9/10 (~6.4 dB)
+		58,  // 12: 8PSK 3/5  (~5.8 dB)
+		68,  // 13: 8PSK 2/3  (~6.8 dB)
+		79,  // 14: 8PSK 3/4  (~7.9 dB)
+		90,  // 15: 8PSK 5/6  (~9.0 dB)
+		100, // 16: 8PSK 8/9  (~10.0 dB)
+		102, // 17: 8PSK 9/10 (~10.2 dB)
+		93,  // 18: 16APSK 2/3  (~9.3 dB)
+		104, // 19: 16APSK 3/4  (~10.4 dB)
+		109, // 20: 16APSK 4/5  (~10.9 dB)
+		115, // 21: 16APSK 5/6  (~11.5 dB)
+		124, // 22: 16APSK 8/9  (~12.4 dB)
+		126, // 23: 16APSK 9/10 (~12.6 dB)
+		127, // 24: 32APSK 3/4  (~12.7 dB)
+		132, // 25: 32APSK 4/5  (~13.2 dB)
+		138, // 26: 32APSK 5/6  (~13.8 dB)
+		147, // 27: 32APSK 8/9  (~14.7 dB)
+		149  // 28: 32APSK 9/10 (~14.9 dB)
+	};
+}
+
 
 DEFINE_REF(eDVBFrontendStatus);
 
@@ -74,14 +142,14 @@ int eDVBFrontendStatus::getBER() const
 
 int eDVBFrontendStatus::getSNR() const
 {
-	if (!frontend || getState() == iDVBFrontend_ENUMS::stateTuning) return 0;
+	if (!frontend) return 0;
 	return frontend->readFrontendData(iFrontendInformation_ENUMS::signalQuality);
 }
 
 int eDVBFrontendStatus::getSNRdB() const
 {
 	int value;
-	if (!frontend || getState() == iDVBFrontend_ENUMS::stateTuning) return 0;
+	if (!frontend) return 0;
 	value = frontend->readFrontendData(iFrontendInformation_ENUMS::signalQualitydB);
 	if (value == 0x12345678)
 	{
@@ -234,9 +302,27 @@ int eDVBTransponderData::getPlpId() const
 
 DEFINE_REF(eDVBSatelliteTransponderData);
 
-eDVBSatelliteTransponderData::eDVBSatelliteTransponderData(struct dtv_property *dtvproperties, unsigned int propertycount, eDVBFrontendParametersSatellite &transponderparms, int frequencyoffset, bool original)
-: eDVBTransponderData(dtvproperties, propertycount, original), transponderParameters(transponderparms), frequencyOffset(frequencyoffset)
+eDVBSatelliteTransponderData::eDVBSatelliteTransponderData(struct dtv_property *dtvproperties, unsigned int propertycount, eDVBFrontendParametersSatellite &transponderparms, int frequencyoffset, bool original, int modcod)
+: eDVBTransponderData(dtvproperties, propertycount, original), transponderParameters(transponderparms), frequencyOffset(frequencyoffset), m_modcod(modcod)
 {
+    // If we already have MODCOD stored in transponder parameters, use it if not provided
+    if (m_modcod == 0 && transponderParameters.modcod > 0)
+    {
+        m_modcod = transponderParameters.modcod;
+    }
+    
+    // Try to extract MODCOD from properties if available
+    if (m_modcod == 0 && !original)
+    {
+        for (unsigned int i = 0; i < propertycount; i++)
+        {
+            if (dtvproperties[i].cmd == DTV_STAT_MODCOD)
+            {
+                m_modcod = dtvproperties[i].u.data;
+                break;
+            }
+        }
+    }
 }
 
 std::string eDVBSatelliteTransponderData::getTunerType() const
@@ -294,7 +380,7 @@ int eDVBSatelliteTransponderData::getFecInner() const
 	case FEC_8_9: return eDVBFrontendParametersSatellite::FEC_8_9;
 	case FEC_9_10: return eDVBFrontendParametersSatellite::FEC_9_10;
 	case FEC_NONE: return eDVBFrontendParametersSatellite::FEC_None;
-	default: eDebug("[eDVBSatelliteTransponderData] got unsupported FEC from frontend! report as FEC_AUTO!\n");
+	default: eDebug("[eDVBSatelliteTransponderData] got unsupported FEC from frontend! report as FEC_AUTO!\n %d", (getProperty(DTV_INNER_FEC)));
 	[[fallthrough]];
 	case FEC_AUTO: return eDVBFrontendParametersSatellite::FEC_Auto;
 	}
@@ -413,6 +499,139 @@ int eDVBSatelliteTransponderData::getT2MIPid() const
 	if (t2mi_pid == eDVBFrontendParametersSatellite::No_T2MI_PLP_Id) return transponderParameters.t2mi_pid;
 	if (!(t2mi_pid & 0x80000000)) return transponderParameters.t2mi_pid;
 	return (t2mi_pid >> 16) & 0x1FFF;
+}
+
+std::string eDVBSatelliteTransponderData::getMODCODDescription() const
+{
+    switch (m_modcod)
+    {
+        case DVB_S2_MODCOD::QPSK_1_4: return "QPSK 1/4";
+        case DVB_S2_MODCOD::QPSK_1_3: return "QPSK 1/3";
+        case DVB_S2_MODCOD::QPSK_2_5: return "QPSK 2/5";
+        case DVB_S2_MODCOD::QPSK_1_2: return "QPSK 1/2";
+        case DVB_S2_MODCOD::QPSK_3_5: return "QPSK 3/5";
+        case DVB_S2_MODCOD::QPSK_2_3: return "QPSK 2/3";
+        case DVB_S2_MODCOD::QPSK_3_4: return "QPSK 3/4";
+        case DVB_S2_MODCOD::QPSK_4_5: return "QPSK 4/5";
+        case DVB_S2_MODCOD::QPSK_5_6: return "QPSK 5/6";
+        case DVB_S2_MODCOD::QPSK_8_9: return "QPSK 8/9";
+        case DVB_S2_MODCOD::QPSK_9_10: return "QPSK 9/10";
+        case DVB_S2_MODCOD::PSK8_3_5: return "8PSK 3/5";
+        case DVB_S2_MODCOD::PSK8_2_3: return "8PSK 2/3";
+        case DVB_S2_MODCOD::PSK8_3_4: return "8PSK 3/4";
+        case DVB_S2_MODCOD::PSK8_5_6: return "8PSK 5/6";
+        case DVB_S2_MODCOD::PSK8_8_9: return "8PSK 8/9";
+        case DVB_S2_MODCOD::PSK8_9_10: return "8PSK 9/10";
+        case DVB_S2_MODCOD::APSK16_2_3: return "16APSK 2/3";
+        case DVB_S2_MODCOD::APSK16_3_4: return "16APSK 3/4";
+        case DVB_S2_MODCOD::APSK16_4_5: return "16APSK 4/5";
+        case DVB_S2_MODCOD::APSK16_5_6: return "16APSK 5/6";
+        case DVB_S2_MODCOD::APSK16_8_9: return "16APSK 8/9";
+        case DVB_S2_MODCOD::APSK16_9_10: return "16APSK 9/10";
+        case DVB_S2_MODCOD::APSK32_3_4: return "32APSK 3/4";
+        case DVB_S2_MODCOD::APSK32_4_5: return "32APSK 4/5";
+        case DVB_S2_MODCOD::APSK32_5_6: return "32APSK 5/6";
+        case DVB_S2_MODCOD::APSK32_8_9: return "32APSK 8/9";
+        case DVB_S2_MODCOD::APSK32_9_10: return "32APSK 9/10";
+        default:
+            // Fall back to modulation + FEC if we don't have a specific MODCOD value
+            std::string mod;
+            switch(getModulation())
+            {
+                case eDVBFrontendParametersSatellite::Modulation_QPSK: mod = "QPSK"; break;
+                case eDVBFrontendParametersSatellite::Modulation_8PSK: mod = "8PSK"; break;
+                case eDVBFrontendParametersSatellite::Modulation_16APSK: mod = "16APSK"; break;
+                case eDVBFrontendParametersSatellite::Modulation_32APSK: mod = "32APSK"; break;
+                default: mod = "Unknown"; break;
+            }
+            
+            std::string fec;
+            switch(getFecInner())
+            {
+                case eDVBFrontendParametersSatellite::FEC_1_2: fec = "1/2"; break;
+                case eDVBFrontendParametersSatellite::FEC_2_3: fec = "2/3"; break;
+                case eDVBFrontendParametersSatellite::FEC_3_4: fec = "3/4"; break;
+                case eDVBFrontendParametersSatellite::FEC_3_5: fec = "3/5"; break;
+                case eDVBFrontendParametersSatellite::FEC_4_5: fec = "4/5"; break;
+                case eDVBFrontendParametersSatellite::FEC_5_6: fec = "5/6"; break;
+                case eDVBFrontendParametersSatellite::FEC_6_7: fec = "6/7"; break;
+                case eDVBFrontendParametersSatellite::FEC_7_8: fec = "7/8"; break;
+                case eDVBFrontendParametersSatellite::FEC_8_9: fec = "8/9"; break;
+                case eDVBFrontendParametersSatellite::FEC_9_10: fec = "9/10"; break;
+                default: fec = "Auto"; break;
+            }
+            
+            if (mod != "Unknown" && fec != "Auto")
+                return mod + " " + fec;
+            return "Unknown";
+    }
+}
+
+int eDVBSatelliteTransponderData::getRequiredSNR() const
+{
+    if (m_modcod > 0 && m_modcod < (int)(sizeof(DVB_S2_MODCOD::requiredSNR_x10) / sizeof(int)))
+        return DVB_S2_MODCOD::requiredSNR_x10[m_modcod];
+    
+    // If we don't have a specific MODCOD, we can approximate based on modulation and FEC
+    if (getSystem() == eDVBFrontendParametersSatellite::System_DVB_S2)
+    {
+        int mod = getModulation();
+        int fec = getFecInner();
+        
+        // These are approximations based on typical values
+        if (mod == eDVBFrontendParametersSatellite::Modulation_QPSK)
+        {
+            switch (fec)
+            {
+                case eDVBFrontendParametersSatellite::FEC_1_2: return 41;  // ~4.1 dB
+                case eDVBFrontendParametersSatellite::FEC_2_3: return 52;  // ~5.2 dB
+                case eDVBFrontendParametersSatellite::FEC_3_4: return 60;  // ~6.0 dB
+                case eDVBFrontendParametersSatellite::FEC_3_5: return 48;  // ~4.8 dB
+                case eDVBFrontendParametersSatellite::FEC_4_5: return 64;  // ~6.4 dB
+                case eDVBFrontendParametersSatellite::FEC_5_6: return 67;  // ~6.7 dB
+                case eDVBFrontendParametersSatellite::FEC_8_9: return 74;  // ~7.4 dB
+                case eDVBFrontendParametersSatellite::FEC_9_10: return 75; // ~7.5 dB
+                default: return 60; // average value
+            }
+        }
+        else if (mod == eDVBFrontendParametersSatellite::Modulation_8PSK)
+        {
+            switch (fec)
+            {
+                case eDVBFrontendParametersSatellite::FEC_2_3: return 83;  // ~8.3 dB
+                case eDVBFrontendParametersSatellite::FEC_3_4: return 94;  // ~9.4 dB
+                case eDVBFrontendParametersSatellite::FEC_3_5: return 78;  // ~7.8 dB
+                case eDVBFrontendParametersSatellite::FEC_5_6: return 107; // ~10.7 dB
+                case eDVBFrontendParametersSatellite::FEC_8_9: return 118; // ~11.8 dB
+                case eDVBFrontendParametersSatellite::FEC_9_10: return 120; // ~12.0 dB
+                default: return 100; // average value
+            }
+        }
+        else if (mod == eDVBFrontendParametersSatellite::Modulation_16APSK)
+        {
+            return 130; // ~13 dB average
+        }
+        else if (mod == eDVBFrontendParametersSatellite::Modulation_32APSK)
+        {
+            return 170; // ~17 dB average
+        }
+    }
+    else // DVB-S
+    {
+        // DVB-S is always QPSK
+        int fec = getFecInner();
+        switch (fec)
+        {
+            case eDVBFrontendParametersSatellite::FEC_1_2: return 43;  // ~4.3 dB
+            case eDVBFrontendParametersSatellite::FEC_2_3: return 56;  // ~5.6 dB
+            case eDVBFrontendParametersSatellite::FEC_3_4: return 67;  // ~6.7 dB
+            case eDVBFrontendParametersSatellite::FEC_5_6: return 77;  // ~7.7 dB
+            case eDVBFrontendParametersSatellite::FEC_7_8: return 85;  // ~8.5 dB
+            default: return 60; // average value
+        }
+    }
+    
+    return 0; // Unknown
 }
 
 DEFINE_REF(eDVBCableTransponderData);

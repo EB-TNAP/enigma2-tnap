@@ -53,11 +53,32 @@ class TimeshiftSettings(Setup):
 			elif not fileAccess(path, "w"):
 				footnote = _("Directory '%s' not writable!") % path
 			elif not hasHardLinks(path):
-				footnote = _("Directory '%s' can't be linked to recordings!") % path
+				# Allow timeshift on FAT32/VFAT but warn about limitations
+				import subprocess
+				try:
+					mount_output = subprocess.check_output(['mount']).decode()
+					fstype = "unknown"
+					for line in mount_output.split('\n'):
+						if path in line or path.rstrip('/') in line:
+							parts = line.split()
+							if 'type' in parts:
+								fstype = parts[parts.index('type') + 1]
+								break
+					if fstype in ('vfat', 'fat', 'fat32', 'exfat'):
+						# FAT32/VFAT is acceptable for basic timeshift
+						footnote = _("INFO: %s filesystem - Timeshift will work, but saving timeshift as recordings will copy data (slower).") % fstype.upper()
+					else:
+						footnote = _("WARNING: Filesystem does not support hard links. Saving timeshift buffers may not work properly.")
+				except:
+					footnote = _("WARNING: Filesystem does not support hard links. Saving timeshift buffers may not work properly.")
 			else:
 				footnote = ""
 			self.setFootnote(footnote)
-			self.status = footnote
+			# Don't treat lack of hardlinks as a blocking error - just a warning
+			if "INFO:" in footnote or "WARNING:" in footnote:
+				self.status = ""  # Allow saving
+			else:
+				self.status = footnote
 
 	def keySelect(self):
 		if self.getCurrentItem() == config.timeshift.path:
@@ -74,7 +95,8 @@ class TimeshiftSettings(Setup):
 
 	def keySave(self):
 		if self.status:
-			self.session.openWithCallback(self.keySaveCallback, MessageBox, "%s\n\n%s" % (self.status, _("Time shift may not work correctly without an acceptable directory.")), type=MessageBox.TYPE_WARNING)
+			# Only show warning for actual errors (not info messages)
+			self.session.openWithCallback(self.keySaveCallback, MessageBox, "%s\n\n%s" % (self.status, _("Timeshift may not work correctly without an acceptable directory.")), type=MessageBox.TYPE_WARNING)
 		else:
 			Setup.keySave(self)
 

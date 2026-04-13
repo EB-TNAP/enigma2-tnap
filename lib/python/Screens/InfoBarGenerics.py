@@ -2842,8 +2842,40 @@ class InfoBarTimeshift:
 				self.setLCDsymbolTimeshift()
 			else:
 				print("timeshift failed")
+				# Show user-friendly error message when timeshift fails
+				if pauseService:
+					from Tools.Notifications import AddPopup
+					AddPopup(_("Timeshift failed!\nPossible reasons:\n- Insufficient disk space\n- Disk is full\n- Timeshift path not accessible"), MessageBox.TYPE_ERROR, timeout=8)
 
 	def startTimeshiftWithoutPause(self):
+		print("[Timeshift] startTimeshiftWithoutPause called - auto-start triggered")
+		# Check disk space before auto-starting timeshift to prevent crashes
+		import os
+		try:
+			# Use config.timeshift.path which is the actual timeshift path setting
+			ts_path = config.timeshift.path.value if hasattr(config, 'timeshift') else None
+			print("[Timeshift] ts_path =", ts_path)
+			if ts_path:
+				st = os.statvfs(ts_path)
+				free_space = st.f_bavail * st.f_frsize
+				free_mb = free_space / (1024 * 1024)
+				print("[Timeshift] Free space: %.1f MB" % free_mb)
+				# Require at least 500MB free space for auto-timeshift
+				if free_space < 500 * 1024 * 1024:
+					print("[Timeshift] Auto-start cancelled: insufficient disk space (%.1f MB free)" % free_mb)
+					from Tools.Notifications import AddPopup
+					AddPopup(_("Automatic timeshift disabled:\nInsufficient disk space (less than 500MB free)"), MessageBox.TYPE_WARNING, timeout=10)
+					# Disable auto-timeshift to prevent continuous attempts
+					config.usage.timeshift_start_delay.value = "0"
+					config.usage.timeshift_start_delay.save()
+					return
+			else:
+				print("[Timeshift] WARNING: ts_path is None, config.timeshift not available")
+		except Exception as e:
+			print("[Timeshift] Error checking disk space:", str(e))
+			import traceback
+			traceback.print_exc()
+		print("[Timeshift] Calling startTimeshift(False)")
 		self.startTimeshift(False)
 
 	def stopTimeshift(self):

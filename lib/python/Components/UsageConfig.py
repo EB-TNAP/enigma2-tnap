@@ -224,6 +224,7 @@ def InitUsageConfig():
 	# ########  Workaround for VTI Skins   ##############
 	config.usage.picon_dir = ConfigDirectory(default="/usr/share/enigma2/picon")
 	config.usage.movielist_show_picon = ConfigYesNo(default=False)
+	config.usage.use_pig = ConfigYesNo(default=False)
 	config.usage.use_extended_pig = ConfigYesNo(default=False)
 	config.usage.use_extended_pig_channelselection = ConfigYesNo(default=False)
 	config.usage.servicelist_preview_mode = ConfigYesNo(default=False)
@@ -383,7 +384,7 @@ def InitUsageConfig():
 		config.usage.timeshift_path.value = configElement.value
 		eSettings.setTimeshiftPath(configElement.value)
 
-	config.timeshift.path.addNotifier(setTimeshiftPath)
+	config.timeshift.path.addNotifier(setTimeshiftPath, initial_call=True)
 	config.timeshift.skipReturnToLive = ConfigYesNo(default=False)
 
 	config.usage.movielist_trashcan = ConfigYesNo(default=True)
@@ -974,7 +975,6 @@ def InitUsageConfig():
 		config.usage.time.enabled_display.value = False
 		config.usage.time.display.value = config.usage.time.display.default
 
-	config.usage.boolean_graphic = ConfigYesNo(default=False)
 	config.usage.show_slider_value = ConfigYesNo(default=True)
 	config.usage.cursorscroll = ConfigSelectionNumber(min=0, max=50, stepwidth=5, default=0, wraparound=True)
 
@@ -1632,14 +1632,20 @@ def InitUsageConfig():
 		config.av.hdr10_support.addNotifier(setHdr10Support)
 
 		def setDisable12Bit(configElement):
-			with open("/proc/stb/video/disable_12bit", "w") as fd:
-				fd.write("on" if configElement.value else "off")
+			try:
+				with open("/proc/stb/video/disable_12bit", "w") as fd:
+					fd.write("on" if configElement.value else "off")
+			except (IOError, OSError) as e:
+				print(f"[UsageConfig] disable_12bit not supported: {e}")
 		config.av.allow_12bit = ConfigYesNo(default=False)
 		config.av.allow_12bit.addNotifier(setDisable12Bit)
 
 		def setDisable10Bit(configElement):
-			with open("/proc/stb/video/disable_10bit", "w") as fd:
-				fd.write("on" if configElement.value else "off")
+			try:
+				with open("/proc/stb/video/disable_10bit", "w") as fd:
+					fd.write("on" if configElement.value else "off")
+			except (IOError, OSError) as e:
+				print(f"[UsageConfig] disable_10bit not supported: {e}")
 		config.av.allow_10bit = ConfigYesNo(default=False)
 		config.av.allow_10bit.addNotifier(setDisable10Bit)
 
@@ -1899,7 +1905,7 @@ def InitUsageConfig():
 
 	def setAiMode(configElement):
 		eSubtitleSettings.setAiMode(configElement.value)
-	config.subtitles.ai_mode = ConfigSelection(default=1, choices=[(x, f"{_("Mode")} {x}") for x in range(1, 4)])
+	config.subtitles.ai_mode = ConfigSelection(default=1, choices=[(x, f'{_("Mode")} {x}') for x in range(1, 4)])
 	config.subtitles.ai_mode.addNotifier(setAiMode)
 	# AI end
 

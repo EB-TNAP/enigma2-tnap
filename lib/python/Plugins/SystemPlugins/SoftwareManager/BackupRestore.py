@@ -17,7 +17,12 @@ from datetime import date
 
 config.plugins.configurationbackup = ConfigSubsection()
 config.plugins.configurationbackup.backuplocation = ConfigText(default='/media/hdd/', visible_width=50, fixed_size=False)
-config.plugins.configurationbackup.backupdirs = ConfigLocations(default=[eEnv.resolve('${sysconfdir}/enigma2/'), '/etc/network/interfaces', '/etc/wpa_supplicant.conf', '/etc/wpa_supplicant.ath0.conf', '/etc/wpa_supplicant.wlan0.conf', "/etc/resolv.conf", '/etc/enigma2/nameserversdns.conf', '/etc/default_gw', '/etc/hostname'])
+# TNAP: Added Wireguard, Samba, Tuxbox/oscam, SSH keys, custom scripts to backup
+# NOTE: /lib/modules/ and /lib/firmware/ are intentionally excluded — they are
+# kernel-version-specific and are reinstalled by the image. Backing them up and
+# restoring after an image upgrade overwrites the new kernel's modules with
+# incompatible ones, causing enigma2 or the system to crash at boot.
+config.plugins.configurationbackup.backupdirs = ConfigLocations(default=[eEnv.resolve('${sysconfdir}/enigma2/'), '/etc/network/interfaces', '/etc/wpa_supplicant.conf', '/etc/wpa_supplicant.ath0.conf', '/etc/wpa_supplicant.wlan0.conf', "/etc/resolv.conf", '/etc/enigma2/nameserversdns.conf', '/etc/default_gw', '/etc/hostname', '/etc/wireguard/', '/etc/tuxbox/config/', '/etc/samba/', '/etc/epgimport/', '/etc/exports', '/etc/hosts', '/usr/script/', '/usr/keys/', '/home/root/.ssh/'])
 
 
 def getBackupPath():
@@ -29,7 +34,43 @@ def getBackupPath():
 
 
 def getBackupFilename():
-	return "enigma2settingsbackup.tar.gz"
+	# TNAP: Create descriptive backup filename with image, model, and date
+	# Format: TNAP-7-sf8008-20260216-0829.tar.gz
+	from Tools.HardwareInfo import HardwareInfo
+	from time import strftime
+
+	# Get image name from /etc/issue
+	imageName = "TNAP-7"
+	try:
+		with open('/etc/issue', 'r') as f:
+			line = f.readline().strip()
+			# Parse "TNAP 7" to "TNAP-7"
+			if line:
+				imageName = line.replace('\\n', '').replace('\\l', '').strip().replace(' ', '-')
+	except:
+		pass
+
+	# Get box model
+	boxModel = "unknown"
+	try:
+		# Try /proc/stb/info/boxtype first (more reliable)
+		with open('/proc/stb/info/boxtype', 'r') as f:
+			boxModel = f.read().strip()
+	except:
+		try:
+			# Fallback to HardwareInfo
+			hwinfo = HardwareInfo()
+			boxModel = hwinfo.get_device_name()
+		except:
+			pass
+
+	# Get current date and time in format: YYYYMMDD-HHMM
+	dateStr = strftime("%Y%m%d-%H%M")
+
+	# Create filename: TNAP-7-sf8008-20260216-0829.tar.gz
+	filename = "%s-%s-%s.tar.gz" % (imageName, boxModel, dateStr)
+
+	return filename
 
 
 class BackupScreen(ConfigListScreen, Screen):
@@ -58,6 +99,14 @@ class BackupScreen(ConfigListScreen, Screen):
 			self.onShown.append(self.doBackup)
 
 	def doBackup(self):
+		# Clear the RestartUI flag before saving — if this transient flag is True
+		# (set during a previous restart) and gets captured in the backup, restoring
+		# it causes enigma2 to enter "UI restart mode" expecting prior session state
+		# that doesn't exist, resulting in an immediate crash on the next boot.
+		try:
+			config.misc.RestartUI.value = False
+		except Exception:
+			pass
 		configfile.save()
 		if config.plugins.softwaremanager.epgcache.value:
 			eEPGCache.getInstance().save()
@@ -65,12 +114,7 @@ class BackupScreen(ConfigListScreen, Screen):
 			if (path.exists(self.backuppath) == False):
 				makedirs(self.backuppath)
 			self.backupdirs = ' '.join(config.plugins.configurationbackup.backupdirs.value)
-			if path.exists(self.fullbackupfilename):
-				dt = str(date.fromtimestamp(stat(self.fullbackupfilename).st_ctime))
-				self.newfilename = self.backuppath + "/" + dt + '-' + self.backupfile
-				if path.exists(self.newfilename):
-					remove(self.newfilename)
-				rename(self.fullbackupfilename, self.newfilename)
+			# TNAP: Filename already includes date, no need to rename old backup
 			if self.finished_cb:
 				self.session.openWithCallback(self.finished_cb, Console, title=_("Backup is running..."), cmdlist=["tar -czvf " + self.fullbackupfilename + " " + self.backupdirs], finishedCallback=self.backupFinishedCB, closeOnSuccess=True)
 			else:
@@ -82,6 +126,91 @@ class BackupScreen(ConfigListScreen, Screen):
 				self.session.openWithCallback(self.backupErrorCB, MessageBox, _("Sorry, your backup destination is not writeable.\nPlease select a different one."), MessageBox.TYPE_INFO, timeout=10)
 
 	def backupFinishedCB(self, retval=None):
+		# TNAP: Create symlinks for compatibility with PLi and old TNAP restore scripts
+		try:
+			import os
+			import time
+
+			if not path.exists(self.fullbackupfilename):
+				print("[BackupRestore] Backup file not found:", self.fullbackupfilename)
+				self.close(False)
+				return
+
+			# Get MAC address for PLi-AutoBackup naming
+			macaddr = ""
+			try:
+				with open("/sys/class/net/eth0/address", "r") as f:
+					macaddr = f.read().strip().replace(":", "")
+			except:
+				pass
+
+			# Create enigma2settingsbackup.tar.gz symlink (for old restore scripts)
+			enigma2_link = path.join(self.backuppath, "enigma2settingsbackup.tar.gz")
+			if path.exists(enigma2_link):
+				if path.islink(enigma2_link) or path.isfile(enigma2_link):
+					os.remove(enigma2_link)
+			os.symlink(self.backupfile, enigma2_link)
+			print("[BackupRestore] Created symlink: enigma2settingsbackup.tar.gz ->", self.backupfile)
+
+			# Create PLi-AutoBackup symlink (for OpenPli restore compatibility)
+			if macaddr:
+				autobackup_link = path.join(self.backuppath, "PLi-AutoBackup%s.tar.gz" % macaddr)
+			else:
+				autobackup_link = path.join(self.backuppath, "PLi-AutoBackup.tar.gz")
+
+			if path.exists(autobackup_link):
+				if path.islink(autobackup_link) or path.isfile(autobackup_link):
+					os.remove(autobackup_link)
+			os.symlink(self.backupfile, autobackup_link)
+			print("[BackupRestore] Created symlink: PLi-AutoBackup ->", self.backupfile)
+
+			# Create timestamp file
+			timestamp_file = path.join(self.backuppath, ".timestamp")
+			with open(timestamp_file, "w") as f:
+				f.write(str(int(time.time())))
+
+			# TNAP: Create autoinstall file with package list
+			print("[BackupRestore] Creating autoinstall file...")
+			if macaddr:
+				autoinstall_file = path.join(self.backuppath, "autoinstall%s" % macaddr)
+			else:
+				autoinstall_file = path.join(self.backuppath, "autoinstall")
+
+			# Get list of installed packages that weren't in the base image
+			installed_file = "/etc/installed"
+			if path.exists(installed_file):
+				import subprocess
+				# Get currently installed packages
+				result = subprocess.run(["opkg", "list_installed"], capture_output=True, text=True)
+				current_packages = set(line.split()[0] for line in result.stdout.strip().split('\n') if line)
+
+				# Get base image packages
+				with open(installed_file, 'r') as f:
+					base_packages = set(line.strip() for line in f if line.strip())
+
+				# Find packages installed after base image (current - base)
+				extra_packages = current_packages - base_packages
+
+				# Write autoinstall file
+				with open(autoinstall_file, 'w') as f:
+					for package in sorted(extra_packages):
+						f.write(package + '\n')
+
+				# Create autoinstall symlink (without MAC address for compatibility)
+				autoinstall_link = path.join(self.backuppath, "autoinstall")
+				if macaddr and autoinstall_file != autoinstall_link:
+					if path.exists(autoinstall_link):
+						if path.islink(autoinstall_link) or path.isfile(autoinstall_link):
+							os.remove(autoinstall_link)
+					os.symlink(path.basename(autoinstall_file), autoinstall_link)
+
+				print("[BackupRestore] Created autoinstall file with %d packages" % len(extra_packages))
+			else:
+				print("[BackupRestore] /etc/installed not found, skipping autoinstall creation")
+		except Exception as e:
+			print("[BackupRestore] Error creating symlinks/autoinstall:", str(e))
+			pass  # Don't fail backup if symlink/autoinstall creation fails
+
 		self.close(True)
 
 	def backupErrorCB(self, retval=None):
@@ -232,8 +361,11 @@ class RestoreMenu(Screen):
 			makedirs(self.path)
 		for file in listdir(self.path):
 			if (file.endswith(".tar.gz")):
-				self.flist.append((file))
-				self.entry = True
+				fullpath = path.join(self.path, file)
+				# Skip symlinks to avoid showing duplicates
+				if not path.islink(fullpath):
+					self.flist.append((file))
+					self.entry = True
 		self.flist.sort(reverse=True)
 		self["filelist"].l.setList(self.flist)
 
@@ -258,7 +390,18 @@ class RestoreMenu(Screen):
 	def startRestore(self, ret=False):
 		if ret:
 			self.exe = True
-			self.session.open(Console, title=_("Restoring..."), cmdlist=["tar -xzvf " + self.path + "/" + self.sel + " -C /", "killall -9 enigma2"])
+			# After extracting the backup, reset RestartUI to False in the restored settings.
+			# Backups made before the doBackup() fix may contain RestartUI=True, which causes
+			# enigma2 to enter "UI restart mode" expecting prior session shared state that no
+			# longer exists (enigma2 was SIGKILL'd), resulting in an immediate crash on restart.
+			# The sed is silent (2>/dev/null) and a no-op if the key is absent (default=False).
+			# sync flushes the extracted files to disk before killing enigma2.
+			self.session.open(Console, title=_("Restoring..."), cmdlist=[
+				"tar -xzvf " + self.path + "/" + self.sel + " -C /",
+				"sed -i 's/config\\.misc\\.RestartUI=.*/config.misc.RestartUI=False/' /etc/enigma2/settings 2>/dev/null || true",
+				"sync",
+				"killall -9 enigma2",
+			])
 
 	def deleteFile(self):
 		if not self.exe and self.entry:

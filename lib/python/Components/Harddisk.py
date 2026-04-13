@@ -200,9 +200,12 @@ class Harddisk:
 		except Exception:
 			dev = self.findMount()
 			if dev:
-				stat = statvfs(dev)
-				cap = int(stat.f_blocks * stat.f_bsize)
-				return cap // 1000 // 1000
+				try:
+					stat = statvfs(dev)
+					cap = int(stat.f_blocks * stat.f_bsize)
+					return cap // 1000 // 1000
+				except OSError:
+					return cap
 			else:
 				return cap
 		return cap // 1000 * 512 // 1000
@@ -269,6 +272,10 @@ class Harddisk:
 	def findMount(self):
 		if self.mount_path is None:
 			return self.mountDevice()
+		if not ismount(self.mount_path):
+			self.mount_path = None
+			self.mount_device = None
+			return None
 		return self.mount_path
 
 	def unmount(self):

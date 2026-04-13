@@ -519,7 +519,7 @@ class ConfigBoolean(ConfigElement):
 	def getMulti(self, selected):
 		from skin import switchPixmap
 		from Components.config import config
-		if self.graphic and config.usage.boolean_graphic.value and "menu_on" in switchPixmap and "menu_off" in switchPixmap:
+		if self.graphic and config.usage.boolean_graphic.value not in (False, "false") and "menu_on" in switchPixmap and "menu_off" in switchPixmap:
 			return ("pixmap", switchPixmap["menu_on" if self.value else "menu_off"])
 		return ("text", self.descriptions[self.value])
 

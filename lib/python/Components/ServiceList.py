@@ -1139,7 +1139,7 @@ class ServiceList(ServiceListBase, ServiceListTemplateParser):
 			if attrib.startswith("colorEventProgressbar"):
 				continue
 
-			if attrib.startswith("progressBar"):
+			if attrib.startswith("progressBar") or attrib.startswith("progressPercent"):
 				continue
 
 			if attrib.startswith("foregroundColorEvent"):

@@ -11,7 +11,7 @@ class DownloadWithProgress:
 	def __init__(self, url, outputFile):
 		self.url = url
 		self.outputFile = outputFile
-		self.userAgent = "Enigma2 HbbTV/1.1.1 (+PVR+RTSP+DL;OpenPLi;;;)"
+		self.userAgent = "Enigma2 HbbTV/1.1.1 (+PVR+RTSP+DL;TNAP;;;)"
 		# self.agent = "Mozilla/5.0 (Windows; U; Windows NT 5.1; en; rv:1.9.1.5) Gecko/20091102 Firefox/3.5.5"
 		self.totalSize = 0
 		self.progress = 0

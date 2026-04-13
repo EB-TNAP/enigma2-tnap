@@ -9,12 +9,6 @@
 #include <lib/dvb/idvb.h>
 #include <lib/dvb/frontendparms.h>
 
-#ifdef HAVE_OLDE2_API
-#if DVB_API_VERSION < 5 || DVB_API_VERSION == 5 && DVB_API_VERSION_MINOR < 6
-#define SYS_DVBC_ANNEX_A SYS_DVBC_ANNEX_AC
-#endif
-#endif
-
 class eDVBFrontendParameters: public iDVBFrontendParameters
 {
 	DECLARE_REF(eDVBFrontendParameters);
@@ -104,8 +98,8 @@ private:
 	bool m_need_rotor_workaround;
 	bool m_blindscan;
 	bool m_multitype;
+	int m_modcod; // MODCOD value for DVB-S2
 	std::map<fe_delivery_system_t, bool> m_delsys, m_delsys_whitelist;
-	std::map<fe_delivery_system_t, dvb_frontend_info> m_fe_info;
 	std::string m_filename;
 	char m_description[128];
 	dvb_frontend_info fe_info;
@@ -128,8 +122,6 @@ private:
 
 	int m_timeoutCount; // needed for timeout
 	int m_retryCount; // diseqc retry for rotor
-	int m_configRetuneNoPatEntry;
-	int m_debuglevel;
 
 	void feEvent(int);
 	void timeout();
@@ -163,9 +155,6 @@ public:
 	RESULT setSecSequence(eSecCommandList &list);
 	RESULT getData(int num, long &data);
 	RESULT setData(int num, long val);
-	void checkRetune();
-	void retune();
-	void setConfigRetuneNoPatEntry(int value);
 
 	int readFrontendData(int type); // iFrontendInformation_ENUMS
 	void getFrontendStatus(ePtr<iDVBFrontendStatus> &dest);
@@ -189,7 +178,6 @@ public:
 	int closeFrontend(bool force=false, bool no_delayed=false);
 	const char *getDescription() const { return m_description; }
 	const dvb_frontend_info getFrontendInfo() const { return fe_info; }
-	const dvb_frontend_info getFrontendInfo(fe_delivery_system_t delsys)  { return m_fe_info[delsys]; }
 	bool is_simulate() const { return m_simulate; }
 	bool is_FBCTuner() { return m_fbc; }
 	void set_FBCTuner(bool yesno) { m_fbc = yesno; }

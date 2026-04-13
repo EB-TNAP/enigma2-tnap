@@ -3396,6 +3396,16 @@ class InfoBarPiP:
 
 	def extTogglePipZapName(self):
 		use = config.usage.pip_zero_button.value
+		if use == "swap":
+			return _("Swap services")
+		elif use == "swapstop":
+			return _("Swap services and stop PiP")
+		elif use == "stop":
+			return _("Disable Picture in Picture")
+		return _("Zap focus to Picture in Picture")
+
+	def pipDoHandle0Action(self):
+		use = config.usage.pip_zero_button.value
 		if "swap" == use:
 			self.swapPiP()
 		elif "swapstop" == use:

@@ -37,7 +37,7 @@ class PiPSetup(Screen):
 
 		self.resize = 100
 
-		self.helptext = _("Please use direction keys to move the PiP window.\nPress Bouquet +/- to resize the window.\nPress OK to go back to the TV mode or EXIT to cancel the moving.")
+		self.helptext = _("Please use direction keys to move the PiP window.\nPress P+/P- (Channel Up/Down) to resize the window.\nPress OK to go back to the TV mode or EXIT to cancel the moving.")
 		if BoxInfo.getItem("VideoDestinationConfigurable") or BoxInfo.getItem("HasExternalPIP"):
 			self.helptext += "\n" + _("Press '0' to toggle PiP mode")
 		self.modetext = _("Current mode: %s \n")

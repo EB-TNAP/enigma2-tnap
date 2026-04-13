@@ -718,6 +718,8 @@ class DistributionInformation(InformationBase):
 		info.append(formatLine("P1", _("File compression"), f"{_("Enabled")} / {_("%s version") % "UPX"} {upxVersion}" if upxVersion else _("Disabled")))
 		info.append(formatLine("P1", _("Feed URL"), BoxInfo.getItem("feedsurl")))
 		info.append(formatLine("P1", _("Compiled by"), BoxInfo.getItem("developername")))
+		info.append(formatLine("P1", _("Support"), "www.legitfta.com"))
+		info.append(formatLine("P1", _("AI assistance"), "Claude (Anthropic)"))
 		info.append("")
 		info.append(formatLine("S", _("Software information")))
 		if self.extraSpacing:

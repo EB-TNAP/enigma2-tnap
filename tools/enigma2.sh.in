@@ -132,7 +132,7 @@ for _dev in /dev/sda1 /dev/sdb1 /dev/sdc1 /dev/sda /dev/sdb; do
 			lsmod > "${LOGFOLDER}lsmod_${_TS}.log"
 			{ ip addr; ip link; cat /proc/net/wireless 2>/dev/null; } > "${LOGFOLDER}network_${_TS}.log" 2>&1
 			ENIGMA_DEBUG=1
-			DEBUG_LVL=4
+			DEBUG_LVL=5
 			sync
 		else
 			umount "$USB_MOUNT" 2>/dev/null

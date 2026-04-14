@@ -46,7 +46,11 @@ def setPosition(dst_left, dst_width, dst_top, dst_height):
 	try:
 		open("/proc/stb/fb/dst_apply", "w").write("1")
 	except:
-		pass
+		try:
+			mode = open("/proc/stb/video/videomode").read().strip()
+			open("/proc/stb/video/videomode", "w").write(mode)
+		except:
+			pass
 
 
 def setConfiguredPosition():

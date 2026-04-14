@@ -18,6 +18,10 @@ fi
 
 if [ ! -e /etc/enigma2/settings ]; then
 	touch /etc/enigma2/settings
+	if [ "${PLATFORMCHECK}" != "meson64" ] && [ -f /proc/stb/video/videomode ]; then
+		echo "config.av.videomode.HDMI=1080p" >> /etc/enigma2/settings
+		echo "config.av.videorate.1080p=60Hz" >> /etc/enigma2/settings
+	fi
 	ENIGMA_DEBUG=1
 	DEBUG_LVL=4
 elif [ "$(grep -i config.crash.debugLevel=4 /etc/enigma2/settings)" != "" ]; then

@@ -1,0 +1,75 @@
+HOW TO CAPTURE A DEBUG LOG
+==========================
+
+If you have a problem and need to send a log to support, use one
+of the two methods below. The receiver does NOT create log files
+automatically — you must capture one on purpose.
+
+
+METHOD 1: USB TRIGGER (Recommended)
+-------------------------------------
+What you need: a USB drive (any size, FAT32 or ext4).
+
+Step 1 - Create a trigger file on the USB drive named exactly:
+
+          ENIGMA2_DEBUG.trigger
+
+         (no extension, no spaces, name must be exact)
+
+Step 2 - Insert the USB drive into your receiver.
+
+Step 3 - Reboot the receiver.
+         The trigger is only detected at startup.
+
+Step 4 - Reproduce the problem.
+         Use the receiver normally until the issue occurs.
+         Note: the receiver may feel slightly slower than usual
+         while debug logging is active. This is normal.
+
+Step 5 - Reboot the receiver again to flush the log to disk.
+
+Step 6 - Remove the USB drive.
+         Open the folder  tnap-debug/  on the USB drive.
+         Send ALL files in that folder to admin@tnapimages.com.
+
+IMPORTANT: Remove or rename the trigger file after you are done.
+If you leave it on the USB, debug mode will activate every time
+you insert that drive.
+
+
+METHOD 2: SSH OR TELNET SESSION
+---------------------------------
+Use this if you do not have a USB drive available, or if you
+want to watch the output live on your computer.
+
+Requirements: SSH or Telnet access to the receiver.
+
+Step 1 - Open an SSH or Telnet connection to the receiver.
+
+Step 2 - Stop enigma2:
+
+          init 4
+
+Step 3 - Start enigma2 and capture output to a file:
+
+          enigma2 2>&1 | tee /home/root/logs/enigma2_manual.log
+
+Step 4 - The receiver screen will come back on.
+         Reproduce the problem.
+
+Step 5 - Reboot the receiver when done. Before rebooting, copy
+         the log file off the receiver — it will be deleted on
+         the next boot.
+
+Step 6 - Send the log file to admin@tnapimages.com.
+
+IMPORTANT: Keep the SSH/Telnet window open the whole time.
+Closing it will stop the log capture.
+
+
+WHAT TO INCLUDE IN YOUR EMAIL
+-------------------------------
+  - Your receiver model
+  - Image version  (Menu > Information > About)
+  - What you were doing when the problem occurred
+  - The log file(s)

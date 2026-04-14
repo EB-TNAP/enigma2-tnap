@@ -1,0 +1,56 @@
+PICTURE IN PICTURE (PiP) GUIDE
+==============================
+
+Picture in Picture lets you watch two channels at the same time —
+one in full screen and one in a smaller window.
+
+
+ACTIVATING PiP
+--------------
+Press the blue button to open the Extensions menu.
+Select "Activate Picture in Picture".
+
+A second channel will appear in a small window on screen.
+
+
+ACCESSING PiP CONTROLS
+-----------------------
+While PiP is active, press the blue button again to open the
+Extensions menu. You will see these options:
+
+  - Swap services        Swap the main and PiP channels
+  - Disable PiP          Close the PiP window
+  - PiP Setup            Move and resize the PiP window
+
+
+MOVING AND RESIZING THE PiP WINDOW
+------------------------------------
+Select "PiP Setup" from the Extensions menu.
+
+  Arrow keys            Move the PiP window
+  P+ / Channel Up       Make the window larger
+  P- / Channel Down     Make the window smaller
+  Number keys 1-9       Snap window to a grid position on screen
+  OK                    Confirm and return to TV
+  Exit                  Cancel and restore original position
+
+Number key layout (matches remote):
+  7  8  9   (top row)
+  4  5  6   (middle row)
+  1  2  3   (bottom row)
+
+
+PiP MODES
+----------
+Press 0 while in PiP Setup to cycle through available modes:
+
+  Standard    Small window overlay on full screen
+  Side by side    Screen split 50/50 left and right
+
+
+NOTES
+-----
+- PiP works best when both channels are on the same transponder.
+- Not all receiver models support all PiP modes.
+- If the '0' key does not respond, check that PiP is actively
+  showing a second channel before entering PiP Setup.

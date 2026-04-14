@@ -45,7 +45,7 @@ if [ "${PLATFORMCHECK}" == "meson64" ]; then
 	echo "1" > /sys/class/graphics/fb1/osd_clear
 	FIRSTRUN=`sed -En 's|^config\.misc\.firstrun=(.+)$|\1|p' /etc/enigma2/settings | tr [A-Z] [a-z]`
 	if [ "$FIRSTRUN" == "true" ]; then
-		echo "1080p50hz" > /sys/class/display/mode
+		echo "1080p60hz" > /sys/class/display/mode
 	fi
 fi
 

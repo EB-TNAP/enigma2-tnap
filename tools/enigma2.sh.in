@@ -190,13 +190,16 @@ for _f in "${LOGFOLDER}"Enigma2_*.log; do
 done
 unset _f _sz
 
-# Start enigma2 with or without debug
-# Always write a log file so the crash handler has output to include in crash reports.
-# Without a log file, crash reports contain only 3 lines of enigma output and are useless.
+# Start enigma2 with or without debug.
+# In normal mode output goes to /dev/null — no automatic crash logs.
+# To capture a log manually: init 4 (stop enigma2), then in telnet/SSH:
+#   enigma2 2>&1 | tee /home/root/logs/enigma2_manual.log
+# Or insert a USB drive with an 'ENIGMA2_DEBUG.trigger' file to enable
+# full debug logging to the USB drive automatically on next boot.
 if [ -n "$ENIGMA_DEBUG" ]; then
 	(LD_PRELOAD=$LIBS ENIGMA_DEBUG_LVL=$DEBUG_LVL ENIGMA_DEBUG_TIME="${DEBUG_TIME}" /usr/bin/enigma2 &> ${LOGFOLDER}Enigma2_debug_$(date +%Y-%m-%d_%H-%M-%S).log) &
 else
-	(LD_PRELOAD=$LIBS ENIGMA_DEBUG_LVL=$DEBUG_LVL ENIGMA_DEBUG_TIME="${DEBUG_TIME}" /usr/bin/enigma2 &> ${LOGFOLDER}Enigma2_crash_$(date +%Y-%m-%d_%H-%M-%S).log) &
+	(LD_PRELOAD=$LIBS ENIGMA_DEBUG_LVL=$DEBUG_LVL ENIGMA_DEBUG_TIME="${DEBUG_TIME}" /usr/bin/enigma2 > /dev/null 2>&1) &
 fi
 
 enigma2pid=$!

@@ -43,6 +43,10 @@ def setPosition(dst_left, dst_width, dst_top, dst_height):
 		open("/proc/stb/fb/dst_height", "w").write('%08x' % dst_height)
 	except:
 		return
+	try:
+		open("/proc/stb/fb/dst_apply", "w").write("1")
+	except:
+		pass
 
 
 def setConfiguredPosition():

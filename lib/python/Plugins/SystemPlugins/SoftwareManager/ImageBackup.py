@@ -139,10 +139,34 @@ class ImageBackup(Screen):
 			targets = []
 			choiceList = []  # (label, slotCode, target, recovery)
 			if current[0][1]:  # The MultiBoot enumeration is complete as we now have slotCodes.
+				skipped = []
 				for target in [join("/media", x) for x in listdir("/media")] + ([join("/media/net", x) for x in listdir("/media/net")] if isdir("/media/net") else []):
-					if Freespace(target) > 300000:
-						targets.append(target)
-						choiceList.append((target, current[0][1], target, current[0][2]))
+					try:
+						free = Freespace(target)
+					except Exception as e:
+						print(f"[ImageBackup] Skipping '{target}': Freespace() failed: {e}")
+						skipped.append((target, _("could not be read")))
+						continue
+					if free < 512000:
+						print(f"[ImageBackup] Skipping '{target}': only {free} KB free (need 512000 KB).")
+						skipped.append((target, _("insufficient free space (need 500 MB)")))
+						continue
+					try:
+						st = os.statvfs(target)
+						if st.f_ffree < 1000:
+							print(f"[ImageBackup] Skipping '{target}': only {st.f_ffree} inodes free.")
+							skipped.append((target, _("insufficient inodes (filesystem too fragmented)")))
+							continue
+					except Exception as e:
+						print(f"[ImageBackup] Warning: inode check failed for '{target}': {e}")
+					targets.append(target)
+					choiceList.append((target, current[0][1], target, current[0][2]))
+				if not targets and skipped:
+					details = "\n".join(f"  {path}  ({reason})" for path, reason in skipped)
+					self.session.open(MessageBox,
+						_("No usable USB drive was found.\n\n%s\n\nPlease check that your USB drive is formatted FAT32 or ext4, has at least 500 MB free space and is fully inserted.") % details,
+						MessageBox.TYPE_ERROR, timeout=20, windowTitle=self.getTitle())
+					return
 				choiceList.append((_("Do not backup the image"), False, None, False))
 				print(f"[ImageBackup] Potential target{"" if len(targets) == 1 else "s"}: '{"', '".join(targets)}'.")
 				self.session.openWithCallback(self.runImageBackup, ChoiceBox, title=_("Please select the target location to save the backup:"), list=choiceList, windowTitle=self.getTitle())

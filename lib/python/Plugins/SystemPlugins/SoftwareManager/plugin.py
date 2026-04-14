@@ -294,9 +294,7 @@ class UpdatePluginMenu(Screen):
 					self.session.open(PacketManager, self.skin_path)
 				elif (currentEntry == "backuplocation"):
 					parts = [(r.description, r.mountpoint, self.session) for r in harddiskmanager.getMountedPartitions(onlyhotplug=False)]
-					for x in parts:
-						if not os.access(x[1], os.F_OK | os.R_OK | os.W_OK) or x[1] == '/':
-							parts.remove(x)
+					parts = [x for x in parts if os.access(x[1], os.F_OK | os.R_OK | os.W_OK) and x[1] != '/']
 					if len(parts):
 						self.session.openWithCallback(self.backuplocation_choosen, ChoiceBox, title=_("Please select medium to use as backup location"), list=parts)
 				elif (currentEntry == "backupfiles"):

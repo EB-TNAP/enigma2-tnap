@@ -87,7 +87,11 @@ class InstallWizard(ConfigListScreen, Screen):
 		self.list = []
 		if self.index == self.STATE_UPDATE:
 			if config.misc.installwizard.hasnetwork.value:
-				ip = ".".join([str(x) for x in iNetwork.getAdapterAttribute(self.adapter, "ip")])
+				try:
+					import netifaces as ni
+					ip = ni.ifaddresses(self.adapter).get(ni.AF_INET, [{}])[0].get("addr", "0.0.0.0")
+				except Exception:
+					ip = ".".join([str(x) for x in iNetwork.getAdapterAttribute(self.adapter, "ip") or [0, 0, 0, 0]])
 				self.list.append((_("Your internet connection is working (IP address: %s)") % ip, self.enabled))
 			else:
 				self.list.append((_("Your receiver does not have an internet connection"), self.enabled))

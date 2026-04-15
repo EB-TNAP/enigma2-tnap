@@ -4,6 +4,7 @@ from Screens.HelpMenu import Rc
 from Screens.MessageBox import MessageBox
 from Components.Pixmap import Pixmap
 from Components.Sources.Boolean import Boolean
+from Components.Console import Console
 from Components.Network import iNetwork
 from Tools.Directories import resolveFilename, SCOPE_PLUGINS
 from enigma import eTimer, getDesktop
@@ -156,6 +157,10 @@ class NetworkWizard(Wizard, Rc):
 		self.Text = None
 		self.rescanTimer = eTimer()
 		self.rescanTimer.callback.append(self.rescanTimerFired)
+		self.connectionTimer = eTimer()
+		self.connectionTimer.callback.append(self.startNetworkCheck)
+		self.wifiPingConsole = None
+		self.wifiPingTestsPassed = 0
 		self.getInstalledInterfaceCount()
 		self.isWlanPluginInstalled()
 
@@ -166,9 +171,10 @@ class NetworkWizard(Wizard, Rc):
 
 	def markDone(self):
 		self.stopScan()
+		self.connectionTimer.stop()
 		del self.rescanTimer
+		del self.connectionTimer
 		self.checkOldInterfaceState()
-		pass
 
 	def back(self):
 		self.stopScan()
@@ -235,9 +241,7 @@ class NetworkWizard(Wizard, Rc):
 	def InterfaceSelect(self, index):
 		if index == 'end':
 			self.NextStep = 'end'
-		elif index == 'eth0':
-			self.NextStep = 'nwconfig'
-		elif index == 'eth1':
+		elif not iNetwork.isWirelessInterface(index):
 			self.NextStep = 'nwconfig'
 		else:
 			self.NextStep = 'asknetworktype'
@@ -289,11 +293,37 @@ class NetworkWizard(Wizard, Rc):
 	def AdapterSetupEnd(self, iface):
 		self.originalInterfaceStateChanged = True
 		if iNetwork.getAdapterAttribute(iface, "dhcp"):
-			iNetwork.checkNetworkState(self.AdapterSetupEndFinished)
-			self.AdapterRef = self.session.openWithCallback(self.AdapterSetupEndCB, MessageBox, _("Please wait while we test your network..."), type=MessageBox.TYPE_INFO, enable_input=False)
+			self.AdapterRef = self.session.openWithCallback(self.AdapterSetupEndCB, MessageBox, _("Please wait up to 30 seconds while we connect to your wireless network and test the connection...") if iNetwork.isWirelessInterface(iface) else _("Please wait while we test your network..."), type=MessageBox.TYPE_INFO, enable_input=False)
+			if iNetwork.isWirelessInterface(iface):
+				self.connectionTimer.start(30000, True)  # allow time for WiFi association and DHCP
+			else:
+				iNetwork.checkNetworkState(self.AdapterSetupEndFinished)
 		else:
 			self.currStep = self.getStepWithID("confdns")
 			self.afterAsyncCode()
+
+	def startNetworkCheck(self):
+		if iNetwork.isWirelessInterface(self.selectedInterface):
+			self.wifiPingConsole = Console()
+			self.wifiPingTestsPassed = 0
+			for target in ("1.1.1.1", "8.8.8.8", "9.9.9.9"):
+				self.wifiPingConsole.ePopen(
+					"/bin/ping -c 1 -I %s %s" % (self.selectedInterface, target),
+					self.wifiPingFinished
+				)
+		else:
+			iNetwork.checkNetworkState(self.AdapterSetupEndFinished)
+
+	def wifiPingFinished(self, result, retVal, extraArgs=None):
+		if self.wifiPingConsole is not None:
+			if retVal == 0:
+				self.wifiPingConsole = None
+				self.AdapterSetupEndFinished(0)
+			else:
+				self.wifiPingTestsPassed += 1
+				if not self.wifiPingConsole.appContainers:
+					self.wifiPingConsole = None
+					self.AdapterSetupEndFinished(self.wifiPingTestsPassed)
 
 	def AdapterSetupEndCB(self, data):
 		if data:
@@ -316,23 +346,23 @@ class NetworkWizard(Wizard, Rc):
 		self.AdapterRef.close(True)
 
 	def checkWlanStateCB(self, data, status):
-		if data is not None:
-			if data:
-				if status is not None:
-					text1 = _("Your receiver is now ready to be used.\n\nYour internet connection is working.\n\n")
-					text2 = _("Access point") + ":\t" + str(status[self.selectedInterface]["accesspoint"]) + "\n"
-					text3 = _("SSID") + ":\t" + str(status[self.selectedInterface]["essid"]) + "\n"
-					text4 = _('Link quality:') + "\t" + str(status[self.selectedInterface]["quality"]) + "\n"
-					text5 = _("Signal strength") + ":\t" + str(status[self.selectedInterface]["signal"]) + "\n"
-					text6 = _("Bitrate") + ":\t" + str(status[self.selectedInterface]["bitrate"]) + "\n"
-					text7 = _("Encryption") + ": " + str(status[self.selectedInterface]["encryption"]) + "\n"
-					text8 = _("Please press OK to continue.")
-					infotext = text1 + text2 + text3 + text4 + text5 + text7 + "\n" + text8
-					self.currStep = self.getStepWithID("checkWlanstatusend")
-					self.Text = infotext
-					if str(status[self.selectedInterface]["accesspoint"]) == "Not-Associated":
-						self.InterfaceState = False
-					self.afterAsyncCode()
+		if data is not None and data and status is not None:
+			text1 = _("Your receiver is now ready to be used.\n\nYour internet connection is working.\n\n")
+			text2 = _("Access point") + ":\t" + str(status[self.selectedInterface]["accesspoint"]) + "\n"
+			text3 = _("SSID") + ":\t" + str(status[self.selectedInterface]["essid"]) + "\n"
+			text4 = _('Link quality:') + "\t" + str(status[self.selectedInterface]["quality"]) + "\n"
+			text5 = _("Signal strength") + ":\t" + str(status[self.selectedInterface]["signal"]) + "\n"
+			text6 = _("Bitrate") + ":\t" + str(status[self.selectedInterface]["bitrate"]) + "\n"
+			text7 = _("Encryption") + ": " + str(status[self.selectedInterface]["encryption"]) + "\n"
+			text8 = _("Please press OK to continue.")
+			infotext = text1 + text2 + text3 + text4 + text5 + text7 + "\n" + text8
+			self.currStep = self.getStepWithID("checkWlanstatusend")
+			self.Text = infotext
+			if str(status[self.selectedInterface]["accesspoint"]) == "Not-Associated":
+				self.InterfaceState = False
+		else:
+			self.InterfaceState = False
+		self.afterAsyncCode()
 
 	def checkNetwork(self):
 		iNetwork.checkNetworkState(self.checkNetworkStateCB)
@@ -467,8 +497,8 @@ class NetworkWizard(Wizard, Rc):
 	def showIP(self):
 		try:
 			from netifaces import ifaddresses, AF_INET
-			ip = ifaddresses('eth0')[AF_INET][0]['addr']
+			ip = ifaddresses(self.selectedInterface or 'eth0')[AF_INET][0]['addr']
 			old = self["text"].getText()
-			self["text"].setText(f"{_("IP address")} : {ip}\n{old}")
+			self["text"].setText(f"{_('IP address')} : {ip}\n{old}")
 		except Exception:
 			pass

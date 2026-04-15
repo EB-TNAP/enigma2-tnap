@@ -6,6 +6,7 @@ from Components.Pixmap import Pixmap
 from Components.Sources.Boolean import Boolean
 from Components.Console import Console
 from Components.Network import iNetwork
+from Components.ScrollLabel import ScrollLabel
 from Tools.Directories import resolveFilename, SCOPE_PLUGINS
 from enigma import eTimer, getDesktop
 
@@ -26,7 +27,7 @@ class NetworkWizard(Wizard, Rc):
 	if isFHD:
 		skin = """
 			<screen position="0,0" size="1920,1080" title="Welcome..." flags="wfNoBorder" >
-				<widget name="text" position="283,55" size="872,522" font="Regular;30" />
+				<widget name="text" position="283,55" size="872,522" font="Regular;30" scrollbarMode="showOnDemand" />
 				<widget source="list" render="Listbox" position="53,585" size="1412,341" font="Regular;30" itemHeight="35" scrollbarMode="showOnDemand" >
 					<convert type="StringList" />
 				</widget>
@@ -75,7 +76,7 @@ class NetworkWizard(Wizard, Rc):
 	else:
 		skin = """
 			<screen position="0,0" size="720,576" title="Welcome..." flags="wfNoBorder" >
-				<widget name="text" position="153,40" size="340,300" font="Regular;22" />
+				<widget name="text" position="153,40" size="340,300" font="Regular;22" scrollbarMode="showOnDemand" />
 				<widget source="list" render="Listbox" position="53,340" size="440,180" scrollbarMode="showOnDemand" >
 					<convert type="StringList" />
 				</widget>
@@ -128,6 +129,7 @@ class NetworkWizard(Wizard, Rc):
 		Wizard.__init__(self, session, showSteps=False, showStepSlider=False)
 		Rc.__init__(self)
 		self.session = session
+		self["text"] = ScrollLabel()  # replace Label with ScrollLabel for scrollable network status text
 		self["wizard"] = Pixmap()
 		self["HelpWindow"] = Pixmap()
 		self["HelpWindow"].hide()
@@ -163,6 +165,18 @@ class NetworkWizard(Wizard, Rc):
 		self.wifiPingTestsPassed = 0
 		self.getInstalledInterfaceCount()
 		self.isWlanPluginInstalled()
+
+	def keyUp(self):
+		if not self.showList and not self.showConfig:
+			self["text"].goLineUp()
+		else:
+			Wizard.keyUp(self)
+
+	def keyDown(self):
+		if not self.showList and not self.showConfig:
+			self["text"].goLineDown()
+		else:
+			Wizard.keyDown(self)
 
 	def exitWizardQuestion(self, ret=False):
 		if (ret):

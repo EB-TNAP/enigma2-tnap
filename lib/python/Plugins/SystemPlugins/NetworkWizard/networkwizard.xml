@@ -183,6 +183,8 @@ self.condition = (self.InterfaceState == True )
                 <code>
 self.clearSelectedKeys()
 self.selectKey("OK")
+self.selectKey("UP")
+self.selectKey("DOWN")
 self["text"].setText(self.Text)
                 </code>
                 <code pos="after">

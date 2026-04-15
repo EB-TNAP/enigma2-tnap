@@ -67,6 +67,14 @@ class OverscanWizard(ConfigListScreen, Screen):
 			self["config"].instance.resize(eSize(800, lenlist))
 			self["introduction"].instance.resize(eSize(800, 440 - lenlist))
 
+	def _readHwMaxResolution(self):
+		try:
+			self.hw_max_width = int(open("/proc/stb/fb/dst_width").read().strip(), 16) or getDesktop(0).size().width()
+			self.hw_max_height = int(open("/proc/stb/fb/dst_height").read().strip(), 16) or getDesktop(0).size().height()
+		except Exception:
+			self.hw_max_width = getDesktop(0).size().width()
+			self.hw_max_height = getDesktop(0).size().height()
+
 	def setScreen(self):
 		self.list = []
 		if self.step == 1:
@@ -83,6 +91,7 @@ class OverscanWizard(ConfigListScreen, Screen):
 			self.save_new_position = False
 			max_width, max_height = getDesktop(0).size().width(), getDesktop(0).size().height()
 			setPosition(0, max_width, 0, max_height)
+			self._readHwMaxResolution()
 		elif self.step == 2:
 			self.Timer.stop()
 			self.setTitle(_("Overscan wizard"))
@@ -95,17 +104,19 @@ class OverscanWizard(ConfigListScreen, Screen):
 			self.save_new_position = False
 			max_width, max_height = getDesktop(0).size().width(), getDesktop(0).size().height()
 			setPosition(0, max_width, 0, max_height)
+			self._readHwMaxResolution()
 		elif self.step == 3:
 			self["introduction"].setText(_("You did not see all eight arrow heads. This means your TV has overscan enabled "
 				"and presents you with a zoomed-in picture, causing you to loose part of a full HD screen. In addition to this "
 				"you may also miss parts of the user interface, for example volume bars and more.\n\n"
 				"You can now try to resize and change the position of the user interface until you see the eight arrow heads.\n\n"
 				"When done press OK.\n\n"))
-			max_width, max_height = getDesktop(0).size().width(), getDesktop(0).size().height()
-			self.dst_left = ConfigSlider(default=config.plugins.OSDPositionSetup.dst_left.value, increment=1, limits=(0, max_width))
-			self.dst_right = ConfigSlider(default=config.plugins.OSDPositionSetup.dst_left.value + config.plugins.OSDPositionSetup.dst_width.value, increment=1, limits=(0, max_width))
-			self.dst_top = ConfigSlider(default=config.plugins.OSDPositionSetup.dst_top.value, increment=1, limits=(0, max_height))
-			self.dst_bottom = ConfigSlider(default=config.plugins.OSDPositionSetup.dst_top.value + config.plugins.OSDPositionSetup.dst_height.value, increment=1, limits=(0, max_height))
+			max_width = getattr(self, 'hw_max_width', getDesktop(0).size().width())
+			max_height = getattr(self, 'hw_max_height', getDesktop(0).size().height())
+			self.dst_left = ConfigSlider(default=min(config.plugins.OSDPositionSetup.dst_left.value, max_width), increment=1, limits=(0, max_width))
+			self.dst_right = ConfigSlider(default=min(config.plugins.OSDPositionSetup.dst_left.value + config.plugins.OSDPositionSetup.dst_width.value, max_width), increment=1, limits=(0, max_width))
+			self.dst_top = ConfigSlider(default=min(config.plugins.OSDPositionSetup.dst_top.value, max_height), increment=1, limits=(0, max_height))
+			self.dst_bottom = ConfigSlider(default=min(config.plugins.OSDPositionSetup.dst_top.value + config.plugins.OSDPositionSetup.dst_height.value, max_height), increment=1, limits=(0, max_height))
 			self.list.append((_("left"), self.dst_left))
 			self.list.append((_("right"), self.dst_right))
 			self.list.append((_("top"), self.dst_top))

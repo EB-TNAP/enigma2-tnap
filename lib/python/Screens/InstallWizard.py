@@ -38,7 +38,7 @@ class InstallWizard(ConfigListScreen, Screen):
 			config.misc.installwizard.opkgloaded.value = False
 			modes = {0: " "}
 			self.enabled = ConfigSelection(choices=modes, default=0)
-			self.adapters = [adapter for adapter in iNetwork.getAdapterList() if adapter in ('eth0', 'eth1')]
+			self.adapters = [adapter for adapter in iNetwork.getAdapterList() if not iNetwork.isBlacklisted(adapter)]
 			self.checkNetwork()
 		elif self.index == self.STATE_CHOISE_CHANNELLIST:
 			self.enabled = config.misc.installwizard.downloadchannellist

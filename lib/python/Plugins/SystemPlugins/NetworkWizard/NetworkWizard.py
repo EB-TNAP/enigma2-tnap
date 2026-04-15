@@ -167,16 +167,20 @@ class NetworkWizard(Wizard, Rc):
 		self.isWlanPluginInstalled()
 
 	def keyUp(self):
-		if not self.showList and not self.showConfig:
-			self["text"].goLineUp()
-		else:
+		stepHasConfig = self.showConfig and (self.wizard[self.currStep]["config"]["screen"] or self.wizard[self.currStep]["config"]["type"] == "dynamic")
+		stepHasList = self.showList and len(self.wizard[self.currStep]["evaluatedList"]) > 0
+		if stepHasConfig or stepHasList:
 			Wizard.keyUp(self)
+		else:
+			self["text"].goLineUp()
 
 	def keyDown(self):
-		if not self.showList and not self.showConfig:
-			self["text"].goLineDown()
-		else:
+		stepHasConfig = self.showConfig and (self.wizard[self.currStep]["config"]["screen"] or self.wizard[self.currStep]["config"]["type"] == "dynamic")
+		stepHasList = self.showList and len(self.wizard[self.currStep]["evaluatedList"]) > 0
+		if stepHasConfig or stepHasList:
 			Wizard.keyDown(self)
+		else:
+			self["text"].goLineDown()
 
 	def exitWizardQuestion(self, ret=False):
 		if (ret):
@@ -307,7 +311,7 @@ class NetworkWizard(Wizard, Rc):
 	def AdapterSetupEnd(self, iface):
 		self.originalInterfaceStateChanged = True
 		if iNetwork.getAdapterAttribute(iface, "dhcp"):
-			self.AdapterRef = self.session.openWithCallback(self.AdapterSetupEndCB, MessageBox, _("Please wait while we restart and test your network connection...") if iNetwork.isWirelessInterface(iface) else _("Please wait while we test your network..."), type=MessageBox.TYPE_INFO, enable_input=False)
+			self.AdapterRef = self.session.openWithCallback(self.AdapterSetupEndCB, MessageBox, _("Please wait (up to 30 seconds) while we restart and test your wireless network connection...") if iNetwork.isWirelessInterface(iface) else _("Please wait while we test your network..."), type=MessageBox.TYPE_INFO, enable_input=False)
 			if iNetwork.isWirelessInterface(iface):
 				# Deactivate first to kill any stale wpa_supplicant from the scan step,
 				# then reactivate so it starts fresh with the newly written WPA config.

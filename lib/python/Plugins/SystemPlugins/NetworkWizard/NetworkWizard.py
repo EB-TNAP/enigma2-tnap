@@ -372,15 +372,21 @@ class NetworkWizard(Wizard, Rc):
 
 	def checkWlanStateCB(self, data, status):
 		if data is not None and data and status is not None:
+			try:
+				from netifaces import ifaddresses, AF_INET
+				ip = ifaddresses(self.selectedInterface)[AF_INET][0]["addr"]
+			except Exception:
+				ip = ".".join([str(x) for x in iNetwork.getAdapterAttribute(self.selectedInterface, "ip") or [0, 0, 0, 0]])
 			text1 = _("Your receiver is now ready to be used.\n\nYour internet connection is working.\n\n")
 			text2 = _("Access point") + ":\t" + str(status[self.selectedInterface]["accesspoint"]) + "\n"
 			text3 = _("SSID") + ":\t" + str(status[self.selectedInterface]["essid"]) + "\n"
-			text4 = _('Link quality:') + "\t" + str(status[self.selectedInterface]["quality"]) + "\n"
-			text5 = _("Signal strength") + ":\t" + str(status[self.selectedInterface]["signal"]) + "\n"
-			text6 = _("Bitrate") + ":\t" + str(status[self.selectedInterface]["bitrate"]) + "\n"
-			text7 = _("Encryption") + ": " + str(status[self.selectedInterface]["encryption"]) + "\n"
-			text8 = _("Please press OK to continue.")
-			infotext = text1 + text2 + text3 + text4 + text5 + text7 + "\n" + text8
+			text4 = _("IP address") + ":\t" + ip + "\n"
+			text5 = _("Link quality") + ":\t" + str(status[self.selectedInterface]["quality"]) + "\n"
+			text6 = _("Signal strength") + ":\t" + str(status[self.selectedInterface]["signal"]) + "\n"
+			text7 = _("Bitrate") + ":\t" + str(status[self.selectedInterface]["bitrate"]) + "\n"
+			text8 = _("Encryption") + ":\t" + str(status[self.selectedInterface]["encryption"]) + "\n"
+			text9 = _("Please press OK to continue.")
+			infotext = text1 + text2 + text3 + text4 + text5 + text6 + text7 + text8 + "\n" + text9
 			self.currStep = self.getStepWithID("checkWlanstatusend")
 			self.Text = infotext
 			if str(status[self.selectedInterface]["accesspoint"]) == "Not-Associated":

@@ -188,6 +188,7 @@ def InitUsageConfig():
 	config.channelSelection = ConfigSubsection()
 	config.channelSelection.showNumber = ConfigYesNo(default=True)
 	config.channelSelection.showPicon = ConfigYesNo(default=False)
+	config.channelSelection.showPicon.addNotifier(refreshServiceList)
 	config.channelSelection.showServiceTypeIcon = ConfigYesNo(default=False)
 	config.channelSelection.showCryptoIcon = ConfigYesNo(default=False)
 	config.channelSelection.recordIndicatorMode = ConfigSelection(default=2, choices=[

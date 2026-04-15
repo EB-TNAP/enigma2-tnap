@@ -808,7 +808,7 @@ class ServiceListLegacy(ServiceListBase):
 		twoLines = config.usage.servicelist_twolines.value
 		self.l.setShowTwoLines(twoLines)
 
-		if config.usage.service_icon_enable.value:
+		if config.usage.service_icon_enable.value or config.channelSelection.showPicon.value:
 			self.l.setGetPiconNameFunc(getPiconName)
 		else:
 			self.l.setGetPiconNameFunc(None)

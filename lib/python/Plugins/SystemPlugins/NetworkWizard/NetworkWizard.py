@@ -307,26 +307,33 @@ class NetworkWizard(Wizard, Rc):
 	def AdapterSetupEnd(self, iface):
 		self.originalInterfaceStateChanged = True
 		if iNetwork.getAdapterAttribute(iface, "dhcp"):
-			self.AdapterRef = self.session.openWithCallback(self.AdapterSetupEndCB, MessageBox, _("Please wait up to 30 seconds while we connect to your wireless network and test the connection...") if iNetwork.isWirelessInterface(iface) else _("Please wait while we test your network..."), type=MessageBox.TYPE_INFO, enable_input=False)
+			self.AdapterRef = self.session.openWithCallback(self.AdapterSetupEndCB, MessageBox, _("Please wait while we restart and test your network connection...") if iNetwork.isWirelessInterface(iface) else _("Please wait while we test your network..."), type=MessageBox.TYPE_INFO, enable_input=False)
 			if iNetwork.isWirelessInterface(iface):
-				self.connectionTimer.start(30000, True)  # allow time for WiFi association and DHCP
+				# Deactivate first to kill any stale wpa_supplicant from the scan step,
+				# then reactivate so it starts fresh with the newly written WPA config.
+				iNetwork.deactivateInterface(iface, self.wifiRestartDeactivateCB)
 			else:
 				iNetwork.checkNetworkState(self.AdapterSetupEndFinished)
 		else:
 			self.currStep = self.getStepWithID("confdns")
 			self.afterAsyncCode()
 
+	def wifiRestartDeactivateCB(self, data):
+		if data is True:
+			iNetwork.activateInterface(self.selectedInterface, self.wifiRestartActivateCB)
+
+	def wifiRestartActivateCB(self, data):
+		if data is True:
+			self.connectionTimer.start(30000, True)  # allow time for WPA association and DHCP
+
 	def startNetworkCheck(self):
-		if iNetwork.isWirelessInterface(self.selectedInterface):
-			self.wifiPingConsole = Console()
-			self.wifiPingTestsPassed = 0
-			for target in ("1.1.1.1", "8.8.8.8", "9.9.9.9"):
-				self.wifiPingConsole.ePopen(
-					"/bin/ping -c 1 -I %s %s" % (self.selectedInterface, target),
-					self.wifiPingFinished
-				)
-		else:
-			iNetwork.checkNetworkState(self.AdapterSetupEndFinished)
+		self.wifiPingConsole = Console()
+		self.wifiPingTestsPassed = 0
+		for target in ("1.1.1.1", "8.8.8.8", "9.9.9.9"):
+			self.wifiPingConsole.ePopen(
+				"/bin/ping -c 1 -I %s %s" % (self.selectedInterface, target),
+				self.wifiPingFinished
+			)
 
 	def wifiPingFinished(self, result, retVal, extraArgs=None):
 		if self.wifiPingConsole is not None:

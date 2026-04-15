@@ -6,7 +6,6 @@ from Components.Pixmap import Pixmap
 from Components.Sources.Boolean import Boolean
 from Components.Console import Console
 from Components.Network import iNetwork
-from Components.ScrollLabel import ScrollLabel
 from Tools.Directories import resolveFilename, SCOPE_PLUGINS
 from enigma import eTimer, getDesktop
 
@@ -129,7 +128,11 @@ class NetworkWizard(Wizard, Rc):
 		Wizard.__init__(self, session, showSteps=False, showStepSlider=False)
 		Rc.__init__(self)
 		self.session = session
-		self["text"] = ScrollLabel()  # replace Label with ScrollLabel for scrollable network status text
+		try:
+			from Components.ScrollLabel import ScrollLabel
+			self["text"] = ScrollLabel()  # replace Label with ScrollLabel for scrollable network status text
+		except ImportError:
+			pass  # keep the Label() set by Wizard.__init__; scrolling unavailable on this build
 		self["wizard"] = Pixmap()
 		self["HelpWindow"] = Pixmap()
 		self["HelpWindow"].hide()

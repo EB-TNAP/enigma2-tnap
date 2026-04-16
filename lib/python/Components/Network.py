@@ -591,7 +591,12 @@ class Network:
 
 	def deactivateInterface(self, ifaces, callback=None):
 		def buildCommands(iface):
-			commands.append(f"ifdown {iface}")
+			# Use -f (force) so BusyBox ifdown acts even when the interface
+			# is NO-CARRIER or otherwise in an inconsistent state.  Without
+			# -f, BusyBox 1.37+ silently ignores the request and leaves the
+			# interface in ifstate, causing the subsequent ifup to fail with
+			# "already configured".
+			commands.append(f"ifdown -f {iface}")
 			commands.append(f"ip addr flush dev {iface} scope global")
 			# The wpa_supplicant sometimes doesn't quit properly on SIGTERM.
 			if exists(f"/var/run/wpa_supplicant/{iface}"):
@@ -616,8 +621,8 @@ class Network:
 
 	def deactivateInterfaceFinished(self, extra_args):
 		def checkCommandResult(iface):
-			if self.deactivateInterfaceConsole and f"ifdown {iface}" in self.deactivateInterfaceConsole.appResults:
-				result = str(self.deactivateInterfaceConsole.appResults.get(f"ifdown {iface}")).strip("\n")
+			if self.deactivateInterfaceConsole and f"ifdown -f {iface}" in self.deactivateInterfaceConsole.appResults:
+				result = str(self.deactivateInterfaceConsole.appResults.get(f"ifdown -f {iface}")).strip("\n")
 				if result == f"ifdown: interface {iface} not configured":
 					return False
 				else:
@@ -646,7 +651,11 @@ class Network:
 			return
 		if not self.activateInterfaceConsole:
 			self.activateInterfaceConsole = Console()
-		commands = [f"/sbin/ifup {iface}"]
+		# Use -f (force) so BusyBox ifup acts even when the interface is
+		# not currently in ifstate (e.g. after a forced ifdown removed it).
+		# Without -f, BusyBox 1.37+ prints "ignoring unknown interface"
+		# and does nothing, leaving the interface down.
+		commands = [f"/sbin/ifup -f {iface}"]
 		self.activateInterfaceConsole.eBatch(commands, self.activateInterfaceFinished, callback, debug=True)
 
 	def activateInterfaceFinished(self, extra_args):

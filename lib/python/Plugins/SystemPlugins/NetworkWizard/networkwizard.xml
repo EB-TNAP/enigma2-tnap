@@ -86,7 +86,7 @@ self.selectKey("UP")
 self.selectKey("DOWN")
                 </code>
                 <list>
-                        <listentry caption="Configure your network again" step="welcome" />
+                        <listentry caption="Configure your network again" step="selectinterface" />
                         <listentry caption="Exit network wizard" step="end" />
                 </list>
         </step>
@@ -207,7 +207,7 @@ self.selectKey("UP")
 self.selectKey("DOWN")
                 </code>
                 <list>
-                        <listentry caption="Configure your network again" step="welcome" />
+                        <listentry caption="Configure your network again" step="selectinterface" />
                         <listentry caption="Exit network wizard" step="end" />
                 </list>
         </step>

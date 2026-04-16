@@ -390,12 +390,15 @@ class NetworkWizard(Wizard, Rc):
 			text8 = _("Encryption") + ":\t" + str(status[self.selectedInterface]["encryption"]) + "\n"
 			text9 = _("Please press OK to continue.")
 			infotext = text1 + text2 + text3 + text4 + text5 + text6 + text7 + text8 + "\n" + text9
-			self.currStep = self.getStepWithID("checkWlanstatusend")
 			self.Text = infotext
 			if str(status[self.selectedInterface]["accesspoint"]) == "Not-Associated":
 				self.InterfaceState = False
 		else:
-			self.InterfaceState = False
+			# Status query failed — trust the ping result already stored in self.InterfaceState
+			# rather than blindly overwriting it with False.
+			if self.InterfaceState is not True:
+				self.InterfaceState = False
+		self.currStep = self.getStepWithID("checkWlanstatusend")
 		self.afterAsyncCode()
 
 	def checkNetwork(self):

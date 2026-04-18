@@ -133,8 +133,18 @@ class VideoWizard(Wizard, Rc):
 		rates = self.listRates(mode)
 		# print("[VideoWizard] modeSelect DEBUG: rates=%s." % rates)
 		if self.port == "HDMI" and mode in ("720p", "1080i", "1080p") and MODELBox not in ("dreamone", "dreamtwo"):
-			self.rate = "multi"
-			self.avSwitch.setMode(port=self.port, mode=mode, rate="multi")
+			rate_values = [r[0] for r in rates]
+			if self.rate is None:
+				# Initialize from config (e.g. 60Hz pre-set by enigma2.sh.in); fall back to "multi".
+				try:
+					configured = config.av.videorate[mode].value
+					self.rate = configured if configured in rate_values else "multi"
+				except Exception:
+					self.rate = "multi"
+			elif self.rate not in rate_values and self.rate != "multi":
+				# Preserve "multi" as-is; reset only when the current rate is invalid for this mode.
+				self.rate = "multi"
+			self.avSwitch.setMode(port=self.port, mode=mode, rate=self.rate)
 		else:
 			self.avSwitch.setMode(port=self.port, mode=mode, rate=rates[0][0])
 

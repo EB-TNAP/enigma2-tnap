@@ -330,10 +330,20 @@ int eDVBServiceStream::doRecord()
 		if (!program.audioStreams.empty())
 		{
 			/* For radio services (no video) the PMT may list every audio stream in the
-			 * entire multiplex.  Stream only the cached/preferred audio PID so the
-			 * receiving player gets a clean single-station TS instead of an unnavigable
-			 * 91-stream blob.  Falls back to all PIDs if no cache entry exists. */
+			 * entire multiplex as components of a single service.  We must not record/stream
+			 * all of them.  Use the first applicable filter that fires, in priority order:
+			 *
+			 *  1. Already streaming: m_pids_active already holds an audio PID from a prior
+			 *     doRecord() call (e.g. initial tune gave a clean 1-stream PMT, then a
+			 *     full-mux PMT update fired).  Lock the existing audio PID — do not expand.
+			 *
+			 *  2. Cache hit: the service DB has a preferred audio PID (user listened before).
+			 *     Record only that PID.
+			 *
+			 *  3. No prior state at all: fallback — record everything so the user is never
+			 *     left with a silent stream on a first-ever tune. */
 			bool isRadioService = program.videoStreams.empty();
+			bool alreadyStreamingAudio = false;
 			bool hasCachedAudio = false;
 			if (isRadioService)
 			{
@@ -341,10 +351,23 @@ int eDVBServiceStream::doRecord()
 					i(program.audioStreams.begin());
 					i != program.audioStreams.end(); ++i)
 				{
-					if (pids_to_record.count(i->pid))
+					if (m_pids_active.count(i->pid))
 					{
-						hasCachedAudio = true;
+						alreadyStreamingAudio = true;
 						break;
+					}
+				}
+				if (!alreadyStreamingAudio)
+				{
+					for (std::vector<eDVBServicePMTHandler::audioStream>::const_iterator
+						i(program.audioStreams.begin());
+						i != program.audioStreams.end(); ++i)
+					{
+						if (pids_to_record.count(i->pid))
+						{
+							hasCachedAudio = true;
+							break;
+						}
 					}
 				}
 			}
@@ -354,9 +377,22 @@ int eDVBServiceStream::doRecord()
 				i(program.audioStreams.begin());
 				i != program.audioStreams.end(); ++i)
 			{
-				/* Radio + cache hit: skip PIDs not in the preferred set */
-				if (isRadioService && hasCachedAudio && !pids_to_record.count(i->pid))
-					continue;
+				if (isRadioService)
+				{
+					if (alreadyStreamingAudio)
+					{
+						/* PMT update mid-stream: only keep the PID we are already streaming */
+						if (!m_pids_active.count(i->pid))
+							continue;
+					}
+					else if (hasCachedAudio)
+					{
+						/* Cache hit: only keep the preferred/cached PID */
+						if (!pids_to_record.count(i->pid))
+							continue;
+					}
+					/* else: no prior state — fall through and record all (first-ever tune) */
+				}
 
 				pids_to_record.insert(i->pid);
 

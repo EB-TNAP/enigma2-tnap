@@ -506,15 +506,17 @@ int eDVBServiceRecord::doRecord()
 			if (!program.audioStreams.empty())
 			{
 				/* For radio services (no video) the PMT may list every audio stream in the
-				 * entire multiplex as components of a single service (e.g. SiriusXM / DAB mux
-				 * style).  Recording all of them produces a huge file containing dozens of
-				 * unrelated stations while the user only wanted the one they were listening to.
+				 * entire multiplex as components of a single service.  Use the first
+				 * applicable filter in priority order:
 				 *
-				 * When there is no video stream, check whether the cache block above already
-				 * inserted a preferred audio PID.  If it did, only record that PID (plus any
-				 * RDS side-channel).  If no cache hit was found (e.g. first-ever tune) fall
-				 * back to recording everything so the user is never left with a silent file. */
+				 *  1. Already recording: m_pids_active already has an audio PID (PMT update
+				 *     mid-recording with a full-mux PMT).  Keep only the active PID.
+				 *
+				 *  2. Cache hit: service DB has a preferred audio PID.  Record only that PID.
+				 *
+				 *  3. No prior state: fallback - record everything (first-ever tune). */
 				bool isRadioService = program.videoStreams.empty();
+				bool alreadyRecordingAudio = false;
 				bool hasCachedAudio = false;
 				if (isRadioService)
 				{
@@ -522,10 +524,23 @@ int eDVBServiceRecord::doRecord()
 						i(program.audioStreams.begin());
 						i != program.audioStreams.end(); ++i)
 					{
-						if (pids_to_record.count(i->pid))
+						if (m_pids_active.count(i->pid))
 						{
-							hasCachedAudio = true;
+							alreadyRecordingAudio = true;
 							break;
+						}
+					}
+					if (!alreadyRecordingAudio)
+					{
+						for (std::vector<eDVBServicePMTHandler::audioStream>::const_iterator
+							i(program.audioStreams.begin());
+							i != program.audioStreams.end(); ++i)
+						{
+							if (pids_to_record.count(i->pid))
+							{
+								hasCachedAudio = true;
+								break;
+							}
 						}
 					}
 				}
@@ -535,9 +550,19 @@ int eDVBServiceRecord::doRecord()
 					i(program.audioStreams.begin());
 					i != program.audioStreams.end(); ++i)
 				{
-					/* Radio + cache hit: skip any PID not already in the preferred set */
-					if (isRadioService && hasCachedAudio && !pids_to_record.count(i->pid))
-						continue;
+					if (isRadioService)
+					{
+						if (alreadyRecordingAudio)
+						{
+							if (!m_pids_active.count(i->pid))
+								continue;
+						}
+						else if (hasCachedAudio)
+						{
+							if (!pids_to_record.count(i->pid))
+								continue;
+						}
+					}
 
 					pids_to_record.insert(i->pid);
 

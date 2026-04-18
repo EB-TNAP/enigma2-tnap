@@ -329,11 +329,35 @@ int eDVBServiceStream::doRecord()
 		eDebugNoNewLine(", and %zd audio stream(s)", program.audioStreams.size());
 		if (!program.audioStreams.empty())
 		{
+			/* For radio services (no video) the PMT may list every audio stream in the
+			 * entire multiplex.  Stream only the cached/preferred audio PID so the
+			 * receiving player gets a clean single-station TS instead of an unnavigable
+			 * 91-stream blob.  Falls back to all PIDs if no cache entry exists. */
+			bool isRadioService = program.videoStreams.empty();
+			bool hasCachedAudio = false;
+			if (isRadioService)
+			{
+				for (std::vector<eDVBServicePMTHandler::audioStream>::const_iterator
+					i(program.audioStreams.begin());
+					i != program.audioStreams.end(); ++i)
+				{
+					if (pids_to_record.count(i->pid))
+					{
+						hasCachedAudio = true;
+						break;
+					}
+				}
+			}
+
 			eDebugNoNewLine(" (");
 			for (std::vector<eDVBServicePMTHandler::audioStream>::const_iterator
 				i(program.audioStreams.begin());
 				i != program.audioStreams.end(); ++i)
 			{
+				/* Radio + cache hit: skip PIDs not in the preferred set */
+				if (isRadioService && hasCachedAudio && !pids_to_record.count(i->pid))
+					continue;
+
 				pids_to_record.insert(i->pid);
 
 				if (timing_pid == -1)

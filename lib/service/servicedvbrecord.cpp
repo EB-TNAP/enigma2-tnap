@@ -505,11 +505,40 @@ int eDVBServiceRecord::doRecord()
 			eDebugNoNewLine(", and %zd audio stream(s)", program.audioStreams.size());
 			if (!program.audioStreams.empty())
 			{
+				/* For radio services (no video) the PMT may list every audio stream in the
+				 * entire multiplex as components of a single service (e.g. SiriusXM / DAB mux
+				 * style).  Recording all of them produces a huge file containing dozens of
+				 * unrelated stations while the user only wanted the one they were listening to.
+				 *
+				 * When there is no video stream, check whether the cache block above already
+				 * inserted a preferred audio PID.  If it did, only record that PID (plus any
+				 * RDS side-channel).  If no cache hit was found (e.g. first-ever tune) fall
+				 * back to recording everything so the user is never left with a silent file. */
+				bool isRadioService = program.videoStreams.empty();
+				bool hasCachedAudio = false;
+				if (isRadioService)
+				{
+					for (std::vector<eDVBServicePMTHandler::audioStream>::const_iterator
+						i(program.audioStreams.begin());
+						i != program.audioStreams.end(); ++i)
+					{
+						if (pids_to_record.count(i->pid))
+						{
+							hasCachedAudio = true;
+							break;
+						}
+					}
+				}
+
 				eDebugNoNewLine(" (");
 				for (std::vector<eDVBServicePMTHandler::audioStream>::const_iterator
 					i(program.audioStreams.begin());
 					i != program.audioStreams.end(); ++i)
 				{
+					/* Radio + cache hit: skip any PID not already in the preferred set */
+					if (isRadioService && hasCachedAudio && !pids_to_record.count(i->pid))
+						continue;
+
 					pids_to_record.insert(i->pid);
 
 					if (timing_pid == -1)

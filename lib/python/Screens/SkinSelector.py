@@ -175,6 +175,9 @@ class SkinSelector(Screen):
 
 	def loadPreview(self):
 		self.currentSelectedSkin = self["skins"].getCurrent()
+		if not self.currentSelectedSkin:
+			self["description"].setText(_("No display skins are installed. Please install a display skin from the plugins browser."))
+			return
 		preview, resolution, skin = self.currentSelectedSkin[6], self.currentSelectedSkin[5], self.currentSelectedSkin[4]
 		self.changedEntry()
 		if not exists(preview):
@@ -295,6 +298,8 @@ class SkinSelectorSummary(ScreenSummary):
 
 	def selectionChanged(self):
 		currentEntry = self.parent["skins"].getCurrent()  # Label
+		if not currentEntry:
+			return
 		self["entry"].setText(currentEntry[1])
 		self["value"].setText("%s   %s" % (currentEntry[5], currentEntry[2]) if currentEntry[5] and currentEntry[2] else currentEntry[5] or currentEntry[2])  # Resolution and/or Flag.
 		self["Name"].setText(self["entry"].getText())

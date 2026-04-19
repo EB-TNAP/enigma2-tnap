@@ -391,10 +391,11 @@ class LocaleSelection(Screen):
 						self.currentLocale = locale
 						self.switchLocale = False
 					international.activateLocale(locale, runCallbacks=False)
-				elif status == self.PACK_INSTALLED:
+				elif status in (self.PACK_INSTALLED, self.PACK_IN_USE):
 					international.activateLocale(self.currentLocale, runCallbacks=False)
 				Processing.instance.hideProgress()
 				self.updateLocaleList(self.currentLocale)
+				self.moveToLocale(self.currentLocale)
 				self.updateText()
 			case _:
 				print(f"[LocaleSelection] Error: Unexpected opkg event '{self.opkgComponent.getEventText(event)}'!")

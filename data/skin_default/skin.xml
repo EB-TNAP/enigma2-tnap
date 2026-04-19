@@ -91,6 +91,7 @@
 		<font filename="/usr/share/fonts/ae_AlMateen.ttf" name="Replacement" scale="90" replacement="1"/>
 		<font filename="/usr/share/fonts/tuxtxt.ttf" name="Console" scale="100"/>
 		<font filename="/usr/share/fonts/andale.ttf" name="Fixed" scale="100"/>
+		<font filename="/usr/share/fonts/DejaVuSans.ttf" name="MultiLingual" scale="100"/>
 		<!-- Aliases that should be present -->
 		<alias name="Body" font="Regular" size="20" height="25"/>
 		<alias name="ChoiceList" font="Regular" size="20" height="25"/>

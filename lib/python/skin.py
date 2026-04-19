@@ -1155,6 +1155,9 @@ class AttributeParser:
 	def pixmap(self, value):
 		self.guiObject.setPixmap(parsePixmap(value, self.desktop))
 
+	def pixmaps(self, value):
+		pass  # Handled by MultiPixmap.applySkin(); other components load their pixmap via code.
+
 	def pointer(self, value):
 		(name, pos) = (x.strip() for x in value.split(":", 1))
 		ptr = parsePixmap(name, self.desktop)

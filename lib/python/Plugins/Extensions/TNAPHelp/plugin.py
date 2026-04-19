@@ -114,7 +114,7 @@ class TNAPHelpViewer(Screen):
             }, -1)
 
         try:
-            with open(path, "r") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 content = f.read()
         except Exception as e:
             content = _("Could not load document: %s") % str(e)

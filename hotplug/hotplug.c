@@ -1,3 +1,16 @@
+/*
+Copyright (c) 2024-2025 jbleyel
+
+This code may be used commercially. Attribution must be given to the original author.
+Licensed under GPLv2.
+
+This file also contains the previous code of
+https://github.com/OpenPLi/hotplug-e2-helper
+based on multiple authors.
+*/
+
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>

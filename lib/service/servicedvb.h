@@ -233,7 +233,7 @@ protected:
 	ePtr<eDVBCSASession> m_csa_session;
 	ePtr<eConnection> m_csa_activated_conn;
 	ePtr<eDVBSoftDecoder> m_soft_decoder;
-	bool m_soft_decoder_video_info_valid;  // Track if video info is available from SoftDecoder
+	bool m_soft_decoder_video_info_valid = false;  // Track if video info is available from SoftDecoder
 
 	int m_is_primary;
 	int m_decoder_index;

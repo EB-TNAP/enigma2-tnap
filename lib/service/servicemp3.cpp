@@ -3474,7 +3474,7 @@ void eServiceMP3::gstBusCall(GstMessage* msg) {
 				}
 
 				if (m_pending_seek_pos > 0) {
-					eDebug("[eServiceMP3] Performing deferred seek to %llds", m_pending_seek_pos);
+					eDebug("[eServiceMP3] Performing deferred seek to %llds", (long long)m_pending_seek_pos);
 					seekTo(m_pending_seek_pos);
 					m_pending_seek_pos = -1;
 				}
@@ -4066,7 +4066,7 @@ void eServiceMP3::pullSubtitle(GstBuffer* buffer) {
 
 						if (decoder_pts >= 0) {
 							// Both values are in 90kHz
-								// Calculate delta based on MPEGTS difference
+							// Calculate delta based on MPEGTS difference
 							delta = (sub.vtt_mpegts_base - m_base_mpegts) / 90; // Convert to ms
 						}
 
@@ -4149,7 +4149,7 @@ void eServiceMP3::pushDVBSubtitles() {
 			m_subtitle_widget->setPage(dvb_page);
 			m_dvb_subtitle_pages.pop_front();
 		} else {
-			eDebug("[eServiceMP3] Delay early subtitle by %.03fs. Page stack size %lu", diff / 1000.0f,
+			eDebug("[eServiceMP3] Delay early subtitle by %.03fs. Page stack size %zu", diff / 1000.0f,
 				   m_dvb_subtitle_pages.size());
 			m_dvb_subtitle_sync_timer->start(diff, 1);
 			break;

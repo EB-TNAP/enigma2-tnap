@@ -429,7 +429,7 @@ void eDVBSoftDecoder::streamHealthCheck()
 		int64_t elapsed = now - m_last_health_check;
 		if (elapsed > 2000)
 		{
-			eDebug("[eDVBSoftDecoder] MainLoop was blocked for %lldms, skipping stall check", elapsed);
+			eDebug("[eDVBSoftDecoder] MainLoop was blocked for %lldms, skipping stall check", (long long)elapsed);
 			m_stall_count = 0;
 			m_stream_stalled = false;
 			m_last_pts = 0;

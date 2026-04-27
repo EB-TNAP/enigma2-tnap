@@ -313,7 +313,7 @@ class StorageDevice():
 		task = LoggingTask(job, "fstrim")
 		task.setTool("fstrim")
 		task.args += ["-v"]
-		task.args.append(self.devicePoint)
+		task.args.append(self.findMount() or self.devicePoint)
 		task = MountTask(job, self, debug=debug)
 		task.weighting = 3
 		return job

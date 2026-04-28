@@ -829,19 +829,24 @@ class DeviceManager(Screen):
 			try:
 				job_manager.AddJob(self.getActionFunction(self.currentAction, self.currentStorageDevice)(self.currentOptions))
 				for job in job_manager.getPendingJobs():
-					if job.name in (_("Initializing storage device..."), _("Checking file system..."), _("Converting ext3 to ext4..."), _("Wiping storage device..."), _("Formatting storage device...")):
+					if job.name == _("Trim File System..."):
+						self.showJobView(job, afterEventChangeable=True, afterEvent="nothing")
+						break
+					elif job.name in (_("Initializing storage device..."), _("Checking file system..."), _("Converting ext3 to ext4..."), _("Wiping storage device..."), _("Formatting storage device...")):
 						self.showJobView(job)
 						break
 			except Exception as ex:
 				self.session.open(MessageBox, str(ex), type=MessageBox.TYPE_ERROR, timeout=10)
 
-	def showJobView(self, job):
+	def showJobView(self, job, afterEventChangeable=False, afterEvent="close"):
 		from Screens.TaskView import JobView
 		job_manager.in_background = False
-		self.session.openWithCallback(self.JobViewCB, JobView, job, cancelable=False, afterEventChangeable=False, afterEvent="close")
+		self.session.openWithCallback(self.JobViewCB, JobView, job, cancelable=False, afterEventChangeable=afterEventChangeable, afterEvent=afterEvent)
 
 	def JobViewCB(self, in_background):
 		job_manager.in_background = in_background
+		if self.currentAction == StorageDeviceAction.ACTION_TRIM:
+			self.session.open(MessageBox, _("Trim File System completed."), MessageBox.TYPE_INFO, timeout=10)
 		if self.curentservice:
 			self.session.nav.playService(self.curentservice)
 		harddiskmanager.refresh(self.currentStorageDevice.disk)

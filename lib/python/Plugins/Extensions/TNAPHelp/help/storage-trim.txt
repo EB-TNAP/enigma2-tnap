@@ -1,0 +1,155 @@
+STORAGE TRIM (SSD MAINTENANCE)
+==============================
+
+TRIM tells your SSD which blocks of storage are no longer in use so
+the drive can pre-erase them. Without regular TRIM, write performance
+on an SSD or NVMe drive degrades over time as the drive runs out of
+pre-erased cells.
+
+TNAP 7 handles TRIM automatically for drives connected to your
+receiver, including NVMe drives connected via USB adapter.
+
+
+SUPPORTED DRIVES
+----------------
+  Native SATA / NVMe drives    Full kernel TRIM support
+  NVMe via USB adapter (UAS)   SCSI UNMAP via ext4trim
+  USB flash drives             Not trimmed (not supported by design)
+  Internal eMMC                Not trimmed (self-managed)
+
+Note: USB NVMe support requires the JMicron JMS583 bridge chip
+(or compatible) running in UAS mode. If your drive is connected via
+a different USB adapter, it may not be trimmed. Use "View Trim Log"
+in Device Manager to confirm.
+
+
+METHOD 1: ONE-TIME TRIM FROM DEVICE MANAGER
+--------------------------------------------
+Use this when you want to trim a drive immediately.
+
+Step 1 - Go to:  Menu > Setup > System > Device Manager
+
+Step 2 - Highlight the drive partition you want to trim
+         (for example: sdd1 - your external HDD or NVMe drive).
+
+Step 3 - Press the Green button to open the action menu.
+
+Step 4 - Select "Trim File System".
+
+Step 5 - Confirm when prompted.
+
+A progress screen will appear showing the trim working. For a 1TB
+NVMe drive this typically takes 8-10 minutes. You can press the
+Background button to close the progress screen and watch TV while
+the trim continues. A notification will appear when it finishes.
+
+
+METHOD 2: SCHEDULE AUTOMATIC TRIM (Recommended)
+-------------------------------------------------
+Set a recurring schedule so trim runs automatically while the
+receiver is idle. This is the recommended approach.
+
+Step 1 - Go to:  Menu > Setup > System > Device Manager
+
+Step 2 - Highlight any drive partition.
+
+Step 3 - Press Green > select "Schedule Automatic Trim".
+
+Step 4 - Choose a schedule. The current setting is marked with  »
+
+    »  Weekly - Sunday 2:00am     (factory default)
+       Weekly - Saturday 2:00am
+       Monthly - 1st day 2:00am
+       Disabled
+
+Step 5 - The schedule is saved immediately.
+
+The trim runs automatically at the chosen time as long as the
+receiver is in standby or on. No further action is needed.
+
+
+METHOD 3: MANUAL CRON EDIT VIA TERMINAL (Advanced)
+----------------------------------------------------
+Use this if you want a custom schedule not available in the menu,
+such as a specific hour or a different day of the week.
+
+Requires SSH or Telnet access to the receiver.
+
+STEP 1 - Connect via SSH or Telnet and log in as root.
+
+STEP 2 - View the current schedule:
+
+          crontab -l
+
+  You should see a line similar to:
+
+          # fstrim-cron
+          0 2 * * 0 /usr/sbin/fstrim-all >> /var/log/fstrim.log 2>&1
+
+STEP 3 - Open the crontab editor:
+
+          crontab -e
+
+  This opens the vi editor. Press  i  to enter insert mode,
+  make your changes, then press  Esc  and type  :wq  to save.
+
+CRON FORMAT REFERENCE
+  The five fields before the command set the schedule:
+
+          MIN  HOUR  DAY  MONTH  WEEKDAY
+
+  WEEKDAY: 0=Sunday  1=Monday  2=Tuesday  3=Wednesday
+           4=Thursday  5=Friday  6=Saturday
+  *  means "every"
+
+EXAMPLES
+  0 2 * * 0     Every Sunday at 2:00am       (factory default)
+  0 3 * * 6     Every Saturday at 3:00am
+  0 1 * * 1     Every Monday at 1:00am
+  0 2 1 * *     1st day of every month at 2:00am
+  0 4 1,15 * *  1st and 15th of each month at 4:00am
+
+FULL CRON LINE (copy exactly, change only the 5 fields at the start):
+
+  0 2 * * 0 /usr/sbin/fstrim-all >> /var/log/fstrim.log 2>&1
+
+STEP 4 - To verify the change was saved:
+
+          crontab -l
+
+
+VIEWING THE TRIM LOG
+---------------------
+To see when trim last ran and how much free space was reclaimed:
+
+  From Device Manager:
+    Press Green > select "View Trim Log"
+    Shows the last run summary — device, size trimmed, and scan time.
+
+  From terminal (full log):
+    cat /var/log/fstrim.log
+
+  Check when trim last ran successfully:
+    cat /var/lib/fstrim.last
+
+  (The .last file contains a Unix timestamp. Use  date -d @NNNNNNNN
+   on a PC to convert it, or check the log directly.)
+
+
+DISABLING AUTOMATIC TRIM
+--------------------------
+  From Device Manager:
+    Press Green > Schedule Automatic Trim > select "Disabled"
+
+  From terminal:
+    crontab -e  then delete the two fstrim-cron lines and save.
+
+
+NOTES
+-----
+- Trim does not delete your data. It only tells the SSD which
+  blocks are free. Your recordings and files are not affected.
+- Running trim more often than weekly has no additional benefit.
+- The progress bar updates approximately every 37 seconds during
+  a long scan. This is normal — the drive is working.
+- Log files are kept at /var/log/fstrim.log (max 512KB, one backup).

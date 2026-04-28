@@ -266,10 +266,17 @@ class StorageDeviceManager():
 				if not device.startswith(black) and device not in seenDevices:
 					seenDevices.append(device)
 		seenDevices = sorted(seenDevices, key=alphanumKey)
+		disksWithPartitions = set()
+		for device in seenDevices:
+			if search(r"^sd[a-z][1-9][\d]*$", device) or search(r"^mmcblk[\d]p[\d]*$", device):
+				disk = device[:7] if device.startswith("mmcblk") else sub(r"[\d]", "", device)
+				disksWithPartitions.add(disk)
 		for device in seenDevices:
 			isPartition = search(r"^sd[a-z][1-9][\d]*$", device) or search(r"^mmcblk[\d]p[\d]*$", device)
 			if not isPartition:
 				if not search(r"^sd[a-z]*$", device) and not search(r"^mmcblk[\d]*$", device):
+					continue
+				if device in disksWithPartitions:
 					continue
 			deviceList.append(self.createDevice(device, bool(isPartition), mounts, swapDevices, partitions, knownDevices, fstab))
 		seenUUIDs = [device.get("UUID") for device in deviceList if device.get("UUID")]
@@ -631,11 +638,14 @@ class DeviceManager(Screen):
 		self.deviceList = []
 		storageDeviceList, unknownList = self.storageDevices.createDevicesList()
 		for storageDevice in storageDeviceList:
-			deviceDisplayName = "" if storageDevice.get("isPartition") else storageDevice.get("device")
-			deviceDisplayNameIndent = storageDevice.get("device") if storageDevice.get("isPartition") else ""
+			deviceDisplayName = storageDevice.get("device")
 			mountPoint = storageDevice.get("mountPoint")
 			label = storageDevice.get("label")
 			size = f"{scaleNumber(storageDevice.get("size"), format="%.2f")}"
+			deviceType = storageDevice.get("deviceType")
+			devicePixmap = LoadPixmap(resolveFilename(SCOPE_GUISKIN, self.DEVICE_TYPES[deviceType][self.DEVICE_TYPES_ICON]))
+			deviceName = self.DEVICE_TYPES[deviceType][self.DEVICE_TYPES_NAME]
+			separator = ""
 			if storageDevice.get("isPartition"):
 				if ":None" in storageDevice.get("knownDevice"):
 					mountPoint = "Ignore"
@@ -651,18 +661,13 @@ class DeviceManager(Screen):
 					swapState = _("On") if storageDevice.get("swapState") else _("Off")
 					des = f"{_("Swap")}: {swapState}"
 				else:
-					des = f"{label or _("No Name")}: {mountPoint} {fs}{rw}"
-				separator = "└"
-				devicePixmap = None
+					des = f"{deviceName}{storageDevice.get("model")}: {label or _("No Name")}: {mountPoint} {fs}{rw}"
 			else:
-				separator = ""
-				devicePixmap = LoadPixmap(resolveFilename(SCOPE_GUISKIN, self.DEVICE_TYPES[storageDevice.get("deviceType")][self.DEVICE_TYPES_ICON]))
-				deviceName = self.DEVICE_TYPES[storageDevice.get("deviceType")][self.DEVICE_TYPES_NAME]
 				des = f"{deviceName}{storageDevice.get("model")}"
 			#        0          1           2    3             4       5        6          7     8          9         10           11          12     13              14
 			# res = (selection, deviceName, des, devicePixmap, mountP, deviceP, isMounted, UUID, UUIDMount, devMount, knownDevice, deviceType, model, deviceLocation, description)
-			#      0   1                  2                        3    4     5          6             7                                8                                 9                               10
-			res = ("", deviceDisplayName, deviceDisplayNameIndent, des, size, separator, devicePixmap, storageDevice.get("mountPoint"), storageDevice.get("devicePoint"), storageDevice.get("isMounted"), storageDevice)
+			#      0   1                  2    3    4     5          6             7                                8                                 9                               10
+			res = ("", deviceDisplayName, "", des, size, separator, devicePixmap, storageDevice.get("mountPoint"), storageDevice.get("devicePoint"), storageDevice.get("isMounted"), storageDevice)
 			self.deviceList.append(res)
 		if unknownList:
 			res = (None, _("Unknown Devices"), "", "", "", "", None, "", "", "", {})
@@ -902,6 +907,16 @@ class DeviceManager(Screen):
 		def keyActionsCallback(action):
 			self.currentAction = action
 			options = {"debug": True} if config.crash.debugStorage.value else {}
+			if action and storageDevice.isPartition and action in (StorageDeviceAction.ACTION_INITIALIZE, StorageDeviceAction.ACTION_WIPE):
+				diskData = dict(storageDevice.deviceData)
+				diskData.update({
+					"device": storageDevice.disk,
+					"devicePoint": f"/dev/{storageDevice.disk}",
+					"isPartition": False,
+					"size": storageDevice.diskSize,
+					"diskSize": storageDevice.diskSize,
+				})
+				self.currentStorageDevice = StorageDevice(diskData)
 			if action:
 				if action == StorageDeviceAction.ACTION_IGNORE:
 					knownDevices = fileReadLines("/etc/udev/known_devices", [], source=MODULE_NAME)
@@ -917,10 +932,10 @@ class DeviceManager(Screen):
 				elif action == StorageDeviceAction.ACTION_LABEL:
 					self.session.openWithCallback(renameCallback, VirtualKeyBoard, title=_("Please enter the new name:"), text=storageDevice.label)
 				elif action in (StorageDeviceAction.ACTION_FORMAT, StorageDeviceAction.ACTION_INITIALIZE):
-					self.session.openWithCallback(keyActionsSetupCallback, StorageDeviceAction, storageDevice, action, _("Format Storage Device"))
+					self.session.openWithCallback(keyActionsSetupCallback, StorageDeviceAction, self.currentStorageDevice, action, _("Format Storage Device"))
 				elif action == StorageDeviceAction.ACTION_WIPE:
 					uuids = {}
-					for device in [x.replace("/dev/", "") for x in glob(f"{storageDevice.devicePoint}*") if x != storageDevice.devicePoint]:
+					for device in [x.replace("/dev/", "") for x in glob(f"{self.currentStorageDevice.devicePoint}*") if x != self.currentStorageDevice.devicePoint]:
 						uuid = fileReadLine(f"/dev/uuid/{device}", default=None, source=MODULE_NAME)
 						if uuid:
 							uuids[device] = uuid
@@ -959,7 +974,9 @@ class DeviceManager(Screen):
 			if storageDevice.isPartition:
 				choiceList = [
 					(_("Cancel"), 0),
-					(_("Format Storage Device"), StorageDeviceAction.ACTION_FORMAT)
+					(_("Format Storage Device"), StorageDeviceAction.ACTION_FORMAT),
+					(_("Initialize Storage Device"), StorageDeviceAction.ACTION_INITIALIZE),
+					(_("Wipe Storage Device"), StorageDeviceAction.ACTION_WIPE)
 				]
 				if storageDevice.fsType in fileSystems:
 					choiceList.append((_("File System Check"), StorageDeviceAction.ACTION_CHECK))
@@ -976,7 +993,7 @@ class DeviceManager(Screen):
 			else:
 				choiceList = [
 					(_("Cancel"), 0),
-					(_("Format Storage Device"), StorageDeviceAction.ACTION_INITIALIZE),
+					(_("Initialize Storage Device"), StorageDeviceAction.ACTION_INITIALIZE),
 					(_("Wipe Storage Device"), StorageDeviceAction.ACTION_WIPE)
 				]
 			self.currentStorageDevice = storageDevice

@@ -54,7 +54,7 @@ class StorageDevice():
 		self.mount_path = None
 		self.mount_device = None
 		self.dev_path = self.devicePoint
-		self.disk_path = self.dev_path
+		self.disk_path = f"/dev/{self.disk}"
 
 	def getLabelLimit(self, fstype):
 		if "ntfs" in fstype:

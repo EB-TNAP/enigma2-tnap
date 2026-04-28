@@ -33,7 +33,7 @@
 from glob import glob
 from os import listdir, mkdir, rmdir, unlink
 from os.path import exists, ismount, join, realpath
-from re import sub
+from re import search, sub
 from string import ascii_letters, digits
 
 
@@ -309,9 +309,7 @@ class StorageDevice():
 
 	def createTrimJob(self, options=None):
 		options = options or {}
-		debug = options.get("debug")
 		job = Job(_("Trim File System..."))
-		task = LoggingTask(job, "fstrim")
 		basedev = sub(r'p?\d+$', '', self.devicePoint.split('/')[-1])
 		gran_path = f"/sys/block/{basedev}/queue/discard_granularity"
 		try:
@@ -320,15 +318,15 @@ class StorageDevice():
 		except Exception:
 			gran = 0
 		if gran > 0:
+			task = TrimTask(job, "fstrim")
 			task.setTool("fstrim")
 			task.args += ["-v"]
 			task.args.append(self.findMount() or self.devicePoint)
 		else:
-			# Kernel discard unavailable (e.g. USB-bridged NVMe on SF8008).
-			# fstrim-all handles the JMicron JMS583 UAS path via SCSI UNMAP.
+			# Kernel discard unavailable (e.g. USB-bridged NVMe via JMicron JMS583).
+			# fstrim-all uses SCSI UNMAP via ext4trim.py; progress reported as (X%).
+			task = TrimTask(job, "fstrim-all")
 			task.setTool("/usr/sbin/fstrim-all")
-		task = MountTask(job, self, debug=debug)
-		task.weighting = 3
 		return job
 
 
@@ -506,6 +504,21 @@ class MkfsTask(LoggingTask):
 		if self.debug:
 			print(f"[{self.__class__.__name__}] DEBUG Output:\n")
 			print(self.log)
+
+
+class TrimTask(LoggingTask):
+	def processOutput(self, data):
+		if isinstance(data, bytes):
+			data = data.decode()
+		# ext4trim progress lines: "scanning group NNN/TTTT (XX%) ..."
+		match = search(r'\((\d+)%\)', data)
+		if match:
+			self.setProgress(int(match.group(1)))
+		# fstrim -v completion: "/media/hdd: N GiB (x bytes) trimmed"
+		# fstrim-all completion: "fstrim-all: done"
+		elif "trimmed" in data or "fstrim-all: done" in data:
+			self.setProgress(100)
+		self.log.append(data)
 
 
 def getProcMountsNew():

@@ -1,0 +1,143 @@
+DEVICE MANAGER
+==============
+
+Device Manager lets you manage external storage connected to your
+receiver — format drives, check file systems, set mount points,
+and schedule automatic maintenance.
+
+Go to:  Menu > Setup > System > Device Manager
+
+
+THE DEVICE LIST
+---------------
+Each connected drive shows as one entry. The description shows the
+partition label, mount point, file system type, and read/write status.
+
+  Example:
+    sdd1   USB: Generic: DISK_1: /media/hdd ext4 R/W   1.00 TB
+
+Unformatted or unpartitioned drives appear without a partition number:
+  sdd    USB: Generic   1.00 TB
+
+An unpartitioned drive must be Initialized before it can be used.
+
+
+NAVIGATION
+----------
+  Up / Down      Move through the drive list
+  Green          Open the action menu for the selected drive
+  Yellow         Set permanent mount points for all drives
+  Blue           Temporarily mount or unmount the selected drive
+  Red / Exit     Close Device Manager
+
+
+ACTION MENU  (Green button)
+----------------------------
+Highlight a drive and press Green to see available actions.
+
+
+FORMAT STORAGE DEVICE
+  Formats the existing partition with a new file system.
+  Lets you choose: ext4, ext3, ext2, vfat, exfat, ntfs, swap.
+  Recommended file system for recordings and storage: ext4.
+  WARNING: All data on the partition will be erased.
+
+
+INITIALIZE STORAGE DEVICE
+  Use this on a brand-new drive or when you want to completely
+  repartition an existing drive.
+  Creates a new partition table and one partition covering the
+  full drive, then formats it.
+  WARNING: All existing partitions and data will be erased.
+
+
+WIPE STORAGE DEVICE
+  Removes the partition table only. Leaves the drive completely
+  blank with no partitions or file system.
+  Use this before returning a drive or passing it to another device
+  that will partition it itself.
+  WARNING: All data and partitions will be erased.
+
+
+FILE SYSTEM CHECK
+  Runs fsck (file system check) on the partition.
+  Use this if the drive was not properly unmounted, or if you see
+  read errors. The drive is unmounted first, checked, then remounted.
+  May take several minutes on a large drive.
+
+
+TRIM FILE SYSTEM
+  Sends a TRIM command to the SSD telling it which blocks are free.
+  Maintains SSD write performance over time.
+  See the "Storage Trim" guide in this help menu for full details.
+
+
+SCHEDULE AUTOMATIC TRIM
+  Sets a recurring schedule for automatic TRIM.
+  The current schedule is marked with  »
+  Options: Disabled / Weekly Sunday 2am / Weekly Saturday 2am /
+           Monthly 1st day 2am.
+
+
+VIEW TRIM LOG
+  Shows the summary from the last automatic or manual trim run.
+  Confirms the drive was trimmed, how much free space was processed,
+  and how long it took.
+
+
+RENAME
+  Changes the partition label (the name shown in the drive list).
+  Applies to ext2/3/4, vfat, exfat, and ntfs partitions.
+
+
+PERMANENTLY IGNORE THIS DEVICE
+  Tells the receiver to never auto-mount this partition.
+  The drive will still appear in Device Manager but will not be
+  mounted automatically on connect or reboot.
+  Use "Activate This Device" to reverse the setting.
+
+
+MOUNT POINTS  (Yellow button)
+-------------------------------
+Press Yellow to assign permanent mount points to all detected drives.
+A permanent mount point is written to /etc/fstab so the drive always
+mounts to the same location (e.g. /media/hdd) after each reboot.
+
+  Recommended mount points:
+    First HDD / NVMe    /media/hdd
+    USB flash drive     /media/usb
+    Second drive        /media/hdd2
+
+If you do not assign a mount point, the receiver will auto-assign
+one each time the drive is connected. Auto-assigned points may
+change if you connect drives in a different order.
+
+
+FILE SYSTEM REFERENCE
+----------------------
+  ext4    Best choice for recordings and large files on Linux.
+           Supports journaling, large files, efficient TRIM.
+
+  vfat    FAT32. Compatible with Windows and most devices.
+           Maximum file size 4GB. No TRIM support.
+
+  exfat   Extended FAT. Windows/Mac compatible, no 4GB limit.
+           Good for drives shared between receiver and PC.
+
+  ntfs    Windows NTFS. Read/write support on TNAP.
+           Use only if the drive must be used on Windows too.
+
+  ext2    Old Linux format, no journaling. Not recommended.
+  ext3    Linux format with journaling. Use ext4 instead.
+  swap    Swap partition. Only needed in special configurations.
+
+
+NOTES
+-----
+- Always use ext4 for drives used exclusively with your receiver.
+- Device Manager unmounts and remounts drives automatically during
+  Format, Initialize, and Check operations.
+- Recordings, timers, and timeshift paths should be set AFTER
+  the drive is formatted and a permanent mount point is assigned.
+- If a drive does not appear in the list, check that it is
+  properly powered and connected. Try unplugging and reconnecting.

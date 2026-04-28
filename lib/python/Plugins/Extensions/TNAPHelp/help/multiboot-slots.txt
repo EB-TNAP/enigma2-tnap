@@ -1,0 +1,109 @@
+MULTIBOOT AND IMAGE SLOTS
+=========================
+
+Multiboot lets you install and run multiple TNAP images on the same
+receiver. Each image lives in its own slot and is completely
+independent — separate settings, channels, recordings path, and
+plugins. You can switch between them without losing anything.
+
+All TNAP 7 supported receivers have up to 4 multiboot slots in
+addition to the main internal flash (slot 0).
+
+
+HOW SLOTS WORK
+---------------
+  Slot 0    Internal eMMC — the factory / main image.
+             Always present. Cannot be deleted.
+
+  Slot 1–4  Multiboot slots stored in a separate area of eMMC.
+             Each slot is an independent install of TNAP 7.
+             Empty slots show as available when flashing.
+
+When you flash an image, you choose which slot to write to.
+The receiver can boot from any slot that has an image installed.
+
+
+SWITCHING BETWEEN SLOTS
+------------------------
+Method 1 — Flash Manager (recommended):
+
+  Go to:  Menu > Setup > System > Flash Manager
+
+  The current running slot is shown at the top.
+  Highlight another slot and press the appropriate button to
+  select it as the boot slot. Confirm when prompted.
+  The receiver will reboot into the selected slot.
+
+Method 2 — Bootloader menu:
+
+  Hold the front panel button during power-on (method varies by
+  receiver model) to access the bootloader slot selection menu.
+
+
+FLASHING A NEW IMAGE
+---------------------
+Step 1 - Download the TNAP 7 image file (.zip) onto a USB drive
+         or into the /tmp folder on the receiver.
+
+Step 2 - Go to:  Menu > Setup > System > Flash Manager
+
+Step 3 - Select the source:
+           USB Drive  — browse to the .zip file on your USB drive
+           /tmp        — if you transferred the file via SSH/FTP
+
+Step 4 - Select which slot to flash:
+           Overwrite current slot  — replaces the running image
+           Empty slot (1–4)        — installs alongside existing images
+
+Step 5 - Confirm the flash. Do not power off the receiver during
+         this process. The screen will go black briefly — this is
+         normal. The receiver will reboot when complete.
+
+IMPORTANT: Flashing a slot that already has an image will erase
+that slot's settings, channel list, and installed plugins.
+It does NOT affect other slots.
+
+
+WHICH SLOT AM I IN?
+---------------------
+  Menu > Information > About
+  The slot number is shown in the image information.
+
+  Or from terminal:
+    cat /proc/cmdline | grep -o "slot_[0-9]"
+
+
+MANAGING SLOTS
+---------------
+  Copy settings to another slot:
+    Some backup plugins can copy settings between slots.
+    Settings are stored in /etc/enigma2/ within each slot.
+
+  Deleting a slot:
+    Flash a fresh image to that slot, or use the slot management
+    option in Flash Manager if available.
+
+
+RECORDINGS AND EXTERNAL DRIVES
+--------------------------------
+Recordings are stored on your external HDD or NVMe drive, NOT
+inside a slot. This means:
+  - All slots share the same recordings on /media/hdd
+  - Deleting or reflashing a slot does NOT delete recordings
+  - Timer settings are per-slot (stored inside the slot)
+
+Set up your recording path in each slot separately:
+  Menu > Setup > System > Recording Paths
+
+
+NOTES
+-----
+- Always use multiboot slots for testing new images before
+  committing to the main slot.
+- If a slot fails to boot, power cycle and use the bootloader
+  menu to select a working slot.
+- The internal eMMC (slot 0) is the safest fallback — keep a
+  known-good image there.
+- Slot numbers shown in Flash Manager and the bootloader may
+  differ by one depending on the receiver model. The slot
+  shown in Menu > About is always correct.

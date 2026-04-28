@@ -1,0 +1,139 @@
+SSH AND TELNET ACCESS
+=====================
+
+SSH and Telnet let you connect to your receiver from a PC or phone
+and run commands directly. This is useful for troubleshooting,
+capturing debug logs, editing configuration files, and advanced
+maintenance tasks.
+
+SSH is encrypted and preferred. Telnet sends data in plain text
+but works on all networks.
+
+
+FINDING YOUR RECEIVER'S IP ADDRESS
+------------------------------------
+Method 1 - On the receiver:
+  Menu > Setup > System > Network > Network Status
+  The IP address is shown on screen.
+
+Method 2 - On the receiver info bar:
+  Some skins show the IP address in the status bar.
+
+Method 3 - From your router:
+  Log into your router's admin page and look for connected devices.
+  The receiver will usually appear as "SF8008", "Dual", or similar.
+
+TIP: Assign a fixed (static) IP to your receiver in your router
+settings so the address never changes.
+
+
+LOGIN CREDENTIALS
+------------------
+  Username:   root
+  Password:   (none — press Enter when prompted)
+
+If you have set a root password, use that password instead.
+
+
+CONNECTING FROM WINDOWS
+------------------------
+Windows 10 and 11 have built-in SSH in the Command Prompt.
+
+  Method A — Command Prompt (Windows 10/11):
+    1. Open Start > type  cmd  > press Enter.
+    2. Type:   ssh root@192.168.1.x
+       (replace 192.168.1.x with your receiver's IP address)
+    3. Press Enter. If asked to confirm the key, type  yes
+    4. Press Enter again when asked for a password.
+
+  Method B — PuTTY (any Windows version):
+    Download PuTTY from https://www.putty.org
+    1. Open PuTTY.
+    2. Enter your receiver's IP address in the Host Name field.
+    3. Port: 22, Connection type: SSH.
+    4. Click Open.
+    5. Log in as  root  and press Enter for the password.
+
+  Telnet (if SSH is not available):
+    Open Command Prompt and type:
+       telnet 192.168.1.x
+    Press Enter for the password when prompted.
+
+
+CONNECTING FROM MAC OR LINUX
+------------------------------
+  1. Open Terminal.
+  2. Type:   ssh root@192.168.1.x
+  3. Press Enter. Type  yes  if asked to confirm the key.
+  4. Press Enter for the password.
+
+
+CONNECTING FROM ANDROID OR IOS
+--------------------------------
+Many free SSH apps are available:
+  Android:   JuiceSSH, ConnectBot, Termux
+  iOS:       Prompt 3, SSH Files, Termius
+
+Configure as: Host = receiver IP, User = root, Password = (blank).
+
+
+USEFUL COMMANDS
+----------------
+Once connected, here are commonly used commands:
+
+  Show disk usage:
+    df -h
+
+  Show connected drives:
+    lsblk
+
+  Restart enigma2 (without full reboot):
+    init 4 && sleep 3 && enigma2 &
+
+  Reboot the receiver:
+    reboot
+
+  View the system log:
+    cat /var/log/enigma2/enigma2.log
+
+  View the trim log:
+    cat /var/log/fstrim.log
+
+  View current cron schedule:
+    crontab -l
+
+  Edit cron schedule:
+    crontab -e
+    (opens vi editor — press i to edit, Esc then :wq to save)
+
+  Check network interfaces:
+    ifconfig
+
+  Show running processes:
+    ps
+
+
+VI EDITOR QUICK REFERENCE
+---------------------------
+The vi editor is used when editing files via terminal (crontab -e,
+editing config files, etc.).
+
+  i           Enter insert mode (you can now type)
+  Esc         Return to command mode (stop typing)
+  :wq         Save and quit
+  :q!         Quit WITHOUT saving
+  Arrow keys  Move cursor (in command mode)
+  dd          Delete the current line (in command mode)
+  u           Undo last change (in command mode)
+
+
+NOTES
+-----
+- Keep your SSH/Telnet window open while performing tasks.
+  Closing it may interrupt operations in progress.
+- The receiver does not have a traditional multi-user setup.
+  Everything runs as root. Be careful with commands.
+- If SSH connection is refused, check that the network cable
+  or WiFi is connected and that the receiver has fully booted.
+- For capturing debug logs via SSH, see the "Debug Capture"
+  guide in this help menu.

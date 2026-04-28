@@ -33,6 +33,7 @@
 from glob import glob
 from os import listdir, mkdir, rmdir, unlink
 from os.path import exists, ismount, join, realpath
+from re import sub
 from string import ascii_letters, digits
 
 
@@ -311,9 +312,21 @@ class StorageDevice():
 		debug = options.get("debug")
 		job = Job(_("Trim File System..."))
 		task = LoggingTask(job, "fstrim")
-		task.setTool("fstrim")
-		task.args += ["-v"]
-		task.args.append(self.findMount() or self.devicePoint)
+		basedev = sub(r'p?\d+$', '', self.devicePoint.split('/')[-1])
+		gran_path = f"/sys/block/{basedev}/queue/discard_granularity"
+		try:
+			with open(gran_path) as gf:
+				gran = int(gf.read().strip())
+		except Exception:
+			gran = 0
+		if gran > 0:
+			task.setTool("fstrim")
+			task.args += ["-v"]
+			task.args.append(self.findMount() or self.devicePoint)
+		else:
+			# Kernel discard unavailable (e.g. USB-bridged NVMe on SF8008).
+			# fstrim-all handles the JMicron JMS583 UAS path via SCSI UNMAP.
+			task.setTool("/usr/sbin/fstrim-all")
 		task = MountTask(job, self, debug=debug)
 		task.weighting = 3
 		return job

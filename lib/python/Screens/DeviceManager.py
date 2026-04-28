@@ -59,6 +59,22 @@ from Tools.Directories import SCOPE_GUISKIN, fileReadLine, fileReadLines, fileWr
 
 MODULE_NAME = __name__.split(".")[-1]
 
+FSTRIM_CRONTAB = "/var/spool/cron/crontabs/root"
+FSTRIM_CRON_MARKER = "# fstrim-cron"
+FSTRIM_CRON_CMD = "/usr/sbin/fstrim-all >> /var/log/fstrim.log 2>&1"
+FSTRIM_LOG_FILE = "/var/log/fstrim.log"
+FSTRIM_SCHEDULES = [
+	("disabled",    "Disabled"),
+	("weekly_sun",  "Weekly - Sunday 2:00am"),
+	("weekly_sat",  "Weekly - Saturday 2:00am"),
+	("monthly",     "Monthly - 1st day 2:00am"),
+]
+FSTRIM_SCHEDULE_CRON = {
+	"weekly_sun": "0 2 * * 0",
+	"weekly_sat": "0 2 * * 6",
+	"monthly":    "0 2 1 * *",
+}
+
 
 def getDesktopSize():
 	s = getDesktop(0).size()
@@ -80,6 +96,8 @@ class StorageDeviceAction(Setup):
 	ACTION_IGNORE = 7
 	ACTION_ACTIVATE = 8
 	ACTION_TRIM = 9
+	ACTION_SCHEDULE_TRIM = 10
+	ACTION_VIEW_TRIM_LOG = 11
 
 	def __init__(self, session, storageDevice, action, actionText):
 		self.storageDevice = storageDevice
@@ -936,6 +954,10 @@ class DeviceManager(Screen):
 					self.updateDevices()
 				elif action == StorageDeviceAction.ACTION_LABEL:
 					self.session.openWithCallback(renameCallback, VirtualKeyBoard, title=_("Please enter the new name:"), text=storageDevice.label)
+				elif action == StorageDeviceAction.ACTION_SCHEDULE_TRIM:
+					self.keyScheduleTrim()
+				elif action == StorageDeviceAction.ACTION_VIEW_TRIM_LOG:
+					self.keyViewTrimLog()
 				elif action in (StorageDeviceAction.ACTION_FORMAT, StorageDeviceAction.ACTION_INITIALIZE):
 					self.session.openWithCallback(keyActionsSetupCallback, StorageDeviceAction, self.currentStorageDevice, action, _("Format Storage Device"))
 				elif action == StorageDeviceAction.ACTION_WIPE:
@@ -995,6 +1017,8 @@ class DeviceManager(Screen):
 						choiceList.append((_("Activate this device"), StorageDeviceAction.ACTION_ACTIVATE))
 					else:
 						choiceList.append((_("Permanently ignore this device"), StorageDeviceAction.ACTION_IGNORE))
+				choiceList.append((_("Schedule Automatic Trim"), StorageDeviceAction.ACTION_SCHEDULE_TRIM))
+				choiceList.append((_("View Trim Log"), StorageDeviceAction.ACTION_VIEW_TRIM_LOG))
 			else:
 				choiceList = [
 					(_("Cancel"), 0),
@@ -1004,6 +1028,50 @@ class DeviceManager(Screen):
 			self.currentStorageDevice = storageDevice
 			self.currentAction = 0
 			self.session.openWithCallback(keyActionsCallback, MessageBox, text=(_("Select")), list=choiceList, windowTitle=self.getTitle())
+
+	def getCurrentTrimSchedule(self):
+		lines = fileReadLines(FSTRIM_CRONTAB, default=[], source=MODULE_NAME)
+		for line in lines:
+			stripped = line.strip()
+			if not stripped or stripped.startswith("#"):
+				continue
+			if FSTRIM_CRON_CMD in stripped:
+				parts = stripped.split()
+				if len(parts) >= 5:
+					expr = " ".join(parts[:5])
+					for key, cron_expr in FSTRIM_SCHEDULE_CRON.items():
+						if expr == cron_expr:
+							return key
+				return "custom"
+		return "disabled"
+
+	def keyScheduleTrim(self):
+		def scheduleCallback(choice):
+			if choice is None:
+				return
+			key = choice[1]
+			lines = fileReadLines(FSTRIM_CRONTAB, default=[], source=MODULE_NAME)
+			new_lines = [l for l in lines if FSTRIM_CRON_MARKER not in l and FSTRIM_CRON_CMD not in l]
+			if key != "disabled":
+				new_lines.extend([FSTRIM_CRON_MARKER, f"{FSTRIM_SCHEDULE_CRON[key]} {FSTRIM_CRON_CMD}"])
+			fileWriteLines(FSTRIM_CRONTAB, new_lines, source=MODULE_NAME)
+			self.session.open(MessageBox, _("Trim schedule updated."), MessageBox.TYPE_INFO, timeout=4)
+
+		current = self.getCurrentTrimSchedule()
+		choices = [(f"{'» ' if k == current else '  '}{_(label)}", k) for k, label in FSTRIM_SCHEDULES]
+		self.session.openWithCallback(scheduleCallback, ChoiceBox, list=choices, keys=[], windowTitle=_("Schedule Automatic Trim"))
+
+	def keyViewTrimLog(self):
+		lines = fileReadLines(FSTRIM_LOG_FILE, default=[], source=MODULE_NAME)
+		if not lines:
+			self.session.open(MessageBox, _("Trim log is empty. No automatic trim has run yet."), MessageBox.TYPE_INFO, timeout=5)
+			return
+		last_start = 0
+		for i, line in enumerate(lines):
+			if "fstrim-all: starting" in line:
+				last_start = i
+		last_run = [l for l in lines[last_start:] if "scanning group" not in l]
+		self.session.open(MessageBox, "\n".join(last_run[:40]) or _("Log is empty."), MessageBox.TYPE_INFO)
 
 	def createSummary(self):
 		return DevicesPanelSummary

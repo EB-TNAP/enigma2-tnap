@@ -350,5 +350,12 @@ def getPythonVersionString():
 	return result
 
 
+def getTNAPBuildTimestamp():
+	for line in fileReadLines("/etc/build-info", default=[], source=MODULE_NAME):
+		if line.startswith("Build Timestamp:"):
+			return line.split(":", 1)[1].strip()
+	return _("Unknown")
+
+
 # For modules that do "from About import about"
 about = modules[__name__]

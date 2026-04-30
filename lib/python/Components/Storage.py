@@ -328,8 +328,10 @@ class StorageDevice():
 			# Kernel discard unavailable (e.g. USB-bridged NVMe via JMicron JMS583).
 			# fstrim-all uses SCSI UNMAP via ext4trim.py; progress reported as (X%).
 			# fstrim-all outputs timestamped lines to stdout; processOutput captures them.
+			# Pass the mount point so only this device is trimmed (not all devices).
 			task = TrimTask(job, "fstrim-all", logFile=FSTRIM_LOG_FILE)
 			task.setTool("/usr/sbin/fstrim-all")
+			task.args.append(self.findMount() or self.devicePoint)
 		return job
 
 

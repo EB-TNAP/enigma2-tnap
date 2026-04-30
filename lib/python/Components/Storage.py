@@ -30,6 +30,7 @@
 #https://creativecommons.org/licenses/by-nc-sa/4.0/
 
 
+from datetime import datetime
 from glob import glob
 from os import listdir, mkdir, rmdir, unlink
 from os.path import exists, ismount, join, realpath
@@ -43,6 +44,7 @@ from Tools.Directories import fileReadLine, fileReadLines, fileWriteLines
 
 MODULE_NAME = __name__.split(".")[-1]
 EXPANDER_MOUNT = ".FlashExpander"
+FSTRIM_LOG_FILE = "/var/log/fstrim.log"
 
 
 class StorageDevice():
@@ -318,13 +320,14 @@ class StorageDevice():
 		except Exception:
 			gran = 0
 		if gran > 0:
-			task = TrimTask(job, "fstrim")
+			task = TrimTask(job, "fstrim", logFile=FSTRIM_LOG_FILE)
 			task.setTool("fstrim")
 			task.args += ["-v"]
 			task.args.append(self.findMount() or self.devicePoint)
 		else:
 			# Kernel discard unavailable (e.g. USB-bridged NVMe via JMicron JMS583).
 			# fstrim-all uses SCSI UNMAP via ext4trim.py; progress reported as (X%).
+			# fstrim-all already writes its own log, so no logFile here.
 			task = TrimTask(job, "fstrim-all")
 			task.setTool("/usr/sbin/fstrim-all")
 		return job
@@ -507,6 +510,19 @@ class MkfsTask(LoggingTask):
 
 
 class TrimTask(LoggingTask):
+	def __init__(self, job, name, logFile=None):
+		LoggingTask.__init__(self, job, name)
+		self.logFile = logFile
+
+	def prepare(self):
+		if self.logFile:
+			ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+			try:
+				with open(self.logFile, 'a') as lf:
+					lf.write(f"{ts} fstrim-all: starting\n")
+			except Exception:
+				pass
+
 	def processOutput(self, data):
 		if isinstance(data, bytes):
 			data = data.decode()
@@ -519,6 +535,23 @@ class TrimTask(LoggingTask):
 		elif "trimmed" in data or "fstrim-all: done" in data:
 			self.setProgress(100)
 		self.log.append(data)
+		if self.logFile:
+			ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+			line = data if data.endswith('\n') else data + '\n'
+			try:
+				with open(self.logFile, 'a') as lf:
+					lf.write(f"{ts} fstrim: {line}")
+			except Exception:
+				pass
+
+	def afterRun(self):
+		if self.logFile:
+			ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+			try:
+				with open(self.logFile, 'a') as lf:
+					lf.write(f"{ts} fstrim-all: done\n")
+			except Exception:
+				pass
 
 
 def getProcMountsNew():

@@ -848,6 +848,7 @@ class DeviceManager(Screen):
 				job_manager.AddJob(self.getActionFunction(self.currentAction, self.currentStorageDevice)(self.currentOptions))
 				for job in job_manager.getPendingJobs():
 					if job.name == _("Trim File System..."):
+						self._activeJob = job
 						self.showJobView(job, afterEventChangeable=True, afterEvent="nothing")
 						break
 					elif job.name in (_("Initializing storage device..."), _("Checking file system..."), _("Converting ext3 to ext4..."), _("Wiping storage device..."), _("Formatting storage device...")):
@@ -863,10 +864,31 @@ class DeviceManager(Screen):
 
 	def JobViewCB(self, in_background):
 		job_manager.in_background = in_background
+		if in_background and self.currentAction == StorageDeviceAction.ACTION_TRIM:
+			job = getattr(self, '_activeJob', None)
+			if job:
+				job.state_changed.append(self._onTrimBackgroundDone)
+			return
 		if self.currentAction == StorageDeviceAction.ACTION_TRIM:
 			self.session.open(MessageBox, _("Trim File System completed."), MessageBox.TYPE_INFO, timeout=10)
 		if self.curentservice:
 			self.session.nav.playService(self.curentservice)
+		harddiskmanager.refresh(self.currentStorageDevice.disk)
+		self.updateDevices()
+
+	def _onTrimBackgroundDone(self):
+		job = getattr(self, '_activeJob', None)
+		if job is None:
+			return
+		if job.status not in (job.FINISHED, job.FAILED):
+			return
+		try:
+			job.state_changed.remove(self._onTrimBackgroundDone)
+		except Exception:
+			pass
+		self._activeJob = None
+		if job.status == job.FINISHED:
+			self.session.open(MessageBox, _("Trim File System completed."), MessageBox.TYPE_INFO, timeout=10)
 		harddiskmanager.refresh(self.currentStorageDevice.disk)
 		self.updateDevices()
 
@@ -1007,7 +1029,17 @@ class DeviceManager(Screen):
 				]
 				if storageDevice.fsType in fileSystems:
 					choiceList.append((_("File System Check"), StorageDeviceAction.ACTION_CHECK))
-					choiceList.append((_("Trim File System"), StorageDeviceAction.ACTION_TRIM))
+					if storageDevice.fsType in ("ext4", "ext3", "ext2"):
+						try:
+							gran = int(fileReadLine(f"/sys/block/{storageDevice.disk}/queue/discard_granularity", default="0", source=MODULE_NAME).strip())
+						except Exception:
+							gran = 0
+						try:
+							removable = int(fileReadLine(f"/sys/block/{storageDevice.disk}/removable", default="0", source=MODULE_NAME).strip())
+						except Exception:
+							removable = 0
+						if gran > 0 or not removable:
+							choiceList.append((_("Trim File System"), StorageDeviceAction.ACTION_TRIM))
 				if storageDevice.fsType == "ext3":
 					choiceList.append((_("Convert file system ext3 to ext4"), StorageDeviceAction.ACTION_EXT4CONVERSION))
 				if "ntfs" not in storageDevice.fsType and storageDevice.fsType in fileSystems:  # NTFS not supported yet because you need to unmount.
@@ -1064,7 +1096,7 @@ class DeviceManager(Screen):
 	def keyViewTrimLog(self):
 		lines = fileReadLines(FSTRIM_LOG_FILE, default=[], source=MODULE_NAME)
 		if not lines:
-			self.session.open(MessageBox, _("Trim log is empty. No automatic trim has run yet."), MessageBox.TYPE_INFO, timeout=5)
+			self.session.open(MessageBox, _("Trim log is empty. No trim has run yet."), MessageBox.TYPE_INFO, timeout=5)
 			return
 		last_start = 0
 		for i, line in enumerate(lines):

@@ -1051,7 +1051,7 @@ class DeviceManager(Screen):
 					else:
 						choiceList.append((_("Permanently ignore this device"), StorageDeviceAction.ACTION_IGNORE))
 				if canTrim:
-					choiceList.append((_("Schedule Automatic Trim"), StorageDeviceAction.ACTION_SCHEDULE_TRIM))
+					choiceList.append((_("Schedule Automatic Trim (All Capable Drives)"), StorageDeviceAction.ACTION_SCHEDULE_TRIM))
 				choiceList.append((_("View Trim Log"), StorageDeviceAction.ACTION_VIEW_TRIM_LOG))
 			else:
 				choiceList = [
@@ -1089,11 +1089,11 @@ class DeviceManager(Screen):
 			if key != "disabled":
 				new_lines.extend([FSTRIM_CRON_MARKER, f"{FSTRIM_SCHEDULE_CRON[key]} {FSTRIM_CRON_CMD}"])
 			fileWriteLines(FSTRIM_CRONTAB, new_lines, source=MODULE_NAME)
-			self.session.open(MessageBox, _("Trim schedule updated."), MessageBox.TYPE_INFO, timeout=4)
+			self.session.open(MessageBox, _("Trim schedule updated.\nAll trim-capable drives will be trimmed on this schedule."), MessageBox.TYPE_INFO, timeout=6)
 
 		current = self.getCurrentTrimSchedule()
 		choices = [(f"{'» ' if k == current else '  '}{_(label)}", k) for k, label in FSTRIM_SCHEDULES]
-		self.session.openWithCallback(scheduleCallback, ChoiceBox, list=choices, keys=[], windowTitle=_("Schedule Automatic Trim"))
+		self.session.openWithCallback(scheduleCallback, ChoiceBox, list=choices, keys=[], windowTitle=_("Schedule Automatic Trim – All Capable Drives"))
 
 	def keyViewTrimLog(self):
 		lines = fileReadLines(FSTRIM_LOG_FILE, default=[], source=MODULE_NAME)

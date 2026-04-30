@@ -1072,7 +1072,7 @@ class DeviceManager(Screen):
 			stripped = line.strip()
 			if not stripped or stripped.startswith("#"):
 				continue
-			if FSTRIM_CRON_CMD in stripped:
+			if "/usr/sbin/fstrim-all" in stripped:
 				parts = stripped.split()
 				if len(parts) >= 5:
 					expr = " ".join(parts[:5])
@@ -1088,7 +1088,7 @@ class DeviceManager(Screen):
 				return
 			key = choice[1]
 			lines = fileReadLines(FSTRIM_CRONTAB, default=[], source=MODULE_NAME)
-			new_lines = [l for l in lines if FSTRIM_CRON_MARKER not in l and FSTRIM_CRON_CMD not in l]
+			new_lines = [l for l in lines if FSTRIM_CRON_MARKER not in l and "/usr/sbin/fstrim-all" not in l]
 			if key != "disabled":
 				new_lines.extend([FSTRIM_CRON_MARKER, f"{FSTRIM_SCHEDULE_CRON[key]} {FSTRIM_CRON_CMD}"])
 			fileWriteLines(FSTRIM_CRONTAB, new_lines, source=MODULE_NAME)

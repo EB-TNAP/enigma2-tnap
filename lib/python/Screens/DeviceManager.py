@@ -946,6 +946,9 @@ class DeviceManager(Screen):
 					message = "%s\n\n%s" % (question, _("You seem to be in time shift, the service will briefly stop as time shift stops."))
 					message = "%s\n%s" % (message, _("Do you want to continue?"))
 					self.session.openWithCallback(self.stopTimeshift, MessageBox, message)
+				elif self.currentAction == StorageDeviceAction.ACTION_TRIM and self._isRecordingOnMount(storageDevice.findMount()):
+					message = "%s\n\n%s\n%s" % (question, _("Warning: A recording is in progress on this drive."), _("Trimming during a recording may affect performance. Continue?"))
+					self.session.openWithCallback(self.hddConfirmed, MessageBox, message, MessageBox.TYPE_YESNO)
 				else:
 					message = "%s\n%s" % (question, _("You can continue watching TV etc. while this is running."))
 					self.session.openWithCallback(self.hddConfirmed, MessageBox, message)
@@ -1094,6 +1097,24 @@ class DeviceManager(Screen):
 		current = self.getCurrentTrimSchedule()
 		choices = [(f"{'» ' if k == current else '  '}{_(label)}", k) for k, label in FSTRIM_SCHEDULES]
 		self.session.openWithCallback(scheduleCallback, ChoiceBox, list=choices, keys=[], windowTitle=_("Schedule Automatic Trim – All Capable Drives"))
+
+	def _isRecordingOnMount(self, mountPoint):
+		if not mountPoint:
+			return False
+		try:
+			from RecordTimer import RecordTimerEntry
+			import NavigationInstance
+			rt = NavigationInstance.instance and NavigationInstance.instance.RecordTimer
+			if not rt:
+				return False
+			for entry in rt.timer_list:
+				if entry.state == RecordTimerEntry.StateRunning:
+					filename = getattr(entry, "Filename", None)
+					if filename and filename.startswith(mountPoint):
+						return True
+		except Exception:
+			pass
+		return False
 
 	def keyViewTrimLog(self):
 		lines = fileReadLines(FSTRIM_LOG_FILE, default=[], source=MODULE_NAME)

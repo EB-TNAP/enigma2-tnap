@@ -49,6 +49,7 @@ from Components.Sources.StaticText import StaticText
 from Screens.ChoiceBox import ChoiceBox
 import Screens.InfoBar
 from Screens.MessageBox import MessageBox
+from Screens.TextBox import TextBox
 from Screens.Screen import Screen
 from Screens.Setup import Setup
 from Screens.Standby import QUIT_REBOOT, TryQuitMainloop
@@ -1104,7 +1105,7 @@ class DeviceManager(Screen):
 			if "fstrim-all: starting" in line:
 				last_start = i
 		last_run = [l for l in lines[last_start:] if "scanning group" not in l]
-		self.session.open(MessageBox, "\n".join(last_run[:40]) or _("Log is empty."), MessageBox.TYPE_INFO)
+		self.session.open(TextBox, "\n".join(last_run) or _("Log is empty."), title=_("Trim Log"))
 
 	def createSummary(self):
 		return DevicesPanelSummary

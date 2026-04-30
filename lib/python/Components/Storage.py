@@ -327,8 +327,8 @@ class StorageDevice():
 		else:
 			# Kernel discard unavailable (e.g. USB-bridged NVMe via JMicron JMS583).
 			# fstrim-all uses SCSI UNMAP via ext4trim.py; progress reported as (X%).
-			# fstrim-all already writes its own log, so no logFile here.
-			task = TrimTask(job, "fstrim-all")
+			# fstrim-all outputs timestamped lines to stdout; processOutput captures them.
+			task = TrimTask(job, "fstrim-all", logFile=FSTRIM_LOG_FILE)
 			task.setTool("/usr/sbin/fstrim-all")
 		return job
 
@@ -514,15 +514,6 @@ class TrimTask(LoggingTask):
 		LoggingTask.__init__(self, job, name)
 		self.logFile = logFile
 
-	def prepare(self):
-		if self.logFile:
-			ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-			try:
-				with open(self.logFile, 'a') as lf:
-					lf.write(f"{ts} fstrim-all: starting\n")
-			except Exception:
-				pass
-
 	def processOutput(self, data):
 		if isinstance(data, bytes):
 			data = data.decode()
@@ -536,20 +527,16 @@ class TrimTask(LoggingTask):
 			self.setProgress(100)
 		self.log.append(data)
 		if self.logFile:
-			ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 			line = data if data.endswith('\n') else data + '\n'
+			# fstrim-all output already carries its own timestamp; don't double-stamp
+			if search(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ', data):
+				entry = line
+			else:
+				ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+				entry = f"{ts} fstrim: {line}"
 			try:
 				with open(self.logFile, 'a') as lf:
-					lf.write(f"{ts} fstrim: {line}")
-			except Exception:
-				pass
-
-	def afterRun(self):
-		if self.logFile:
-			ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-			try:
-				with open(self.logFile, 'a') as lf:
-					lf.write(f"{ts} fstrim-all: done\n")
+					lf.write(entry)
 			except Exception:
 				pass
 

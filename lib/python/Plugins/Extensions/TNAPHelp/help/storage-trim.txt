@@ -38,6 +38,11 @@ Step 4 - Select "Trim File System".
 
 Step 5 - Confirm when prompted.
 
+  Note: If a recording is currently writing to this drive you will
+  be warned before trim starts. You can choose to continue or cancel.
+  The scheduled cron trim will skip a drive entirely if a recording
+  is in progress and try again on the next scheduled run.
+
 A progress screen will appear showing the trim working. For a 1TB
 NVMe drive this typically takes 8-10 minutes. You can press the
 Background button to close the progress screen and watch TV while
@@ -53,7 +58,7 @@ Step 1 - Go to:  Menu > Setup > System > Device Manager
 
 Step 2 - Highlight any drive partition.
 
-Step 3 - Press Green > select "Schedule Automatic Trim".
+Step 3 - Press Green > select "Schedule Automatic Trim (All Capable Drives)".
 
 Step 4 - Choose a schedule. The current setting is marked with  »
 
@@ -66,6 +71,11 @@ Step 5 - The schedule is saved immediately.
 
 The trim runs automatically at the chosen time as long as the
 receiver is in standby or on. No further action is needed.
+
+  Note: The schedule trims ALL drives that are capable of TRIM,
+  not just the drive you selected the menu from. Any drive that
+  has a recording in progress at the scheduled time is skipped
+  automatically and a note is written to the trim log.
 
 
 METHOD 3: MANUAL CRON EDIT VIA TERMINAL (Advanced)
@@ -139,7 +149,7 @@ To see when trim last ran and how much free space was reclaimed:
 DISABLING AUTOMATIC TRIM
 --------------------------
   From Device Manager:
-    Press Green > Schedule Automatic Trim > select "Disabled"
+    Press Green > Schedule Automatic Trim (All Capable Drives) > select "Disabled"
 
   From terminal:
     crontab -e  then delete the two fstrim-cron lines and save.
@@ -153,3 +163,8 @@ NOTES
 - The progress bar updates approximately every 37 seconds during
   a long scan. This is normal — the drive is working.
 - Log files are kept at /var/log/fstrim.log (max 512KB, one backup).
+- If a recording is active on a drive when manual trim is selected,
+  a warning is shown. You can cancel or continue.
+- The scheduled cron trim automatically skips any drive that has a
+  recording in progress. A "skipping -- recording in progress" entry
+  is written to the trim log so you know it was detected and skipped.

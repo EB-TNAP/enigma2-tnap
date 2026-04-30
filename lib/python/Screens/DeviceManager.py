@@ -1021,6 +1021,15 @@ class DeviceManager(Screen):
 			if exists("/usr/bin/ntfsfix") and exists("/usr/sbin/mkntfs"):
 				fileSystems.append("ntfs")  # NTFS optional.
 			if storageDevice.isPartition:
+				try:
+					gran = int(fileReadLine(f"/sys/block/{storageDevice.disk}/queue/discard_granularity", default="0", source=MODULE_NAME).strip())
+				except Exception:
+					gran = 0
+				try:
+					removable = int(fileReadLine(f"/sys/block/{storageDevice.disk}/removable", default="0", source=MODULE_NAME).strip())
+				except Exception:
+					removable = 0
+				canTrim = storageDevice.fsType in ("ext4", "ext3", "ext2") and (gran > 0 or not removable)
 				choiceList = [
 					(_("Cancel"), 0),
 					(_("Format Storage Device"), StorageDeviceAction.ACTION_FORMAT),
@@ -1029,17 +1038,8 @@ class DeviceManager(Screen):
 				]
 				if storageDevice.fsType in fileSystems:
 					choiceList.append((_("File System Check"), StorageDeviceAction.ACTION_CHECK))
-					if storageDevice.fsType in ("ext4", "ext3", "ext2"):
-						try:
-							gran = int(fileReadLine(f"/sys/block/{storageDevice.disk}/queue/discard_granularity", default="0", source=MODULE_NAME).strip())
-						except Exception:
-							gran = 0
-						try:
-							removable = int(fileReadLine(f"/sys/block/{storageDevice.disk}/removable", default="0", source=MODULE_NAME).strip())
-						except Exception:
-							removable = 0
-						if gran > 0 or not removable:
-							choiceList.append((_("Trim File System"), StorageDeviceAction.ACTION_TRIM))
+					if canTrim:
+						choiceList.append((_("Trim File System"), StorageDeviceAction.ACTION_TRIM))
 				if storageDevice.fsType == "ext3":
 					choiceList.append((_("Convert file system ext3 to ext4"), StorageDeviceAction.ACTION_EXT4CONVERSION))
 				if "ntfs" not in storageDevice.fsType and storageDevice.fsType in fileSystems:  # NTFS not supported yet because you need to unmount.
@@ -1049,7 +1049,8 @@ class DeviceManager(Screen):
 						choiceList.append((_("Activate this device"), StorageDeviceAction.ACTION_ACTIVATE))
 					else:
 						choiceList.append((_("Permanently ignore this device"), StorageDeviceAction.ACTION_IGNORE))
-				choiceList.append((_("Schedule Automatic Trim"), StorageDeviceAction.ACTION_SCHEDULE_TRIM))
+				if canTrim:
+					choiceList.append((_("Schedule Automatic Trim"), StorageDeviceAction.ACTION_SCHEDULE_TRIM))
 				choiceList.append((_("View Trim Log"), StorageDeviceAction.ACTION_VIEW_TRIM_LOG))
 			else:
 				choiceList = [

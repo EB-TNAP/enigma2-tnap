@@ -2526,8 +2526,8 @@ except Exception as e:
 	<screen name="JobView" position="center,center" size="520,250">
 		<widget source="job_name" render="Label" position="20,0" size="480,60" font="Regular;28"/>
 		<widget source="job_task" render="Label" position="20,30" size="480,50" font="Regular;23"/>
-		<widget source="job_progress" render="Progress" position="20,62" size="480,36" borderWidth="2" backgroundColor="#254f7497"/>
-		<widget source="job_progress" render="Label" position="120,66" size="280,32" font="Regular;28" foregroundColor="black" zPosition="2" halign="center" transparent="1">
+		<widget source="job_progress" render="Progress" position="20,62" size="480,36" borderWidth="2" backgroundColor="#254f7497" foregroundColor="#00578cc0"/>
+		<widget source="job_progress" render="Label" position="120,66" size="280,32" font="Regular;28" foregroundColor="white" zPosition="2" halign="center" transparent="1">
 			<convert type="ProgressToText"/>
 		</widget>
 		<widget source="job_status" render="Label" position="20,112" size="480,26" font="Regular;23"/>

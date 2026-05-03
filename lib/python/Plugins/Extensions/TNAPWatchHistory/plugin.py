@@ -11,12 +11,13 @@ from Components.ActionMap import ActionMap
 from Components.Sources.StaticText import StaticText
 from Components.ScrollLabel import ScrollLabel
 from ServiceReference import ServiceReference
-from enigma import iPlayableService
+from enigma import iPlayableService, eTimer
 from datetime import datetime
 import os
 
 LOG_FILE = "/var/log/watched.log"
 MAX_LOG_BYTES = 512 * 1024   # rotate when file exceeds 512 KB
+EPG_WAIT_MS   = 5000         # ms to wait for EPG before writing without it
 
 _tracker = None
 
@@ -31,14 +32,12 @@ def _rotateLog():
             return
         with open(LOG_FILE, 'rb') as f:
             data = f.read()
-        # Keep everything after the midpoint newline
         mid = len(data) // 2
         cut = data.find(b'\n', mid)
         if cut == -1:
             cut = mid
-        trimmed = data[cut + 1:]
         with open(LOG_FILE, 'wb') as f:
-            f.write(trimmed)
+            f.write(data[cut + 1:])
     except Exception:
         pass
 
@@ -54,72 +53,102 @@ class WatchHistoryTracker:
         self._channel = ""
         self._title = ""
         self._desc = ""
+        self._start_written = False
+
+        # Timer fires if EPG doesn't arrive within EPG_WAIT_MS
+        self._epg_timer = eTimer()
+        self._epg_timer.callback.append(self._onEpgTimeout)
+
         session.nav.event.append(self._onEvent)
         # Capture service already playing before our hook was registered
-        self._captureService()
+        self._onServiceStart()
 
     def _onEvent(self, evt):
         if evt == iPlayableService.evStart:
-            self._captureService()
+            self._onServiceStart()
+        elif evt == iPlayableService.evUpdatedEventInfo:
+            self._onEpgUpdated()
         elif evt == iPlayableService.evEnd:
+            self._epg_timer.stop()
             self._writeDuration()
             self._start_time = None
             self._channel = ""
             self._title = ""
             self._desc = ""
+            self._start_written = False
 
-    def _captureService(self):
+    def _onServiceStart(self):
         nav = self.session.nav
         ref = nav.getCurrentlyPlayingServiceOrGroup()
-        service = nav.getCurrentService()
 
         channel = ""
-        title = ""
-
         if ref:
             try:
                 channel = ServiceReference(ref).getServiceName() or ""
             except Exception:
                 pass
-
-        desc = ""
-        if service:
-            try:
-                info = service.info()
-                event = info and info.getEvent(0)
-                if event:
-                    title = event.getEventName() or ""
-                    short = (event.getShortDescription() or "").strip()
-                    extended = (event.getExtendedDescription() or "").strip()
-                    desc = extended or short
-            except Exception:
-                pass
-
         channel = channel.strip()
-        title = title.strip()
-        # Collapse newlines in description to a single space
-        desc = " ".join(desc.split()) if desc else ""
 
         # Skip if same channel (evStart can fire multiple times for same service)
         if channel and channel == self._channel:
             return
 
-        # Write duration entry for the channel we're leaving
+        # Flush previous channel
+        self._epg_timer.stop()
         if self._start_time and self._channel:
             self._writeDuration()
 
         self._start_time = datetime.now()
         self._channel = channel
-        self._title = title
-        self._desc = desc
+        self._title = ""
+        self._desc = ""
+        self._start_written = False
 
-        # Write start entry immediately so current channel is always in log
-        if self._channel:
+        if not self._channel:
+            return
+
+        # Try to get EPG right now (may already be available on init)
+        self._fetchEpg()
+
+        if self._title or self._desc:
+            # EPG was available immediately — write now
+            self._writeStart()
+        else:
+            # EPG not ready yet — wait up to EPG_WAIT_MS then write anyway
+            self._epg_timer.start(EPG_WAIT_MS, True)
+
+    def _fetchEpg(self):
+        service = self.session.nav.getCurrentService()
+        if not service:
+            return
+        try:
+            info = service.info()
+            event = info and info.getEvent(0)
+            if event:
+                self._title = (event.getEventName() or "").strip()
+                short    = (event.getShortDescription()    or "").strip()
+                extended = (event.getExtendedDescription() or "").strip()
+                desc = extended or short
+                self._desc = " ".join(desc.split()) if desc else ""
+        except Exception:
+            pass
+
+    def _onEpgUpdated(self):
+        if self._start_written:
+            return
+        self._fetchEpg()
+        if self._title or self._desc:
+            self._epg_timer.stop()
+            self._writeStart()
+
+    def _onEpgTimeout(self):
+        if not self._start_written:
             self._writeStart()
 
     def _writeStart(self):
-        if not self._channel or not self._start_time:
+        if not self._channel or not self._start_time or self._start_written:
             return
+        self._start_written = True
         start = self._start_time.strftime("%Y-%m-%d %H:%M:%S")
         parts = [start, self._channel]
         if self._title:
@@ -241,9 +270,8 @@ class WatchHistoryViewer(Screen):
                 lines = f.readlines()
             if not lines:
                 return _("Log is empty.")
-            # Show most-recent entries first
             lines.reverse()
-            header = _("Timestamp             Channel / Show  (indented = duration on leaving)\n")
+            header = _("Timestamp             Channel | Show Title | Description\n")
             header += "-" * 70 + "\n"
             return header + "".join(lines)
         except Exception as e:

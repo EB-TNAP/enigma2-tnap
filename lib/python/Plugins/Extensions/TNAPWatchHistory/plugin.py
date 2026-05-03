@@ -53,6 +53,7 @@ class WatchHistoryTracker:
         self._start_time = None
         self._channel = ""
         self._title = ""
+        self._desc = ""
         session.nav.event.append(self._onEvent)
         # Capture service already playing before our hook was registered
         self._captureService()
@@ -65,6 +66,7 @@ class WatchHistoryTracker:
             self._start_time = None
             self._channel = ""
             self._title = ""
+            self._desc = ""
 
     def _captureService(self):
         nav = self.session.nav
@@ -80,17 +82,23 @@ class WatchHistoryTracker:
             except Exception:
                 pass
 
+        desc = ""
         if service:
             try:
                 info = service.info()
                 event = info and info.getEvent(0)
                 if event:
                     title = event.getEventName() or ""
+                    short = (event.getShortDescription() or "").strip()
+                    extended = (event.getExtendedDescription() or "").strip()
+                    desc = extended or short
             except Exception:
                 pass
 
         channel = channel.strip()
         title = title.strip()
+        # Collapse newlines in description to a single space
+        desc = " ".join(desc.split()) if desc else ""
 
         # Skip if same channel (evStart can fire multiple times for same service)
         if channel and channel == self._channel:
@@ -103,6 +111,7 @@ class WatchHistoryTracker:
         self._start_time = datetime.now()
         self._channel = channel
         self._title = title
+        self._desc = desc
 
         # Write start entry immediately so current channel is always in log
         if self._channel:
@@ -112,10 +121,12 @@ class WatchHistoryTracker:
         if not self._channel or not self._start_time:
             return
         start = self._start_time.strftime("%Y-%m-%d %H:%M:%S")
+        parts = [start, self._channel]
         if self._title:
-            line = "%s | %s | %s\n" % (start, self._channel, self._title)
-        else:
-            line = "%s | %s\n" % (start, self._channel)
+            parts.append(self._title)
+        if self._desc:
+            parts.append(self._desc)
+        line = " | ".join(parts) + "\n"
         try:
             _rotateLog()
             with open(LOG_FILE, 'a') as f:
@@ -133,10 +144,10 @@ class WatchHistoryTracker:
         m, s = divmod(rem, 60)
         dur = "%d:%02d:%02d" % (h, m, s)
         stop = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        parts = [stop, "watched %s" % dur, self._channel]
         if self._title:
-            line = "%s | watched %s | %s | %s\n" % (stop, dur, self._channel, self._title)
-        else:
-            line = "%s | watched %s | %s\n" % (stop, dur, self._channel)
+            parts.append(self._title)
+        line = " | ".join(parts) + "\n"
         try:
             with open(LOG_FILE, 'a') as f:
                 f.write(line)

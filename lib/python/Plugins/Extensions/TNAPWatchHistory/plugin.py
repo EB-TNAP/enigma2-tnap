@@ -17,7 +17,6 @@ import os
 
 LOG_FILE = "/var/log/watched.log"
 MAX_LOG_BYTES = 512 * 1024   # rotate when file exceeds 512 KB
-MIN_WATCH_SECS = 10          # ignore zaps shorter than this
 
 _tracker = None
 
@@ -55,18 +54,14 @@ class WatchHistoryTracker:
         self._channel = ""
         self._title = ""
         session.nav.event.append(self._onEvent)
+        # Capture service already playing before our hook was registered
+        self._captureService()
 
     def _onEvent(self, evt):
         if evt == iPlayableService.evStart:
-            self._onServiceStart()
-        elif evt == iPlayableService.evEnd:
-            self._onServiceStop()
+            self._captureService()
 
-    def _onServiceStart(self):
-        # Flush any previous service before starting the new one
-        if self._start_time and self._channel:
-            self._writeLog()
-
+    def _captureService(self):
         nav = self.session.nav
         ref = nav.getCurrentlyPlayingServiceOrGroup()
         service = nav.getCurrentService()
@@ -89,32 +84,28 @@ class WatchHistoryTracker:
             except Exception:
                 pass
 
-        self._start_time = datetime.now()
-        self._channel = channel.strip()
-        self._title = title.strip()
+        channel = channel.strip()
+        title = title.strip()
 
-    def _onServiceStop(self):
-        if self._start_time and self._channel:
+        # Skip if same channel (evStart can fire multiple times for same service)
+        if channel and channel == self._channel:
+            return
+
+        self._start_time = datetime.now()
+        self._channel = channel
+        self._title = title
+
+        if self._channel:
             self._writeLog()
-        self._start_time = None
-        self._channel = ""
-        self._title = ""
 
     def _writeLog(self):
-        if not self._start_time or not self._channel:
+        if not self._channel:
             return
-        now = datetime.now()
-        duration_secs = int((now - self._start_time).total_seconds())
-        if duration_secs < MIN_WATCH_SECS:
-            return
-        h, rem = divmod(duration_secs, 3600)
-        m, s = divmod(rem, 60)
-        dur = "%d:%02d:%02d" % (h, m, s)
         start = self._start_time.strftime("%Y-%m-%d %H:%M:%S")
         if self._title:
-            line = "%s | %s | %s | %s\n" % (start, dur, self._channel, self._title)
+            line = "%s | %s | %s\n" % (start, self._channel, self._title)
         else:
-            line = "%s | %s | %s\n" % (start, dur, self._channel)
+            line = "%s | %s\n" % (start, self._channel)
         try:
             _rotateLog()
             with open(LOG_FILE, 'a') as f:
@@ -211,7 +202,7 @@ class WatchHistoryViewer(Screen):
                 return _("Log is empty.")
             # Show most-recent entries first
             lines.reverse()
-            header = _("Start time            Duration  Channel / Show\n")
+            header = _("Start time            Channel / Show\n")
             header += "-" * 70 + "\n"
             return header + "".join(lines)
         except Exception as e:

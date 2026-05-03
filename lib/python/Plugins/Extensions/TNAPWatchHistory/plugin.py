@@ -257,8 +257,8 @@ class WatchHistoryViewer(Screen):
                 "cancel": self.close,
                 "red":    self.close,
                 "yellow": self.clearLog,
-                "up":     self["text"].goPageUp,
-                "down":   self["text"].goPageDown,
+                "up":     self["text"].pageUp,
+                "down":   self["text"].pageDown,
             }, -1)
 
         self["text"].setText(self._loadLog())

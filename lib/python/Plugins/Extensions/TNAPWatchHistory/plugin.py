@@ -143,6 +143,7 @@ class WatchHistoryTracker:
 
     def _onEpgTimeout(self):
         if not self._start_written:
+            self._fetchEpg()   # retry — EPG cache may be populated by now
             self._writeStart()
 
     def _writeStart(self):

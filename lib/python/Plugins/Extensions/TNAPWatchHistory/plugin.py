@@ -16,7 +16,7 @@ from datetime import datetime
 import os
 
 LOG_FILE = "/var/log/watched.log"
-MAX_LOG_BYTES = 512 * 1024   # rotate when file exceeds 512 KB
+MAX_LOG_BYTES = 2 * 1024 * 1024   # rotate when file exceeds 2 MB
 EPG_WAIT_MS   = 5000         # ms to wait for EPG before writing without it
 
 _tracker = None

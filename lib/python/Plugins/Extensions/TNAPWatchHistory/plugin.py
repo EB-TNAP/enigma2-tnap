@@ -144,7 +144,7 @@ def Plugins(**kwargs):
         PluginDescriptor(
             name=_("TNAP Watch History"),
             description=_("Silently logs watched channels and shows"),
-            where=PluginDescriptor.WHERE_AUTOSTART,
+            where=PluginDescriptor.WHERE_SESSIONSTART,
             needsRestart=False,
             fnc=autostart,
         ),

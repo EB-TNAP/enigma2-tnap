@@ -127,9 +127,12 @@ class WatchHistoryTracker:
 # Plugin entry points
 # ---------------------------------------------------------------------------
 
-def autostart(session, **kwargs):
-    global _tracker
-    _tracker = WatchHistoryTracker(session)
+def autostart(reason, **kwargs):
+    if reason == 0:
+        session = kwargs.get("session")
+        if session:
+            global _tracker
+            _tracker = WatchHistoryTracker(session)
 
 
 def openViewer(session, **kwargs):

@@ -60,6 +60,11 @@ class WatchHistoryTracker:
     def _onEvent(self, evt):
         if evt == iPlayableService.evStart:
             self._captureService()
+        elif evt == iPlayableService.evEnd:
+            self._writeDuration()
+            self._start_time = None
+            self._channel = ""
+            self._title = ""
 
     def _captureService(self):
         nav = self.session.nav
@@ -91,15 +96,20 @@ class WatchHistoryTracker:
         if channel and channel == self._channel:
             return
 
+        # Write duration entry for the channel we're leaving
+        if self._start_time and self._channel:
+            self._writeDuration()
+
         self._start_time = datetime.now()
         self._channel = channel
         self._title = title
 
+        # Write start entry immediately so current channel is always in log
         if self._channel:
-            self._writeLog()
+            self._writeStart()
 
-    def _writeLog(self):
-        if not self._channel:
+    def _writeStart(self):
+        if not self._channel or not self._start_time:
             return
         start = self._start_time.strftime("%Y-%m-%d %H:%M:%S")
         if self._title:
@@ -108,6 +118,26 @@ class WatchHistoryTracker:
             line = "%s | %s\n" % (start, self._channel)
         try:
             _rotateLog()
+            with open(LOG_FILE, 'a') as f:
+                f.write(line)
+        except Exception:
+            pass
+
+    def _writeDuration(self):
+        if not self._start_time or not self._channel:
+            return
+        secs = int((datetime.now() - self._start_time).total_seconds())
+        if secs < 10:
+            return
+        h, rem = divmod(secs, 3600)
+        m, s = divmod(rem, 60)
+        dur = "%d:%02d:%02d" % (h, m, s)
+        stop = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if self._title:
+            line = "%s | watched %s | %s | %s\n" % (stop, dur, self._channel, self._title)
+        else:
+            line = "%s | watched %s | %s\n" % (stop, dur, self._channel)
+        try:
             with open(LOG_FILE, 'a') as f:
                 f.write(line)
         except Exception:
@@ -202,7 +232,7 @@ class WatchHistoryViewer(Screen):
                 return _("Log is empty.")
             # Show most-recent entries first
             lines.reverse()
-            header = _("Start time            Channel / Show\n")
+            header = _("Timestamp             Channel / Show  (indented = duration on leaving)\n")
             header += "-" * 70 + "\n"
             return header + "".join(lines)
         except Exception as e:

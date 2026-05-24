@@ -536,7 +536,23 @@ RESULT eDVBSatelliteEquipmentControl::prepare(iDVBFrontend &frontend, const eDVB
 				frequency = ((((local * 2) / 125) + 1) / 2) * 125;
 				frontend.setData(eDVBFrontend::FREQ_OFFSET, sat.frequency - frequency);
 
-				if (voltage_mode == eDVBSatelliteSwitchParameters::_0V)
+				/* C-band band-stacked LNB (5150/5750 MHz): polarisation selects
+				 * which local oscillator is active, so voltage must follow
+				 * polarisation rather than the switch parameter. */
+				if (lnb_param.m_lof_threshold == 5450000 && lnb_param.m_lof_hi == 5750000 && lnb_param.m_lof_lo == 5150000)
+				{
+					if (sat.polarisation & eDVBFrontendParametersSatellite::Polarisation_Vertical) {
+						lof = lnb_param.m_lof_lo;
+						voltage = VOLTAGE(13);
+					} else {
+						lof = lnb_param.m_lof_hi;
+						voltage = VOLTAGE(18);
+					}
+					int local = absdiff(sat.frequency, lof);
+					frequency = ((((local * 2) / 125) + 1) / 2) * 125;
+					frontend.setData(eDVBFrontend::FREQ_OFFSET, sat.frequency - frequency);
+				}
+				else if (voltage_mode == eDVBSatelliteSwitchParameters::_0V)
 					voltage = iDVBFrontend::voltageOff;
 				/* Dishpro bandstacking HACK */
 				else if (lnb_param.m_lof_threshold == 1000)

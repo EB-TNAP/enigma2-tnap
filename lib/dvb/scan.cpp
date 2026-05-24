@@ -223,7 +223,7 @@ RESULT eDVBScan::nextChannel()
 {
 	ePtr<iDVBFrontend> fe;
 
-	m_SDT = 0; m_PAT = 0; m_BAT = 0; m_NIT = 0, m_PMT = 0;
+	m_SDT = 0; m_PAT = 0; m_BAT = 0; m_NIT = 0, m_PMT = 0; m_VCT = 0;
 
 	m_ready = 0;
 
@@ -310,6 +310,19 @@ RESULT eDVBScan::startFilter()
 			return -1;
 		CONNECT(m_VCT->tableReady, eDVBScan::VCTready);
 		startSDT = false;
+	}
+	else if (system == iDVBFrontend::feSatellite || system == iDVBFrontend::feCable)
+	{
+		/* Some DVB-S/S2 and DVB-C transponders carry ATSC PSIP on PID 0x1FFB
+		 * (e.g. North American feeds on Eutelsat 117W). Try VCT alongside SDT.
+		 * If SDT arrives first it satisfies readySDT and channelDone() proceeds,
+		 * resetting m_VCT before its 5-second timeout fires — zero overhead for
+		 * normal DVB transponders. If VCT succeeds first, ATSC channel names win. */
+		m_VCT = new eTable<VirtualChannelTableSection>;
+		if (m_VCT->start(m_demux, eDVBVCTSpec()))
+			m_VCT = 0;
+		else
+			CONNECT(m_VCT->tableReady, eDVBScan::VCTready);
 	}
 
 	m_SDT = 0;
@@ -468,7 +481,12 @@ void eDVBScan::PATready(int err)
 void eDVBScan::VCTready(int err)
 {
 	SCAN_eDebug("[scan.cpp-#424] got vct %d", err);
-	m_ready |= readySDT;
+	/* In feATSC mode m_SDT is null, so VCT always satisfies readySDT.
+	 * When running alongside SDT (DVB-S/C), only set readySDT on success
+	 * so a successful VCT short-circuits the SDT timeout without blocking
+	 * normal DVB scans on VCT timeout. */
+	if (!m_SDT || !err)
+		m_ready |= readySDT;
 	if (!err)
 		m_ready |= validVCT;
 	channelDone();

@@ -793,7 +793,7 @@ void eDVBScan::channelDone()
 		 * may differ from the DVB PAT TSID.  Use the PAT TSID so the channel database
 		 * entry and all service references share the same key that enigma2's satellite
 		 * transponder-info lookup expects.  For native feATSC frontends keep the VCT TSID. */
-		eTransportStreamID tsid = (vct_system == iDVBFrontend::feATSC || !m_pat_tsid)
+		eTransportStreamID tsid = (vct_system == iDVBFrontend::feATSC || m_pat_tsid == eTransportStreamID())
 			? (**m_VCT->getSections().begin()).getTransportStreamId()
 			: m_pat_tsid;
 		eDVBNamespace dvbnamespace = buildNamespace(eOriginalNetworkID(onid), tsid, hash);

@@ -787,7 +787,15 @@ void eDVBScan::channelDone()
 		m_ch_current->getHash(hash);
 
 		int onid = 0; /* TODO: ATSC ONID? */
-		eTransportStreamID tsid = (**m_VCT->getSections().begin()).getTransportStreamId();
+		int vct_system;
+		m_ch_current->getSystem(vct_system);
+		/* For DVB-S/C frontends carrying ATSC PSIP, the VCT section's transport_stream_id
+		 * may differ from the DVB PAT TSID.  Use the PAT TSID so the channel database
+		 * entry and all service references share the same key that enigma2's satellite
+		 * transponder-info lookup expects.  For native feATSC frontends keep the VCT TSID. */
+		eTransportStreamID tsid = (vct_system == iDVBFrontend::feATSC || !m_pat_tsid)
+			? (**m_VCT->getSections().begin()).getTransportStreamId()
+			: m_pat_tsid;
 		eDVBNamespace dvbnamespace = buildNamespace(eOriginalNetworkID(onid), tsid, hash);
 
 		/* Detect namespace collision (same as SDT block above) */

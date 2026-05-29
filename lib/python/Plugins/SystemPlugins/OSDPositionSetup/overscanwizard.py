@@ -190,11 +190,24 @@ class OverscanWizard(ConfigListScreen, Screen):
 				config.misc.do_overscanwizard.value = False
 				config.misc.do_overscanwizard.save()
 				config.plugins.OSDPositionSetup.save()
+				self._syncOSDCalibration()
 				setConfiguredPosition()
 				self.close()
 			else:
 				self.step = 1
 		self.setScreen()
+
+	def _syncOSDCalibration(self):
+		from Components.SystemInfo import BoxInfo
+		if BoxInfo.getItem("CanChangeOsdPosition"):
+			config.osd.dst_left.setValue(config.plugins.OSDPositionSetup.dst_left.value)
+			config.osd.dst_width.setValue(config.plugins.OSDPositionSetup.dst_width.value)
+			config.osd.dst_top.setValue(config.plugins.OSDPositionSetup.dst_top.value)
+			config.osd.dst_height.setValue(config.plugins.OSDPositionSetup.dst_height.value)
+			config.osd.dst_left.save()
+			config.osd.dst_width.save()
+			config.osd.dst_top.save()
+			config.osd.dst_height.save()
 
 	def setPreviewPosition(self):
 		if self.dst_left.value > self.dst_right.value:

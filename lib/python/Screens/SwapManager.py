@@ -259,12 +259,17 @@ class Swap(Screen):
 	def createDel(self):
 		if not self.device:
 			if self.swapPlace:
-				if self.swapActive is True:
-					self.Console.ePopen(f"swapoff {self.swapPlace}", self.createDel2)
-				else:
-					self.createDel2(None, 0)
+				self.session.openWithCallback(self.createDelConfirm, MessageBox, _("Are you sure you want to delete the swap file?"), MessageBox.TYPE_YESNO, default=False)
 			else:
 				self.doCreateSwap()
+
+	def createDelConfirm(self, confirmed):
+		if not confirmed:
+			return
+		if self.swapActive is True:
+			self.Console.ePopen(f"swapoff {self.swapPlace}", self.createDel2)
+		else:
+			self.createDel2(None, 0)
 
 	def createDel2(self, result, retval, extra_args=None):
 		if retval == 0:
@@ -304,6 +309,7 @@ class Swap(Screen):
 			self.commands = []
 			self.commands.append(f"dd if=/dev/zero of={myfile} bs=1024 count={swapsize} 2>/dev/null")
 			self.commands.append(f"mkswap {myfile}")
+			self.commands.append(f"swapon {myfile}")
 			self.Console.eBatch(self.commands, self.updateSwap, debug=True)
 
 	def autoSsWap(self):

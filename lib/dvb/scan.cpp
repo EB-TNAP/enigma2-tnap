@@ -301,10 +301,10 @@ RESULT eDVBScan::startFilter()
 			m_flags |= scanOnlyFree;
 	}
 
-	m_VCT = 0;
 	m_ch_current->getSystem(system);
 	if (system == iDVBFrontend::feATSC)
 	{
+		m_VCT = 0;
 		m_VCT = new eTable<VirtualChannelTableSection>;
 		if (m_VCT->start(m_demux, eDVBVCTSpec()))
 			return -1;
@@ -314,15 +314,23 @@ RESULT eDVBScan::startFilter()
 	else if (system == iDVBFrontend::feSatellite || system == iDVBFrontend::feCable)
 	{
 		/* Some DVB-S/S2 and DVB-C transponders carry ATSC PSIP on PID 0x1FFB
-		 * (e.g. North American feeds on Eutelsat 117W). Try VCT alongside SDT.
-		 * If SDT arrives first it satisfies readySDT and channelDone() proceeds,
-		 * resetting m_VCT before its 5-second timeout fires — zero overhead for
-		 * normal DVB transponders. If VCT succeeds first, ATSC channel names win. */
-		m_VCT = new eTable<VirtualChannelTableSection>;
-		if (m_VCT->start(m_demux, eDVBVCTSpec()))
-			m_VCT = 0;
-		else
-			CONNECT(m_VCT->tableReady, eDVBScan::VCTready);
+		 * (e.g. North American feeds on Eutelsat 117W). Start VCT alongside SDT
+		 * on the first startFilter() call only.  startFilter() is called again
+		 * after PAT arrives; at that point m_VCT is already active (or already
+		 * succeeded and set validVCT), so we must not recreate it — doing so
+		 * would destroy the completed sections before channelDone() processes them. */
+		if (!m_VCT && !(m_ready & validVCT))
+		{
+			m_VCT = new eTable<VirtualChannelTableSection>;
+			if (m_VCT->start(m_demux, eDVBVCTSpec()))
+				m_VCT = 0;
+			else
+				CONNECT(m_VCT->tableReady, eDVBScan::VCTready);
+		}
+	}
+	else
+	{
+		m_VCT = 0;
 	}
 
 	m_SDT = 0;
@@ -746,6 +754,20 @@ int eDVBScan::sameChannel(iDVBFrontendParameters *ch1, iDVBFrontendParameters *c
 
 void eDVBScan::channelDone()
 {
+	/* On DVB-S/C transponders that carry ATSC PSIP, VCT and SDT can both
+	 * succeed.  VCT takes priority: discard SDT results so services are not
+	 * added twice with conflicting names. */
+	if ((m_ready & validVCT) && (m_ready & validSDT))
+	{
+		int ch_system_check;
+		m_ch_current->getSystem(ch_system_check);
+		if (ch_system_check != iDVBFrontend::feATSC)
+		{
+			SCAN_eDebug("[eDVBScan] VCT succeeded on DVB-S/C; discarding SDT results");
+			m_ready &= ~validSDT;
+		}
+	}
+
 	if (m_ready & validSDT && (!(m_flags & scanOnlyFree) || !m_pmt_running))
 	{
 		unsigned long hash = 0;

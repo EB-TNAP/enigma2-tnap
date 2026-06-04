@@ -395,7 +395,8 @@ int eDVBServiceRecord::doRecord()
 			::close(fd);
 			return errNoDemuxAvailable;
 		}
-		demux->createTSRecorder(m_record, m_packet_size, false);
+		bool softcsa_enabled = eConfigManager::getConfigBoolValue("config.softcsa.enabled", false);
+		demux->createTSRecorder(m_record, m_packet_size, false, false, false, softcsa_enabled);
 		if (!m_record)
 		{
 			eDebug("[eDVBServiceRecord] no ts recorder available.");

@@ -3093,8 +3093,9 @@ RESULT eDVBServicePlay::startTimeshift()
 	if (m_service_handler.getDataDemux(demux))
 		return -2;
 
-	// Always create a recorder - use eDVBRecordScrambledThread which supports optional descrambling
-	demux->createTSRecorder(m_record, 188, false);  // false = use ScrambledThread
+	// Use ScrambledThread only when SoftCSA is enabled — otherwise FileThread restores full buffer sizing
+	bool softcsa_enabled = eConfigManager::getConfigBoolValue("config.softcsa.enabled", false);
+	demux->createTSRecorder(m_record, 188, false, false, false, softcsa_enabled);
 	if (!m_record)
 		return -3;
 
@@ -3329,15 +3330,17 @@ bool eDVBServicePlay::startTapToFD(int fd, const std::vector<int> &pids, int pac
 		is_encrypted = program.isCrypted();
 	}
 
+	bool softcsa_enabled = eConfigManager::getConfigBoolValue("config.softcsa.enabled", false);
 	if (is_encrypted)
 	{
-		eDebug("[eServiceTap] Encrypted channel - using ScrambledThread for descrambling support");
-		// streaming=false to get eDVBRecordScrambledThread (supports setDescrambler)
-		demux->createTSRecorder(m_tap_recorder, packetsize, false);
+		// ScrambledThread when SoftCSA enabled (supports setDescrambler),
+		// FileThread when disabled (no descrambling needed, restores full buffer size)
+		eDebug("[eServiceTap] Encrypted channel - ScrambledThread=%d", softcsa_enabled ? 1 : 0);
+		demux->createTSRecorder(m_tap_recorder, packetsize, false, false, false, softcsa_enabled);
 	}
 	else
 	{
-		// FTA channel - can use StreamThread (slightly more efficient)
+		// FTA channel - StreamThread (socket-optimised, sync writes)
 		demux->createTSRecorder(m_tap_recorder, packetsize, true);
 	}
 

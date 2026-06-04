@@ -142,7 +142,7 @@ RESULT eDVBDemux::createPESReader(eMainloop *context, ePtr<iDVBPESReader> &reade
 	return res;
 }
 
-RESULT eDVBDemux::createTSRecorder(ePtr<iDVBTSRecorder> &recorder, unsigned int packetsize, bool streaming, bool sync_mode, bool is_streaming_output)
+RESULT eDVBDemux::createTSRecorder(ePtr<iDVBTSRecorder> &recorder, unsigned int packetsize, bool streaming, bool sync_mode, bool is_streaming_output, bool use_scrambled_thread)
 {
 	if (m_dvr_busy)
 		return -EBUSY;
@@ -151,7 +151,8 @@ RESULT eDVBDemux::createTSRecorder(ePtr<iDVBTSRecorder> &recorder, unsigned int 
 	// (which supports descrambling when a descrambler is attached)
 	// sync_mode=true for Live-TV (DVR device), false for recording (file)
 	// is_streaming_output=true when target is a socket (encrypted streaming)
-	recorder = new eDVBTSRecorder(this, packetsize, streaming, sync_mode, is_streaming_output);
+	// use_scrambled_thread=false uses eDVBRecordFileThread (original full-size buffers)
+	recorder = new eDVBTSRecorder(this, packetsize, streaming, sync_mode, is_streaming_output, use_scrambled_thread);
 	return 0;
 }
 
@@ -1050,7 +1051,7 @@ int eDVBRecordScrambledThread::writeData(int len)
 
 DEFINE_REF(eDVBTSRecorder);
 
-eDVBTSRecorder::eDVBTSRecorder(eDVBDemux *demux, int packetsize, bool streaming, bool sync_mode, bool is_streaming_output):
+eDVBTSRecorder::eDVBTSRecorder(eDVBDemux *demux, int packetsize, bool streaming, bool sync_mode, bool is_streaming_output, bool use_scrambled_thread):
 	m_demux(demux),
 	m_running(0),
 	m_target_fd(-1),
@@ -1067,13 +1068,17 @@ eDVBTSRecorder::eDVBTSRecorder(eDVBDemux *demux, int packetsize, bool streaming,
 		//   - sync writes are correct and clean for socket output
 		//   - 4 buffers reduces malloc size vs 40 (recording default)
 		m_thread = new eDVBRecordStreamThread(packetsize, -1, /*sync_mode=*/true, 4);
-	else
-		// Use ScrambledThread for file recording - supports optional descrambling
-		// Buffer size 256*188 = 47kB - larger buffers cause latency issues
-		// sync_mode=true for Live-TV (DVR device has small buffers, frequent short writes)
-		// sync_mode=false for recording/timeshift (file has large buffers, async is faster)
-		// is_streaming_output=true when target is a socket (streaming encrypted channels)
+	else if (use_scrambled_thread)
+		// ScrambledThread: supports optional SoftCSA descrambling via setDescrambler()
+		// Buffer size 256*188 = 47kB
+		// sync_mode=true for Live-TV (DVR device), false for file recording
+		// is_streaming_output=true when target is a socket (encrypted stream output)
 		m_thread = new eDVBRecordScrambledThread(packetsize, 256*188, sync_mode, is_streaming_output);
+	else
+		// FileThread: SoftCSA disabled — no descrambling needed, use original full-size buffers
+		// packetsize*1024 = 188*1024 = 192kB per buffer (vs 47kB in ScrambledThread)
+		// Restores pre-SoftCSA buffer sizing; reduces syscall frequency and LowMem pressure
+		m_thread = new eDVBRecordFileThread(packetsize, -1, sync_mode);
 	CONNECT(m_thread->m_event, eDVBTSRecorder::filepushEvent);
 }
 

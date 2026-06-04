@@ -588,6 +588,12 @@ RESULT eDVBServiceStream::frontendInfo(ePtr<iFrontendInformation> &ptr)
 
 void eDVBServiceStream::setupSpeculativeDescrambler()
 {
+	if (!eConfigManager::getConfigBoolValue("config.softcsa.enabled", false))
+	{
+		eDebug("[eDVBServiceStream] SoftCSA disabled, skipping speculative descrambler");
+		return;
+	}
+
 	// Check if channel is encrypted
 	eDVBServicePMTHandler::program program;
 	if (m_service_handler.getProgramInfo(program))

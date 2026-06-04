@@ -314,6 +314,12 @@ int eDVBServiceRecord::doPrepare()
 // Called to setup software descrambling for recording
 int eDVBServiceRecord::setupSoftwareDescrambler(eDVBServicePMTHandler::program& program)
 {
+	if (!eConfigManager::getConfigBoolValue("config.softcsa.enabled", false))
+	{
+		eDebug("[eDVBServiceRecord] SoftCSA disabled, skipping software descrambler for recording");
+		return 0;
+	}
+
 	eDebug("[eDVBServiceRecord] Setting up CSA session for recording");
 
 	// Create session for recording (no decoder needed)

@@ -568,6 +568,12 @@ void eDVBServiceFCCPlay::setupSpeculativeDescrambling()
 	if (m_is_pvr || m_is_stream)
 		return;
 
+	if (!eConfigManager::getConfigBoolValue("config.softcsa.enabled", false))
+	{
+		eDebug("[eDVBServiceFCCPlay] SoftCSA disabled, skipping speculative descrambling");
+		return;
+	}
+
 	eDebug("[eDVBServiceFCCPlay] Encrypted channel, creating CSA session for FCC");
 
 	// Use base class members (m_csa_session, m_soft_decoder) for proper integration

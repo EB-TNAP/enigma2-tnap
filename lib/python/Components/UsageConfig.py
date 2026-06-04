@@ -2093,6 +2093,7 @@ def InitUsageConfig():
 	config.mediaplayer.alternateUserAgent = ConfigText(default="")
 
 	config.softcsa = ConfigSubsection()
+	config.softcsa.enabled = ConfigYesNo(default=False)
 	config.softcsa.decoderRelease = ConfigSelection(default=0, choices=[
 			(0, _("Quick")),
 			(1, _("Normal"))

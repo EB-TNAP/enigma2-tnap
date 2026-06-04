@@ -4430,6 +4430,9 @@ void eDVBServicePlay::setupSpeculativeDescrambling()
 	if (m_is_pvr || m_is_stream)
 		return;
 
+	if (!eConfigManager::getConfigBoolValue("config.softcsa.enabled", false))
+		return;
+
 	eDebug("[eDVBServicePlay] Encrypted channel, creating speculative CSA session");
 
 	// Create session (starts INACTIVE, will activate when CSA-ALT detected from ECM)

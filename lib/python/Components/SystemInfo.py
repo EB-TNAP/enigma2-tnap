@@ -280,6 +280,7 @@ BoxInfo.setItem("HasChkrootMultiboot", MultiBoot.isFat32("/dev/block/by-name/oth
 BoxInfo.setItem("canchkroot", (BoxInfo.getItem("hasUBIMB") or fileExists("/dev/block/by-name/others")) and not BoxInfo.getItem("HasChkrootMultiboot") and not fileExists("/etc/.disableChkroot"))
 BoxInfo.setItem("HasSDmmc", MultiBoot.canMultiBoot() and "sd" in MultiBoot.getBootSlots().get("2", "") and "mmcblk" in MTDROOTFS)
 BoxInfo.setItem("HasSoftcamInstalled", hassoftcaminstalled())
+BoxInfo.setItem("HasSoftCSA", fileExists("/usr/lib/libdvbcsa.so.1") or fileExists("/lib/libdvbcsa.so.1"))
 BoxInfo.setItem("NumVideoDecoders", getNumVideoDecoders())
 BoxInfo.setItem("PIPAvailable", BoxInfo.getItem("NumVideoDecoders") > 1)
 BoxInfo.setItem("CanMeasureFrontendInputPower", eDVBResourceManager.getInstance().canMeasureFrontendInputPower())

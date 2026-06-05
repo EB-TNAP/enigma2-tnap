@@ -1348,6 +1348,29 @@ def InitUsageConfig():
 
 	config.crash.coredump = ConfigYesNo(default=False)
 
+	AUTOLOG_FLAG = "/etc/enigma2/no_autolog"
+
+	def autologChanged(configElement):
+		try:
+			if configElement.value:
+				# Logging enabled: remove flag file and set debug level 5 (verbose)
+				if isfile(AUTOLOG_FLAG):
+					unlink(AUTOLOG_FLAG)
+				config.crash.debugLevel.value = 5
+				config.crash.debugLevel.save()
+			else:
+				# Logging disabled: write flag file and disable debug level
+				makedirs("/etc/enigma2", 0o755, exist_ok=True)
+				open(AUTOLOG_FLAG, 'w').close()
+				config.crash.debugLevel.value = 0
+				config.crash.debugLevel.save()
+			configfile.save()
+		except OSError as err:
+			print("[UsageConfig] autologChanged: Error %d: %s" % (err.errno, err.strerror))
+
+	config.crash.autolog = ConfigYesNo(default=False)
+	config.crash.autolog.addNotifier(autologChanged, immediate_feedback=False, initial_call=True)
+
 	def updateDebugPath(configElement):
 		debugPath = config.crash.debug_path.value
 		try:

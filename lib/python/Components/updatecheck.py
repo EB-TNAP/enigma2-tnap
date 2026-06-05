@@ -129,19 +129,14 @@ class InstallerUpdateCheck:
         def dataAvail(self, line):
             #logdata('line dataAvail', line)
             if line.find(b'Read-only') == -1 and line.find(b'Permission denied') == -1 and line.find(b'HOLD') == -1 and line.find(b'PREFER') == -1:
-                self.upgradableListData += str(line)
+                if line.strip():
+                    self.upgradableListData += str(line)
 
         def getOpkgUpgradale(self):
             count = None
             try:
-                f = open(opkg_ugradable_filename, 'r')
-                line = 'dummy'
-                count = 0
-                while line:
-                    line = f.readline()
-                    if not line == '':
-                        count = count + 1
-                f.close()
+                with open(opkg_ugradable_filename, 'r') as f:
+                    count = sum(1 for line in f if line.strip())
                 print('[upgradable_list] updatable packages: %d' % count)
             except:
                 pass
@@ -150,8 +145,8 @@ class InstallerUpdateCheck:
         def upgradableListFinished(self, value):
             #logdata('value', value)
             self.total_packages = self.getOpkgUpgradale()
-            if self.upgradableListData:
-                (cprint('[UpdateCheck] Updates available...'), self.upgradableListData)
+            if self.total_packages and self.total_packages > 0:
+                cprint('[UpdateCheck] Updates available...')
                 Notifications.AddNotificationWithCallback(self.runUpgrade, MessageBox, '\n' + _('[ %s ] updated package available.') % self.total_packages + '\n' + _('\nDo you want to start the firmware upgrade now?'), timeout=10, default=False)
             else:
                 cprint('[UpdateCheck] No updates available')

@@ -397,6 +397,9 @@ class SoftwareManagerSetup(ConfigListScreen, Screen):
 		self.list.append((_("Overwrite Bootlogo Files ?"), config.plugins.softwaremanager.overwriteBootlogoFiles))
 		self.list.append((_("Overwrite Spinner Files ?"), config.plugins.softwaremanager.overwriteSpinnerFiles))
 		self.list.append((_("Mode for autorestore"), config.plugins.softwaremanager.restoremode))
+		self.list.append((_("Check for updates on boot"), config.updatecheck.check_update_on_boot))
+		self.list.append((_("Automatic update check interval"), config.updatecheck.check_update_notifier))
+		self.list.append((_("Enable USB debug auto-logging"), config.crash.autolog))
 
 		self["config"].list = self.list
 		self["config"].l.setSeperation(400)

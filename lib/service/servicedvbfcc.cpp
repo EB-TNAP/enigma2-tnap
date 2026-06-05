@@ -2,6 +2,7 @@
 #include <lib/components/file_eraser.h>
 #include <lib/dvb/decoder.h>
 #include <lib/dvb/csasession.h>
+#include <lib/dvb/csaengine.h>
 #include <lib/service/servicedvbsoftdecoder.h>
 #include <lib/base/nconfig.h>
 #include <lib/base/esimpleconfig.h>
@@ -573,6 +574,9 @@ void eDVBServiceFCCPlay::setupSpeculativeDescrambling()
 		eDebug("[eDVBServiceFCCPlay] SoftCSA disabled, skipping speculative descrambling");
 		return;
 	}
+
+	if (!eDVBCSAEngine::isAvailable())
+		return;
 
 	eDebug("[eDVBServiceFCCPlay] Encrypted channel, creating CSA session for FCC");
 

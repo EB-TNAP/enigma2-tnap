@@ -1,5 +1,6 @@
 #include <lib/service/servicedvbrecord.h>
 #include <lib/dvb/csasession.h>
+#include <lib/dvb/csaengine.h>
 #include <lib/dvb/cahandler.h>
 #include <lib/base/eerror.h>
 #include <lib/dvb/db.h>
@@ -319,6 +320,9 @@ int eDVBServiceRecord::setupSoftwareDescrambler(eDVBServicePMTHandler::program& 
 		eDebug("[eDVBServiceRecord] SoftCSA disabled, skipping software descrambler for recording");
 		return 0;
 	}
+
+	if (!eDVBCSAEngine::isAvailable())
+		return -1;
 
 	eDebug("[eDVBServiceRecord] Setting up CSA session for recording");
 

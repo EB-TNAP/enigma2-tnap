@@ -1,5 +1,6 @@
 #include <lib/service/servicedvbstream.h>
 #include <lib/dvb/csasession.h>
+#include <lib/dvb/csaengine.h>
 #include <lib/base/eerror.h>
 #include <lib/dvb/db.h>
 #include <lib/dvb/epgcache.h>
@@ -593,6 +594,9 @@ void eDVBServiceStream::setupSpeculativeDescrambler()
 		eDebug("[eDVBServiceStream] SoftCSA disabled, skipping speculative descrambler");
 		return;
 	}
+
+	if (!eDVBCSAEngine::isAvailable())
+		return;
 
 	// Check if channel is encrypted
 	eDVBServicePMTHandler::program program;

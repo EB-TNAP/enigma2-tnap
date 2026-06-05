@@ -5,6 +5,7 @@
 #include <lib/service/servicedvb.h>
 #include <lib/service/service.h>
 #include <lib/dvb/csasession.h>
+#include <lib/dvb/csaengine.h>
 #include <lib/service/servicedvbsoftdecoder.h>
 #include <lib/dvb/cahandler.h>
 #include <lib/base/estring.h>
@@ -4434,6 +4435,9 @@ void eDVBServicePlay::setupSpeculativeDescrambling()
 		return;
 
 	if (!eConfigManager::getConfigBoolValue("config.softcsa.enabled", false))
+		return;
+
+	if (!eDVBCSAEngine::isAvailable())
 		return;
 
 	eDebug("[eDVBServicePlay] Encrypted channel, creating speculative CSA session");

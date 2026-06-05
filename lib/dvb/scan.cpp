@@ -788,7 +788,7 @@ void eDVBScan::channelDone()
 			!eDVBDB::getInstance()->getChannelFrontendData(chid_check, existing_ch))
 		{
 			int diff = 0;
-			if (!m_ch_current->calculateDifference(&*existing_ch, diff, false) && diff > 0)
+			if (!m_ch_current->calculateDifference(&*existing_ch, diff, false) && diff >= 2000)
 			{
 				dvbnamespace = eDVBNamespace(hash);
 				SCAN_eDebug("[eDVBScan] namespace collision detected: different transponder uses same TSID/ONID, preserving frequency in namespace");
@@ -826,7 +826,7 @@ void eDVBScan::channelDone()
 			!eDVBDB::getInstance()->getChannelFrontendData(chid_check, existing_ch))
 		{
 			int diff = 0;
-			if (!m_ch_current->calculateDifference(&*existing_ch, diff, false) && diff > 0)
+			if (!m_ch_current->calculateDifference(&*existing_ch, diff, false) && diff >= 2000)
 			{
 				dvbnamespace = eDVBNamespace(hash);
 				SCAN_eDebug("[eDVBScan] namespace collision detected: different transponder uses same TSID/ONID, preserving frequency in namespace");
@@ -1688,10 +1688,17 @@ void eDVBScan::insertInto(iDVBChannelList *db, bool backgroundscanresult)
 				continue;
 			if (!(dvb_service->m_flags & eDVBService::dxHoldName))
 			{
-				dvb_service->m_service_name = service->second->m_service_name;
-				dvb_service->m_service_name_sort = service->second->m_service_name_sort;
+				/* Only overwrite name if the new SDT actually has a name.
+				 * An empty name means SERVICE_DESCRIPTOR was absent — keep
+				 * the existing name to avoid producing N/A entries. */
+				if (!service->second->m_service_name.empty())
+				{
+					dvb_service->m_service_name = service->second->m_service_name;
+					dvb_service->m_service_name_sort = service->second->m_service_name_sort;
+				}
 			}
-			dvb_service->m_provider_name = service->second->m_provider_name;
+			if (!service->second->m_provider_name.empty())
+				dvb_service->m_provider_name = service->second->m_provider_name;
 			if (service->second->m_ca.size())
 				dvb_service->m_ca = service->second->m_ca;
 			if (!backgroundscanresult) // do not remove new found flags when this is the result of a 'background scan'

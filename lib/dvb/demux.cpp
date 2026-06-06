@@ -1078,7 +1078,9 @@ eDVBTSRecorder::eDVBTSRecorder(eDVBDemux *demux, int packetsize, bool streaming,
 		// FileThread: SoftCSA disabled — no descrambling needed, use original full-size buffers
 		// packetsize*1024 = 188*1024 = 192kB per buffer (vs 47kB in ScrambledThread)
 		// Restores pre-SoftCSA buffer sizing; reduces syscall frequency and LowMem pressure
-		m_thread = new eDVBRecordFileThread(packetsize, -1, sync_mode);
+		// bufferCount=-1 was previously passed here, which caused std::vector<AsyncIO>(-1)
+		// to throw std::length_error on 32-bit ARM (size_t wraps to ~4GB).
+		m_thread = new eDVBRecordFileThread(packetsize, recordingBufferCount, -1, sync_mode);
 	CONNECT(m_thread->m_event, eDVBTSRecorder::filepushEvent);
 }
 

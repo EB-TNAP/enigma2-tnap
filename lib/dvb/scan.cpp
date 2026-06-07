@@ -782,16 +782,30 @@ void eDVBScan::channelDone()
 		 * already exists in the database but points to a different physical transponder,
 		 * preserve the frequency in the namespace to keep services unique.
 		 * This prevents services with the same SID on different transponders (e.g. EBU feeds)
-		 * from overwriting each other during manual scan. */
+		 * from overwriting each other during manual scan.
+		 * Check both the persistent DB and m_new_channels so fresh blindscans (where the
+		 * conflicting transponder has not yet been committed to lamedb) are also handled. */
 		eDVBChannelID chid_check(dvbnamespace, tsid, onid);
-		if (ePtr<iDVBFrontendParameters> existing_ch;
-			!eDVBDB::getInstance()->getChannelFrontendData(chid_check, existing_ch))
 		{
-			int diff = 0;
-			if (!m_ch_current->calculateDifference(&*existing_ch, diff, false) && diff >= 2000)
+			ePtr<iDVBFrontendParameters> existing_ch;
+			bool found = !eDVBDB::getInstance()->getChannelFrontendData(chid_check, existing_ch);
+			if (!found)
 			{
-				dvbnamespace = eDVBNamespace(hash);
-				SCAN_eDebug("[eDVBScan] namespace collision detected: different transponder uses same TSID/ONID, preserving frequency in namespace");
+				auto it = m_new_channels.find(chid_check);
+				if (it != m_new_channels.end())
+				{
+					existing_ch = it->second;
+					found = true;
+				}
+			}
+			if (found)
+			{
+				int diff = 0;
+				if (!m_ch_current->calculateDifference(&*existing_ch, diff, false) && diff >= 2000)
+				{
+					dvbnamespace = eDVBNamespace(hash);
+					SCAN_eDebug("[eDVBScan] namespace collision detected: different transponder uses same TSID/ONID, preserving frequency in namespace");
+				}
 			}
 		}
 
@@ -820,16 +834,28 @@ void eDVBScan::channelDone()
 			: m_pat_tsid;
 		eDVBNamespace dvbnamespace = buildNamespace(eOriginalNetworkID(onid), tsid, hash);
 
-		/* Detect namespace collision (same as SDT block above) */
+		/* Detect namespace collision (same as SDT block above, including m_new_channels) */
 		eDVBChannelID chid_check(dvbnamespace, tsid, eOriginalNetworkID(onid));
-		if (ePtr<iDVBFrontendParameters> existing_ch;
-			!eDVBDB::getInstance()->getChannelFrontendData(chid_check, existing_ch))
 		{
-			int diff = 0;
-			if (!m_ch_current->calculateDifference(&*existing_ch, diff, false) && diff >= 2000)
+			ePtr<iDVBFrontendParameters> existing_ch;
+			bool found = !eDVBDB::getInstance()->getChannelFrontendData(chid_check, existing_ch);
+			if (!found)
 			{
-				dvbnamespace = eDVBNamespace(hash);
-				SCAN_eDebug("[eDVBScan] namespace collision detected: different transponder uses same TSID/ONID, preserving frequency in namespace");
+				auto it = m_new_channels.find(chid_check);
+				if (it != m_new_channels.end())
+				{
+					existing_ch = it->second;
+					found = true;
+				}
+			}
+			if (found)
+			{
+				int diff = 0;
+				if (!m_ch_current->calculateDifference(&*existing_ch, diff, false) && diff >= 2000)
+				{
+					dvbnamespace = eDVBNamespace(hash);
+					SCAN_eDebug("[eDVBScan] namespace collision detected: different transponder uses same TSID/ONID, preserving frequency in namespace");
+				}
 			}
 		}
 

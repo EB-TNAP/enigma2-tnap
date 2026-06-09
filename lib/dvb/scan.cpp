@@ -1778,12 +1778,12 @@ void eDVBScan::insertInto(iDVBChannelList *db, bool backgroundscanresult)
 								// Add to new services list
 								m_new_services[ref] = service;
 								count++;
-								
-								eDebug("[HIDDEN_CHANNELS] Added hidden channel: %s (SID %04x, Type %d, Provider: %s, Video PID: %04x, Audio PID: %04x, PCR PID: %04x)", 
+								SCAN_eDebug("[HIDDEN_CHANNELS] Added hidden channel: %s (SID %04x, Type %d, Provider: %s, Video PID: %04x, Audio PID: %04x, PCR PID: %04x)",
 									service_name.c_str(), service_id, service_type, provider_name.c_str(), video_pid, audio_pid, pcr_pid);
 							}
 						}
 					}
+					eDebug("[HIDDEN_CHANNELS] Loaded %d hidden channel(s)", count);
 					file.close();
 				}
 			}

@@ -83,6 +83,31 @@ eDVBNamespace eDVBScan::buildNamespace(eOriginalNetworkID onid, eTransportStream
 	return eDVBNamespace(hash);
 }
 
+int eDVBScan::getSITimeout(int base_timeout) const
+{
+	/*
+	 * Narrowband (low symbol rate) transponders carry SI at a much lower
+	 * bitrate, and feed transponders frequently violate the nominal SI
+	 * repetition intervals. Demod lock is also slower to stabilise at low
+	 * symbol rates, eating into the table acquisition window. Scale the
+	 * PAT/PMT timeouts up so SCPC carriers (SR < 1000 ksps) get enough
+	 * time to deliver their tables instead of being declared empty.
+	 */
+	int type;
+	if (m_ch_current && !m_ch_current->getSystem(type) && type == iDVBFrontend::feSatellite)
+	{
+		eDVBFrontendParametersSatellite parm;
+		if (!m_ch_current->getDVBS(parm) && parm.symbol_rate > 0)
+		{
+			if (parm.symbol_rate < 1000000)      /* < 1 Msps */
+				return base_timeout * 3;
+			if (parm.symbol_rate < 4000000)      /* 1 - 4 Msps */
+				return base_timeout * 2;
+		}
+	}
+	return base_timeout;
+}
+
 void eDVBScan::stateChange(iDVBChannel *ch)
 {
 	int state;
@@ -223,9 +248,17 @@ RESULT eDVBScan::nextChannel()
 {
 	ePtr<iDVBFrontend> fe;
 
-	m_SDT = 0; m_PAT = 0; m_BAT = 0; m_NIT = 0, m_PMT = 0; m_VCT = 0;
+	m_SDT = 0; m_PAT = 0; m_BAT = 0; m_NIT = 0; m_PMT = 0; m_VCT = 0;
 
 	m_ready = 0;
+
+	/* If the previous transponder lost lock mid-scan (common on marginal
+	 * narrowband carriers), channelDone() never ran and PMT bookkeeping
+	 * is stale. Reset it so leftover PMT PIDs from the previous transport
+	 * stream are not read on the next one. */
+	m_pmts_to_read.clear();
+	m_pmt_running = false;
+	m_abort_current_pmt = false;
 
 	m_pat_tsid = eTransportStreamID();
 
@@ -373,16 +406,16 @@ RESULT eDVBScan::startFilter()
 		if (tsid == -1)
 		{
 			SCAN_eDebug("[scan.cpp] tsid == -1; using default SDT specification.");
-			if (m_SDT->start(m_demux, eDVBSDTSpec()))
+			if (m_SDT->start(m_demux, eDVBSDTSpec().setTimeout(getSITimeout(2500))))
 				return -1;
 		}
 		else 
 		{
 			SCAN_eDebug("[scan.cpp] tsid != -1; attempting to start SDT with eDVBSDTSpec(tsid, true).");
-			if (m_SDT->start(m_demux, eDVBSDTSpec(tsid, true)))
+			if (m_SDT->start(m_demux, eDVBSDTSpec(tsid, true).setTimeout(getSITimeout(10500))))
 			{
 				SCAN_eDebug("[scan.cpp] First attempt with true failed; trying eDVBSDTSpec(tsid, false) as fallback.");
-				if (m_SDT->start(m_demux, eDVBSDTSpec(tsid, false)))
+				if (m_SDT->start(m_demux, eDVBSDTSpec(tsid, false).setTimeout(getSITimeout(2500))))
 				{
 					SCAN_eDebug("[scan.cpp] Fallback attempt with false also failed; returning failure.");
 					return -1;
@@ -399,9 +432,9 @@ RESULT eDVBScan::startFilter()
 		if (m_ready_all & readyPAT)
 		{
 			m_PAT = new eTable<ProgramAssociationSection>;
-			if (m_PAT->start(m_demux, eDVBPATSpec(8000)))
+			if (m_PAT->start(m_demux, eDVBPATSpec(getSITimeout(8000))))
 			{
-				SCAN_eDebug("[scan.cpp #380] ERROR: Timed out waiting on PAT after 8 seconds");
+				SCAN_eDebug("[scan.cpp] ERROR: failed to start PAT filter");
 				return -1;
 			}
 			CONNECT(m_PAT->tableReady, eDVBScan::PATready);
@@ -440,7 +473,7 @@ void eDVBScan::SDTready(int err)
 			m_SDT = new eTable<ServiceDescriptionSection>;
 			
 			// Try with a different approach - no specific transport stream ID filter
-			if (m_SDT->start(m_demux, eDVBSDTSpec()))
+			if (m_SDT->start(m_demux, eDVBSDTSpec().setTimeout(getSITimeout(2500))))
 			{
 				SCAN_eDebug("[scan.cpp] SDT retry also failed");
 				m_ready |= readySDT;
@@ -630,7 +663,7 @@ void eDVBScan::PMTready(int err)
 	}
 
 	if (m_pmt_in_progress != m_pmts_to_read.end())
-		m_PMT->start(m_demux, eDVBPMTSpec(m_pmt_in_progress->second.pmtPid, m_pmt_in_progress->first, 4000));
+		m_PMT->start(m_demux, eDVBPMTSpec(m_pmt_in_progress->second.pmtPid, m_pmt_in_progress->first, getSITimeout(4000)));
 	else
 	{
 		m_PMT = 0;
@@ -749,6 +782,49 @@ void eDVBScan::addChannelToScan(iDVBFrontendParameters *feparm)
 
 int eDVBScan::sameChannel(iDVBFrontendParameters *ch1, iDVBFrontendParameters *ch2, bool exact) const
 {
+	int diff;
+
+	if (!ch1 || !ch2)
+		return 0;
+
+	if (ch1->calculateDifference(ch2, diff, exact))
+		return 0;
+
+	/*
+	 * Default merge window: 4 MHz (kHz units for DVB-S/C; Hz for DVB-T,
+	 * which effectively means "exact" for terrestrial - same as upstream).
+	 *
+	 * For satellite, scale the window down with the narrower of the two
+	 * symbol rates. A fixed 4 MHz window incorrectly merges adjacent
+	 * narrowband (low symbol rate / SCPC feed) transponders, so closely
+	 * spaced carriers below ~6 Msps would never all be scanned. Using
+	 * roughly 2/3 of the narrower symbol rate (~half the occupied
+	 * bandwidth incl. roll-off) keeps wideband behaviour identical while
+	 * letting feed transponders spaced ~1 MHz apart coexist in the list.
+	 *
+	 * Floor of 500 kHz: below that, LNB LOF drift would create duplicate
+	 * entries for the same physical carrier (harmless, but wastes time).
+	 */
+	int tolerance = 4000;
+	int type1, type2;
+	if (!ch1->getSystem(type1) && !ch2->getSystem(type2)
+		&& type1 == iDVBFrontend::feSatellite && type2 == iDVBFrontend::feSatellite)
+	{
+		eDVBFrontendParametersSatellite p1, p2;
+		if (!ch1->getDVBS(p1) && !ch2->getDVBS(p2))
+		{
+			int min_sr = p1.symbol_rate < p2.symbol_rate ? p1.symbol_rate : p2.symbol_rate;
+			if (min_sr > 0 && min_sr < 6000000)
+			{
+				tolerance = (min_sr / 1000) * 2 / 3; /* kHz */
+				if (tolerance < 500)
+					tolerance = 500;
+			}
+		}
+	}
+
+	if (diff < tolerance)
+		return 1;
 	return 0;
 }
 
@@ -768,7 +844,7 @@ void eDVBScan::channelDone()
 		}
 	}
 
-	if (m_ready & validSDT && (!(m_flags & scanOnlyFree) || !m_pmt_running))
+	if ((m_ready & validSDT) && m_SDT && !m_SDT->getSections().empty() && (!(m_flags & scanOnlyFree) || !m_pmt_running))
 	{
 		unsigned long hash = 0;
 
@@ -816,7 +892,7 @@ void eDVBScan::channelDone()
 		m_ready &= ~validSDT;
 	}
 
-	if (m_ready & validVCT)
+	if ((m_ready & validVCT) && m_VCT && !m_VCT->getSections().empty())
 	{
 		unsigned long hash = 0;
 
@@ -945,11 +1021,10 @@ void eDVBScan::channelDone()
 					}
 					case S2_SATELLITE_DELIVERY_SYSTEM_DESCRIPTOR:
 					{
-						eDebug("[scan.cpp-#758] S2_SATELLITE_DELIVERY_SYSTEM_DESCRIPTOR found");
+						SCAN_eDebug("[scan.cpp] S2_SATELLITE_DELIVERY_SYSTEM_DESCRIPTOR found");
 						if (system != iDVBFrontend::feSatellite)
 							break; // when current locked transponder is no satellite transponder ignore this descriptor
 						S2SatelliteDeliverySystemDescriptor &d = (S2SatelliteDeliverySystemDescriptor&)**desc;
-						ePtr<eDVBFrontendParameters> feparm = new eDVBFrontendParameters;
 						eDVBFrontendParametersSatellite sat;
 						sat.set(d);
 
@@ -958,11 +1033,18 @@ void eDVBScan::channelDone()
 
 						if (p.is_id != sat.is_id || p.pls_mode != sat.pls_mode || p.pls_code != sat.pls_code)
 						{
+							/* multistream sibling on the current transponder:
+							 * keep tuned RF parameters, apply stream/PLS data */
+							ePtr<eDVBFrontendParameters> feparm = new eDVBFrontendParameters;
 							p.set(d); //set multistream descriptor to current tuned data
 							feparm->setDVBS(p);
 							addChannelToScan(feparm);
 						}
-						[[fallthrough]];
+						/* The S2 descriptor carries no frequency; do NOT fall
+						 * through into the DVB-S descriptor handler (that would
+						 * reinterpret this descriptor as a
+						 * SatelliteDeliverySystemDescriptor and read garbage). */
+						break;
 					}
 					case SATELLITE_DELIVERY_SYSTEM_DESCRIPTOR:
 					{
@@ -979,6 +1061,33 @@ void eDVBScan::channelDone()
 
 						eDVBFrontendParametersSatellite p;
 						m_ch_current->getDVBS(p);
+
+						/* some NITs report a slightly different orbital position
+						 * than the one we tuned; snap to the tuned position */
+						if (absdiff(p.orbital_position, sat.orbital_position) < 5)
+							sat.orbital_position = p.orbital_position;
+						/* some NITs have the west/east flag inverted */
+						if (absdiff(absdiff(3600, p.orbital_position), sat.orbital_position) < 5)
+						{
+							SCAN_eDebug("[eDVBScan] NIT entry with incorrect west/east flag, correcting %d -> %d",
+								sat.orbital_position, p.orbital_position);
+							sat.orbital_position = p.orbital_position;
+						}
+
+						feparm->setDVBS(sat);
+
+						if (sat.orbital_position != p.orbital_position)
+						{
+							SCAN_eDebug("[eDVBScan] dropping NIT transponder on different satellite (%d.%d vs %d.%d)",
+								sat.orbital_position/10, sat.orbital_position%10,
+								p.orbital_position/10, p.orbital_position%10);
+							break;
+						}
+
+						unsigned long hash = 0;
+						feparm->getHash(hash);
+						ns = buildNamespace(onid, tsid, hash);
+
 						addChannelToScan(feparm);
 						break;
 					}
@@ -1580,41 +1689,6 @@ void eDVBScan::insertInto(iDVBChannelList *db, bool backgroundscanresult)
 				if (!file.is_open()) {
 					eDebug("[HIDDEN_CHANNELS] Could not open any hidden channels file");
 				} else {
-					// Also try to open original lamedb for PID information
-					std::ifstream lamedb_file("/etc/enigma2/lamedb");
-					std::map<std::string, std::string> lamedb_data;
-					
-					// Parse lamedb to extract CA PID info if available
-					if (lamedb_file.is_open()) {
-						std::string lamedb_line;
-						bool in_services = false;
-						std::string current_service_id;
-						
-						while (std::getline(lamedb_file, lamedb_line)) {
-							if (lamedb_line == "services") {
-								in_services = true;
-								continue;
-							} else if (lamedb_line == "end" || lamedb_line.empty()) {
-								break;
-							}
-							
-							if (in_services) {
-								if (lamedb_line.find("0a1faee1:0004:0000") != std::string::npos) {
-									// This is a service line for our transponder
-									size_t colon_pos = lamedb_line.find(':');
-									if (colon_pos != std::string::npos) {
-										current_service_id = lamedb_line.substr(0, colon_pos);
-									}
-								} else if (!current_service_id.empty() && lamedb_line.find("p:") != std::string::npos) {
-									// This is provider/CA line for current service
-									lamedb_data[current_service_id] = lamedb_line;
-									current_service_id.clear();
-								}
-							}
-						}
-						lamedb_file.close();
-					}
-					
 					std::string line;
 					int count = 0;
 					
@@ -1644,13 +1718,22 @@ void eDVBScan::insertInto(iDVBChannelList *db, bool backgroundscanresult)
 							parts.push_back(current); // Add last part
 							
 							if (parts.size() >= 7) {
-								unsigned short service_id = std::stoul(parts[0], 0, 16);
+								unsigned short service_id;
+								unsigned char service_type;
+								unsigned short video_pid, audio_pid, pcr_pid;
+								try {
+									service_id = std::stoul(parts[0], 0, 16);
+									service_type = std::stoul(parts[3]);
+									video_pid = std::stoul(parts[4], 0, 16);
+									audio_pid = std::stoul(parts[5], 0, 16);
+									pcr_pid = std::stoul(parts[6], 0, 16);
+								}
+								catch (const std::exception &e) {
+									eDebug("[HIDDEN_CHANNELS] skipping malformed line: %s", line.c_str());
+									continue;
+								}
 								std::string service_name = parts[1];
 								std::string provider_name = parts[2];
-								unsigned char service_type = std::stoul(parts[3]);
-								unsigned short video_pid = std::stoul(parts[4], 0, 16);
-								unsigned short audio_pid = std::stoul(parts[5], 0, 16);
-								unsigned short pcr_pid = std::stoul(parts[6], 0, 16);
 								
 								// Create cached PIDs for proper radio service playback: audio_pid and pcr_pid
 								std::vector<unsigned short> cached_pids;
@@ -1675,8 +1758,11 @@ void eDVBScan::insertInto(iDVBChannelList *db, bool backgroundscanresult)
 								service->m_provider_name = provider_name;
 								service->m_flags = eDVBService::dxNewFound | eDVBService::dxNoDVB;
 								
-								// Add cached PIDs for proper radio service playback
-								if (!cached_pids.empty()) {
+								// Add cached PIDs so the service is playable without PSI
+								if (!cached_pids.empty() || video_pid != 0) {
+									if (video_pid != 0) {
+										service->setCacheEntry(eDVBService::cVPID, video_pid);
+									}
 									// Set audio PID if present
 									if (audio_pid != 0) {
 										service->setCacheEntry(eDVBService::cMPEGAPID, audio_pid);
@@ -1685,8 +1771,8 @@ void eDVBScan::insertInto(iDVBChannelList *db, bool backgroundscanresult)
 									if (pcr_pid != 0) {
 										service->setCacheEntry(eDVBService::cPCRPID, pcr_pid);
 									}
-									SCAN_eDebug("[scan.cpp] Added cached PIDs for service %04x: Audio=%04x, PCR=%04x", 
-										service_id, audio_pid, pcr_pid);
+									SCAN_eDebug("[scan.cpp] Added cached PIDs for service %04x: Video=%04x, Audio=%04x, PCR=%04x", 
+										service_id, video_pid, audio_pid, pcr_pid);
 								}
 								
 								// Add to new services list

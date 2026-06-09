@@ -2126,36 +2126,23 @@ int eDVBFrontend::tuneLoopInt()  // called by m_tuneTimer
 			}
 			case eSecCommand::START_TUNE_TIMEOUT:
 			{
-				char allow_unlocked_transponder[64] = {};
-				sprintf(allow_unlocked_transponder, "config.Nims.%d.allow_unlocked_transponder", m_slotid);
-				sleep(.3); // below
-				int lockstat = readFrontendData(iFrontendInformation_ENUMS::lockState);
-				int tuneTimeout = (m_sec_sequence.current()->timeout);
-				int allowunlock = (eConfigManager::getConfigBoolValue(allow_unlocked_transponder, false));
-				if (!m_simulate && allowunlock == 0 && lockstat == 0)
-				{
-					tuneTimeout = 0;
-					m_timeout->start((3000), 1);
-					eDebug("[eDVBFrontend%d] lockstat == 0 UNLOCKED TRANSPONDER  Timeout = %d, lockstat =  %d allowunlock = %d" , m_dvbid, tuneTimeout, lockstat, allowunlock);
-				}
-				if (!m_simulate && allowunlock == 1 && lockstat == 0)
-				{
-					eDebugNoSimulate("[eDVBFrontend%d] startTuneTimeout %d", m_dvbid, tuneTimeout);
-					m_timeout->start(tuneTimeout, 1);				
-					eDebug("[eDVBFrontend%d] lockstat == 0  Timeout = %d, lockstat =  %d allowunlock = %d", m_dvbid, tuneTimeout, lockstat, allowunlock);
-				}
-				if (!m_simulate && allowunlock == 1 && lockstat == 1)
-				{
-					eDebugNoSimulate("[eDVBFrontend%d] startTuneTimeout %d", m_dvbid, tuneTimeout);
+				/*
+				 * Always arm the timeout with the value calculated by
+				 * calcLockTimeout() (symbol rate aware: up to 60s for
+				 * SR < 800 ksps). For satellite this command runs BEFORE
+				 * voltage/DiSEqC/SET_FRONTEND, so reading lockState here
+				 * reflects the PREVIOUS transponder and must not be used
+				 * to shorten the timeout - doing so capped narrowband
+				 * carriers (which need many seconds to achieve FEC lock)
+				 * to 3s whenever the previous tune was unlocked, making
+				 * low symbol rate locking nondeterministic.
+				 * Genuinely dead transponders are still failed early by
+				 * the driver via FE_TIMEDOUT (IF_LOCK_TIMEOUT_GOTO).
+				 */
+				int tuneTimeout = m_sec_sequence.current()->timeout;
+				eDebugNoSimulate("[eDVBFrontend%d] startTuneTimeout %d", m_dvbid, tuneTimeout);
+				if (!m_simulate)
 					m_timeout->start(tuneTimeout, 1);
-					eDebug("[eDVBFrontend%d] lockstat == 1  Timeout = %d, lockstat =  %d allowunlock = %d", m_dvbid, tuneTimeout, lockstat, allowunlock);
-				}
-				if (!m_simulate && allowunlock == 0 && lockstat == 1)
-				{
-					eDebugNoSimulate("[eDVBFrontend%d] startTuneTimeout %d", m_dvbid, tuneTimeout);
-					m_timeout->start(tuneTimeout, 1);
-					eDebug("[eDVBFrontend%d] lockstat == 1  Timeout = %d, lockstat =  %d allowunlock = %d", m_dvbid, tuneTimeout, lockstat, allowunlock);
-				}
 				++m_sec_sequence.current();
 				break;
 			}

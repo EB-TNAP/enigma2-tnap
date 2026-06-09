@@ -75,6 +75,19 @@ public:
 			m_spec.tid_mask = 0xFB;
 		}
 	}
+	/*
+	 * Override the default timeout, chainable:
+	 *   eDVBSDTSpec(tsid, true).setTimeout(x)
+	 * Used by the channel scan to give narrowband (low symbol rate)
+	 * transponders more time to deliver their SI tables; the DVB
+	 * repetition guidelines above are frequently violated by SCPC
+	 * feed transponders.
+	 */
+	eDVBSDTSpec &setTimeout(int timeout)
+	{
+		m_spec.timeout = timeout;
+		return *this;
+	}
 	operator eDVBTableSpec &()
 	{
 		return m_spec;
@@ -94,10 +107,17 @@ public:
 		m_spec.flags   = eDVBTableSpec::tfAnyVersion |
 			eDVBTableSpec::tfHaveTID | eDVBTableSpec::tfCheckCRC |
 			eDVBTableSpec::tfHaveTimeout;
+		/*
+		 * Also receive NIT-other (TID 0x41, e.g. transponders advertised
+		 * for sibling networks on the same orbital position). This finds
+		 * additional transponders during network scans; entries pointing
+		 * to other satellites are validated and dropped by eDVBScan via
+		 * the orbital position check.
+		 */
+		m_spec.flags |= eDVBTableSpec::tfHaveTIDMask;
+		m_spec.tid_mask = 0xFE; /* match 0x40 (actual) and 0x41 (other) */
 		if (networkid)
 		{
-			m_spec.flags |= eDVBTableSpec::tfHaveTIDMask;
-			m_spec.tid_mask = 0xFE; /* not only 'actual', check 'other' as well (as we're looking for a non-standard network id) */
 			m_spec.flags |= eDVBTableSpec::tfHaveTIDExt | eDVBTableSpec::tfHaveTIDExtMask;
 			m_spec.tidext = networkid;
 			m_spec.tidext_mask = 0xFFFF;

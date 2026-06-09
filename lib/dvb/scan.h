@@ -33,6 +33,9 @@ class eDVBScan: public sigc::trackable, public iObject
 		/* build dvb namespace */
 	eDVBNamespace buildNamespace(eOriginalNetworkID onid, eTransportStreamID tsid, unsigned long hash);
 
+		/* scale SI table timeouts up for low symbol rate transponders */
+	int getSITimeout(int base_timeout) const;
+
 		/* scan resources */
 	eUsePtr<iDVBChannel> m_channel;
 	ePtr<iDVBDemux> m_demux;

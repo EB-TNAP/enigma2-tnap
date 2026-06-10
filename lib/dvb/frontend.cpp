@@ -1490,10 +1490,8 @@ void eDVBFrontend::calculateSignalQuality(int snr, int &signalquality, int &sign
 
 int eDVBFrontend::readFrontendData(int type)
 {
-	char force_legacy_signal_stats[64] = {};
-	sprintf(force_legacy_signal_stats, "config.Nims.%d.force_legacy_signal_stats", m_slotid);
 	char show_signal_below_lock[64] = {};
-	sprintf(show_signal_below_lock, "config.Nims.%d.show_signal_below_lock", m_slotid);
+	snprintf(show_signal_below_lock, sizeof(show_signal_below_lock), "config.Nims.%d.show_signal_below_lock", m_slotid);
 	switch(type)
 	{
 		case iFrontendInformation_ENUMS::bitErrorRate:
@@ -1509,34 +1507,48 @@ int eDVBFrontend::readFrontendData(int type)
 			}
 			break;
 		case iFrontendInformation_ENUMS::snrValue:
-			if (m_state == stateLock)
+		{
+			bool below_lock = (m_state != stateLock) && eConfigManager::getConfigBoolValue(show_signal_below_lock, true);
+			if (m_state == stateLock || below_lock)
 			{
 				uint16_t snr = 0;
 				if (!m_simulate)
 				{
+					if (below_lock)
+					{
+						/* only report SNR pre-lock when the demod actually sees a carrier,
+						 * otherwise some frontends (e.g. AVL6261) return full-scale garbage */
+						fe_status_t status = (fe_status_t)0;
+						ioctl(m_fd, FE_READ_STATUS, &status);
+						if (!(status & (FE_HAS_SIGNAL | FE_HAS_CARRIER)))
+							break;
+					}
 					if (ioctl(m_fd, FE_READ_SNR, &snr) < 0 && errno != ERANGE)
 						eDebug("[eDVBFrontend] FE_READ_SNR failed: %m");
+					if (below_lock && snr >= 15536)
+						break; /* sanity cap: discard implausible pre-lock readings */
 				}
 				return snr;
 			}
-			else if (eConfigManager::getConfigBoolValue(show_signal_below_lock, true))
-			{
-				uint16_t snr = 0;
-				if (!m_simulate)
-				{
-					if (ioctl(m_fd, FE_READ_SNR, &snr) < 0 && errno != ERANGE)
-						eDebug("[eDVBFrontend] FE_READ_SNR failed: %m");
-				}
-				if (snr < 15536)
-					return snr;
-			}
 			break;
+		}
 		case iFrontendInformation_ENUMS::signalQuality:
 		case iFrontendInformation_ENUMS::signalQualitydB: /* this moved into the driver on DVB API 5.10 */
-			if (m_state == stateLock)
+		{
+			bool below_lock = (m_state != stateLock) && eConfigManager::getConfigBoolValue(show_signal_below_lock, true);
+			if (m_state == stateLock || below_lock)
 			{
 				int signalquality = 0;
 				int signalqualitydb = 0;
+				if (below_lock && !m_simulate)
+				{
+					/* only report quality pre-lock when the demod sees a carrier,
+					 * otherwise some frontends (e.g. AVL6261) return garbage */
+					fe_status_t status = (fe_status_t)0;
+					ioctl(m_fd, FE_READ_STATUS, &status);
+					if (!(status & (FE_HAS_SIGNAL | FE_HAS_CARRIER)))
+						break;
+				}
 #if DVB_API_VERSION > 5 || DVB_API_VERSION == 5 && DVB_API_VERSION_MINOR >= 10
 				if (m_dvbversion >= DVB_VERSION(5, 10))
 				{
@@ -1575,81 +1587,6 @@ int eDVBFrontend::readFrontendData(int type)
 								signalquality = calculateSignalPercentage(signalqualitydb);
 							}
 							return signalquality;
-						}
-					}
-				}
-#endif
-				/* fallback to old DVB API */
-				int snr = readFrontendData(iFrontendInformation_ENUMS::snrValue);
-				calculateSignalQuality(snr, signalquality, signalqualitydb);
-
-				if (type == iFrontendInformation_ENUMS::signalQuality)
-				{
-					return signalquality;
-				}
-				else
-				{
-					return signalqualitydb;
-				}
-			}
-			else if (eConfigManager::getConfigBoolValue(show_signal_below_lock, true))
-			{
-				int signalquality = 0;
-				int signalqualitydb = 0;
-#if DVB_API_VERSION > 5 || DVB_API_VERSION == 5 && DVB_API_VERSION_MINOR >= 10
-				if (m_dvbversion >= DVB_VERSION(5, 10))
-				{
-					dtv_property prop[1] = {};
-					prop[0].cmd = DTV_STAT_CNR;
-					dtv_properties props;
-					props.props = prop;
-					props.num = 1;
-
-					if (::ioctl(m_fd, FE_GET_PROPERTY, &props) < 0 && errno != ERANGE)
-					{
-						eDebug("[eDVBFrontend] DTV_STAT_CNR failed: %m");
-					}
-					else
-					{
-						for(unsigned int i=0; i<prop[0].u.st.len; i++)
-						{
-							if (prop[0].u.st.stat[i].scale == FE_SCALE_DECIBEL)
-							{
-								signalqualitydb = prop[0].u.st.stat[i].svalue / 10;
-							}
-							else if (prop[0].u.st.stat[i].scale == FE_SCALE_RELATIVE)
-							{
-								signalquality = prop[0].u.st.stat[i].svalue;
-							}
-						}
-						if (signalqualitydb)
-						{
-							if(type == iFrontendInformation_ENUMS::signalQualitydB)
-							{
-								return signalqualitydb;
-							}
-							if(!signalquality)
-							{
-								/* provide an estimated percentage when drivers lack this info */
-								signalquality = calculateSignalPercentage(signalqualitydb);
-							}
-							return signalquality;
-			                if (m_state != stateLock)
-			                {
-				                uint16_t snr = 0;
-				                int signalquality = 0;
-				                int signalqualitydb = 0;
-				                if (!m_simulate)
-					                ioctl(m_fd, FE_READ_SNR, &snr);
-				                if (snr > 0 && snr < 65535)
-				                {
-					                calculateSignalQuality(snr, signalquality, signalqualitydb);
-					                if (type == iFrontendInformation_ENUMS::signalQuality)
-						                return signalquality;
-					                else
-						                return signalqualitydb;
-				                }
-			                }
 						}
 					}
 				}
@@ -1668,8 +1605,9 @@ int eDVBFrontend::readFrontendData(int type)
 				}
 			}
 			break;
+		}
 		case iFrontendInformation_ENUMS::signalPower:
-			if (m_state == stateLock)
+			if (m_state == stateLock || eConfigManager::getConfigBoolValue(show_signal_below_lock, true))
 			{
 				uint16_t strength=0;
 				if (!m_simulate)

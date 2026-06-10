@@ -160,7 +160,7 @@ int eDVBFrontendStatus::getSNRdB() const
 
 int eDVBFrontendStatus::getSignalPower() const
 {
-	if (!frontend || getState() == iDVBFrontend_ENUMS::stateTuning) return 0;
+	if (!frontend) return 0;
 	return frontend->readFrontendData(iFrontendInformation_ENUMS::signalPower);
 }
 

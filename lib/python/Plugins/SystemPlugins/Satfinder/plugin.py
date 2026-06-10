@@ -1256,9 +1256,14 @@ class SatfinderExtra(Satfinder):
 		if self.currentProcess != currentProcess:
 			return
 
+		with self.threadLock:
+			self["pos"].setText(_("Reading NIT..."))
+
 		fd = dvbreader.open(demuxer_device, nit_current_pid, nit_current_table_id, mask, self.feid)
 		if fd < 0:
 			print("[Satfinder][getOrbPosFromNit] Cannot open the demuxer")
+			with self.threadLock:
+				self["pos"].setText(_("NIT: demuxer error"))
 			return
 
 		timeout = datetime.datetime.now()
@@ -1299,29 +1304,85 @@ class SatfinderExtra(Satfinder):
 
 		if not nit_current_content:
 			print("[Satfinder][getOrbPosFromNit] current transponder not found")
+			with self.threadLock:
+				self["pos"].setText(_("No NIT data"))
 			return
 
 		# Find the transponder with matching ONID and TSID
-		transponders = [t for t in nit_current_content if "descriptor_tag" in t and t["descriptor_tag"] == 0x43 
+		transponders = [t for t in nit_current_content if "descriptor_tag" in t and t["descriptor_tag"] == 0x43
 					   and t["original_network_id"] == self.onid and t["transport_stream_id"] == self.tsid]
-		
+
 		# If not found, try with just TSID
-		transponders2 = [t for t in nit_current_content if "descriptor_tag" in t and t["descriptor_tag"] == 0x43 
+		transponders2 = [t for t in nit_current_content if "descriptor_tag" in t and t["descriptor_tag"] == 0x43
 						and t["transport_stream_id"] == self.tsid]
-		
+
 		if transponders and "orbital_position" in transponders[0]:
-			orb_pos = self.getOrbitalPosition(transponders[0]["orbital_position"], transponders[0]["west_east_flag"])
-			with self.threadLock:
-				self["pos"].setText(_("%s") % orb_pos)
-			print("[satfinder][getOrbPosFromNit] orb_pos", orb_pos)
+			entry = transponders[0]
+			tentative = False
 		elif transponders2 and "orbital_position" in transponders2[0]:
-			orb_pos = self.getOrbitalPosition(transponders2[0]["orbital_position"], transponders2[0]["west_east_flag"])
-			with self.threadLock:
-				self["pos"].setText(_("%s?") % orb_pos)
-			print("[satfinder][getOrbPosFromNit] orb_pos tentative, tsid match, onid mismatch between NIT and SDT", orb_pos)
+			entry = transponders2[0]
+			tentative = True
+			print("[satfinder][getOrbPosFromNit] tentative, tsid match, onid mismatch between NIT and SDT")
 		else:
 			print("[satfinder][getOrbPosFromNit] no orbital position found")
+			with self.threadLock:
+				self["pos"].setText(_("NIT: no position"))
+			return
 
+		verdict = self.buildNitVerdict(entry["orbital_position"], entry["west_east_flag"], tentative)
+		print("[satfinder][getOrbPosFromNit]", verdict)
+		with self.threadLock:
+			self["pos"].setText(verdict)
+
+	def getOrbitalPositionValue(self, bcd, w_e_flag=1):
+		# Same decoding as getOrbitalPosition but returns the position as an
+		# integer in enigma's 0..3600 convention (west = 3600 - x) for comparison
+		# against the satellite selected in the tuner configuration.
+		op = 0
+		for i in range(4):
+			op += ((bcd >> 4 * i) & 0x0F) * 10**i
+		if op > 1800:
+			op = (3600 - op) * -1
+		if w_e_flag == 0:
+			op *= -1
+		return op % 3600
+
+	def nitSatName(self, pos):
+		try:
+			name = str(nimmanager.getSatDescription(pos))
+			if name:
+				return name[:26]
+		except Exception:
+			pass
+		return ""
+
+	def buildNitVerdict(self, bcd, w_e_flag, tentative):
+		# The satellite broadcasts its own orbital position in the NIT; comparing
+		# it with the position the tuner is configured for verifies whether this
+		# transponder really belongs to the selected satellite.
+		pos_text = self.getOrbitalPosition(bcd, w_e_flag)
+		pos_value = self.getOrbitalPositionValue(bcd, w_e_flag)
+		name = self.nitSatName(pos_value)
+		text = pos_text
+		if name:
+			text += " " + name
+		if tentative:
+			text += " ?"
+		expected = None
+		try:
+			if self.DVB_type.value == "DVB-S":
+				expected = int(self.tuning_sat.value)
+		except Exception:
+			expected = None
+		if expected is None:
+			return text
+		diff = abs(pos_value - expected)
+		if diff > 1800:
+			diff = 3600 - diff
+		if diff <= 5: # 0.5 degree tolerance for nominal-position fuzz, e.g. 0.8W vs 1.0W
+			return text + " - " + _("verified")
+		expected_text = "{:0.1f}{}".format((3600 - expected) / 10. if expected > 1800 else expected / 10., "W" if expected > 1800 else "E")
+		return text + " - " + _("MISMATCH! tuner is set to %s") % expected_text
 
 	def getOrbitalPosition(self, bcd, w_e_flag=1):
 		# 4 bit BCD (binary coded decimal)

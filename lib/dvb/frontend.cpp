@@ -1508,7 +1508,12 @@ int eDVBFrontend::readFrontendData(int type)
 			break;
 		case iFrontendInformation_ENUMS::snrValue:
 		{
-			bool below_lock = (m_state != stateLock) && eConfigManager::getConfigBoolValue(show_signal_below_lock, true);
+			/* pre-lock readings are only live while the demod is acquiring
+			 * (stateTuning) or re-acquiring (stateLostLock); once tuning has
+			 * failed or gone idle the AVL6261 SNR register freezes at its
+			 * last computed value, so reading it would show stale data */
+			bool below_lock = (m_state == stateTuning || m_state == stateLostLock)
+				&& eConfigManager::getConfigBoolValue(show_signal_below_lock, true);
 			if (m_state == stateLock || below_lock)
 			{
 				uint16_t snr = 0;
@@ -1529,7 +1534,9 @@ int eDVBFrontend::readFrontendData(int type)
 		case iFrontendInformation_ENUMS::signalQuality:
 		case iFrontendInformation_ENUMS::signalQualitydB: /* this moved into the driver on DVB API 5.10 */
 		{
-			bool below_lock = (m_state != stateLock) && eConfigManager::getConfigBoolValue(show_signal_below_lock, true);
+			/* see snrValue: only trust pre-lock stats while acquisition is active */
+			bool below_lock = (m_state == stateTuning || m_state == stateLostLock)
+				&& eConfigManager::getConfigBoolValue(show_signal_below_lock, true);
 			if (m_state == stateLock || below_lock)
 			{
 				int signalquality = 0;
@@ -1592,7 +1599,8 @@ int eDVBFrontend::readFrontendData(int type)
 			break;
 		}
 		case iFrontendInformation_ENUMS::signalPower:
-			if (m_state == stateLock || eConfigManager::getConfigBoolValue(show_signal_below_lock, true))
+			if (m_state == stateLock || ((m_state == stateTuning || m_state == stateLostLock)
+				&& eConfigManager::getConfigBoolValue(show_signal_below_lock, true)))
 			{
 				uint16_t strength=0;
 				if (!m_simulate)

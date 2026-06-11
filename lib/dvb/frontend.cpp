@@ -1514,19 +1514,13 @@ int eDVBFrontend::readFrontendData(int type)
 				uint16_t snr = 0;
 				if (!m_simulate)
 				{
-					if (below_lock)
-					{
-						/* only report SNR pre-lock when the demod actually sees a carrier,
-						 * otherwise some frontends (e.g. AVL6261) return full-scale garbage */
-						fe_status_t status = (fe_status_t)0;
-						ioctl(m_fd, FE_READ_STATUS, &status);
-						if (!(status & (FE_HAS_SIGNAL | FE_HAS_CARRIER)))
-							break;
-					}
 					if (ioctl(m_fd, FE_READ_SNR, &snr) < 0 && errno != ERANGE)
 						eDebug("[eDVBFrontend] FE_READ_SNR failed: %m");
+					/* AVL6261 and similar do not raise FE_HAS_SIGNAL/FE_HAS_CARRIER
+					 * before lock, so we cannot gate on FE_READ_STATUS here;
+					 * rely on a sanity cap to discard implausible readings */
 					if (below_lock && snr >= 15536)
-						break; /* sanity cap: discard implausible pre-lock readings */
+						break;
 				}
 				return snr;
 			}
@@ -1540,15 +1534,6 @@ int eDVBFrontend::readFrontendData(int type)
 			{
 				int signalquality = 0;
 				int signalqualitydb = 0;
-				if (below_lock && !m_simulate)
-				{
-					/* only report quality pre-lock when the demod sees a carrier,
-					 * otherwise some frontends (e.g. AVL6261) return garbage */
-					fe_status_t status = (fe_status_t)0;
-					ioctl(m_fd, FE_READ_STATUS, &status);
-					if (!(status & (FE_HAS_SIGNAL | FE_HAS_CARRIER)))
-						break;
-				}
 #if DVB_API_VERSION > 5 || DVB_API_VERSION == 5 && DVB_API_VERSION_MINOR >= 10
 				if (m_dvbversion >= DVB_VERSION(5, 10))
 				{

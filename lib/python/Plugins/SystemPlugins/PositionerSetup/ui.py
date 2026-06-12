@@ -93,7 +93,7 @@ class PositionerSetup(Screen):
 
 	FIRST_UPDATE_INTERVAL = 800	#500		# milliseconds 500
 	UPDATE_INTERVAL = 25	#50				# milliseconds  50
-	RETUNE_KEEPALIVE_INTERVAL = 250		# milliseconds: debounce before re-arming a failed tune
+	RETUNE_KEEPALIVE_INTERVAL = 3000		# milliseconds: debounce before re-arming a failed tune
 ####
 	STATUS_MSG_TIMEOUT = 2					# seconds
 	LOG_SIZE = 16 * 1024					# log buffer size

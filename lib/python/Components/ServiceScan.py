@@ -10,8 +10,8 @@ from time import strftime, time, gmtime, localtime
 import os
 import pwd
 import grp
-import subprocess  # New import for running dvbstat binary
-import time as ttime
+import ctypes
+import fcntl
 
 
 BOX_MODEL = ""
@@ -63,22 +63,155 @@ if fileExists("/proc/stb/info/boxtype") and not fileExists("/proc/stb/info/hwmod
 	except:
 		pass
 
-# New function to get signal data from dvbstat binary
-def get_signal_data(adapter=0):
-    try:
-        result = subprocess.run(['dvbstat', '--adapter', str(adapter)], 
-                               capture_output=True, text=True, check=True)
-        output = result.stdout.strip().split(';')
-        if len(output) == 3:
-            return {
-                'snr': float(output[0]),
-                'status': 0 if output[1] == "UnLocked" else 16,  # Match existing code status values
-                'strength': float(output[2])
-            }
-    except Exception as e:
-        print(f"Error getting signal data: {e}")
-    return {'snr': 0, 'status': 0, 'strength': 0}  # Default values on error
+# In-process DVB frontend signal reader (replaces the external dvbstat
+# binary). Opens the frontend read-only, so it can safely run alongside
+# an active scan without disturbing the tune. Same ioctl path as the
+# fe-monitor.py diagnostic tool.
+#
+# Driver differences (verified on real hardware, both AVL6261 silicon):
+#  - Octagon SF8008 blob: no DVB API5 stats; legacy FE_READ_SNR is in
+#    0.01 dB units with garbage sentinel values at 55536 / ~65500.
+#  - Edision osmio4k/osmio4kplus/osmini4k driver: proper API5
+#    DTV_STAT_CNR in decibels; legacy FE_READ_SNR is relative 0-65535.
+# The reader probes API5 first and only applies the sentinel filter and
+# the 0.01 dB interpretation when API5 stats are unavailable.
 
+FE_HAS_LOCK = 0x10
+SNR_GARBAGE_THRESHOLD = 15536	# legacy-path sentinel filter (Octagon blob)
+DTV_STAT_CNR = 63
+FE_SCALE_DECIBEL = 1
+_MAX_DTV_STATS = 4
+
+
+def _fe_ior(nr, size):	# _IOR('o', nr, size) for the DVB frontend ioctls
+	return (2 << 30) | (size << 16) | (0x6F << 8) | nr
+
+
+FE_READ_STATUS = _fe_ior(69, 4)
+FE_READ_SIGNAL_STRENGTH = _fe_ior(71, 2)
+FE_READ_SNR = _fe_ior(72, 2)
+
+
+class _DtvStats(ctypes.Structure):
+	_pack_ = 1
+	_layout_ = "ms"
+	_fields_ = [("scale", ctypes.c_uint8), ("svalue", ctypes.c_int64)]
+
+
+class _DtvFeStats(ctypes.Structure):
+	_pack_ = 1
+	_layout_ = "ms"
+	_fields_ = [("len", ctypes.c_uint8), ("stat", _DtvStats * _MAX_DTV_STATS)]
+
+
+class _PropBuffer(ctypes.Structure):
+	_pack_ = 1
+	_layout_ = "ms"
+	_fields_ = [("data", ctypes.c_uint8 * 32), ("len", ctypes.c_uint32),
+		("reserved1", ctypes.c_uint32 * 3), ("reserved2", ctypes.c_void_p)]
+
+
+class _PropUnion(ctypes.Union):
+	_pack_ = 1
+	_layout_ = "ms"
+	_fields_ = [("data", ctypes.c_uint32), ("st", _DtvFeStats), ("buffer", _PropBuffer)]
+
+
+class _DtvProperty(ctypes.Structure):
+	_pack_ = 1
+	_layout_ = "ms"
+	_fields_ = [("cmd", ctypes.c_uint32), ("reserved", ctypes.c_uint32 * 3),
+		("u", _PropUnion), ("result", ctypes.c_int)]
+
+
+class _DtvProperties(ctypes.Structure):
+	_fields_ = [("num", ctypes.c_uint32), ("props", ctypes.POINTER(_DtvProperty))]
+
+
+FE_GET_PROPERTY = _fe_ior(83, ctypes.sizeof(_DtvProperties))
+
+
+class FESignalReader:
+	def __init__(self, feid=0):
+		self.fd = -1
+		self.api5_seen = False	# sticky: driver has produced API5 CNR stats
+		for dev in ("/dev/dvb/adapter0/frontend%d" % feid,
+				"/dev/dvb/adapter%d/frontend0" % feid,
+				"/dev/dvb/adapter0/frontend0"):
+			try:
+				self.fd = os.open(dev, os.O_RDONLY | os.O_NONBLOCK)
+				break
+			except OSError:
+				continue
+
+	def _ioctl(self, request, ctype):
+		buf = ctype(0)
+		try:
+			fcntl.ioctl(self.fd, request, buf)
+			return buf.value
+		except OSError:
+			return None
+
+	def _read_cnr_db(self):
+		# DVB API 5.10 DTV_STAT_CNR in dB, or None when the driver does
+		# not provide it (e.g. the Octagon SF8008 blob)
+		props = (_DtvProperty * 1)()
+		props[0].cmd = DTV_STAT_CNR
+		wrapper = _DtvProperties(num=1, props=ctypes.cast(props, ctypes.POINTER(_DtvProperty)))
+		try:
+			fcntl.ioctl(self.fd, FE_GET_PROPERTY, wrapper)
+		except OSError:
+			return None
+		st = props[0].u.st
+		for i in range(min(st.len, _MAX_DTV_STATS)):
+			if st.stat[i].scale == FE_SCALE_DECIBEL:
+				return st.stat[i].svalue / 1000.0
+		return None
+
+	def read(self):
+		# returns (status, snr_raw, strength_raw, cnr_db); None on failure
+		if self.fd < 0:
+			return None, None, None, None
+		return (self._ioctl(FE_READ_STATUS, ctypes.c_uint32),
+			self._ioctl(FE_READ_SNR, ctypes.c_uint16),
+			self._ioctl(FE_READ_SIGNAL_STRENGTH, ctypes.c_uint16),
+			self._read_cnr_db())
+
+	def close(self):
+		if self.fd >= 0:
+			try:
+				os.close(self.fd)
+			except OSError:
+				pass
+			self.fd = -1
+
+
+def get_signal_data(adapter=0):
+	# Compatibility wrapper with the old dvbstat output contract, plus
+	# 'snr_raw'. dB comes from API5 DTV_STAT_CNR when the driver provides
+	# it (Edision); otherwise legacy raw is interpreted as 0.01 dB units
+	# with the sentinel filter applied (Octagon blob).
+	reader = FESignalReader(adapter)
+	status, snr, strength, cnr_db = reader.read()
+	reader.close()
+	if status is None:
+		return {'snr': 0, 'snr_raw': 0, 'status': 0, 'strength': 0}
+	if cnr_db:
+		db = round(cnr_db, 2)
+		raw = snr or 0
+	elif status & 0x0F:
+		# full status bits = relative-scale legacy register, dB unknown
+		db = 0.0
+		raw = snr or 0
+	elif snr and snr < SNR_GARBAGE_THRESHOLD:
+		db = round(snr / 100.0, 2)
+		raw = snr
+	else:
+		db = 0.0
+		raw = 0
+	return {'snr': db, 'snr_raw': raw,
+		'status': status & 0x1F,
+		'strength': round((strength or 0) * 100.0 / 65535.0, 1)}
 
 class ServiceScan:
 	Idle = 1
@@ -118,23 +251,10 @@ class ServiceScan:
 				#TRANSLATORS: Intermediate scanning result, '%d' channel(s) have been found so far
 				message += ngettext("  Channels Found = %d", "  Channels Found = %d", result) % result
 				if self.l == 1 and tpnumb > 1: 
-					for x in range(2): #from 10
-						signal_data = get_signal_data(self.feid)
-						self.signaltp = signal_data['snr']
-						self.signaltp1 = signal_data['status']
-						self.signaltp2 = signal_data['strength']
-						ttime.sleep(.01)
-					tpstatus = ""
-					if self.signaltp1 == 0:
-						tpstatus = "UnLocked"
-					if self.signaltp1 == 16 or self.signaltp1 == 31:
-						tpstatus = "Locked"
+					tpstatus = self._takeTpSignal()
 
 					try:
-						if BOX_MODEL == "edision":
-						    xml = "\n< Transponder SNR =['%.2fdb'-%s], LNB Power = %.2f >\n< %s /> " %(self.signaltp, tpstatus, self.signaltp2, strftime("%a, %d %b %Y %H:%M:%S", localtime()))
-						if BOX_MODEL != "edision":
-						    xml = "\n< Transponder SNR =['%sdb'-%s], LNB Power = %.2f >\n< %s /> " %(self.signaltp, tpstatus, self.signaltp2, strftime("%a, %d %b %Y %H:%M:%S", localtime()))
+						xml = "\n< Transponder SNR =['%s' raw=%s -%s], Strength = %.1f%% >\n< %s /> " %(self.signaltp, self.signaltp3, tpstatus, self.signaltp2, strftime("%a, %d %b %Y %H:%M:%S", localtime()))
 						f = open(self.location, "a")
 						f.writelines(xml)
 					except:
@@ -294,36 +414,19 @@ class ServiceScan:
 			T = self.foundServices - self.r
 
 			try:
-				for x in range(2): #from 10
-					# Get signal data using our new function
-					signal_data = get_signal_data(self.feid)
-					self.signaltp = signal_data['snr']
-					self.signaltp1 = signal_data['status']
-					self.signaltp2 = signal_data['strength']
-					ttime.sleep(.01)
-				tpstatus = ""
-				if self.signaltp1 == 0:
-					tpstatus = "UnLocked"
-				if self.signaltp1 == 16 or self.signaltp1 == 31:
-					tpstatus = "Locked"
+				tpstatus = self._takeTpSignal()
 				f = open(self.location, "a")
 				if self.start_time1 > 10:
 					self.transponder.setText(_("Blind Scan Time = %d Min.  %02d Sec.")  %( runtime / 60, (runtime % 60)))
 					try:
-						if BOX_MODEL == "edision":
-						    xml = "\n< Transponder SNR =['%.2fdb'-%s], LNB Power = %.2f >\n< %s /> " %(self.signaltp, tpstatus, self.signaltp2, strftime("%a, %d %b %Y %H:%M:%S", localtime()))
-						if BOX_MODEL != "edision":
-						    xml = "\n< Transponder SNR =['%sdb'-%s], LNB Power = %.2f >\n< %s /> " %(self.signaltp, tpstatus, self.signaltp2, strftime("%a, %d %b %Y %H:%M:%S", localtime()))
+						xml = "\n< Transponder SNR =['%s' raw=%s -%s], Strength = %.1f%% >\n< %s /> " %(self.signaltp, self.signaltp3, tpstatus, self.signaltp2, strftime("%a, %d %b %Y %H:%M:%S", localtime()))
 					except:
 						print("Non-Satellite Scan Line#300")
 					xml += "< \n\nBlind Scan Time = %d Min. %02d Sec.\n"  %( runtime / 60, (runtime % 60))
 				if self.start_time1 < 10:
 					self.transponder.setText(_("Service Scan Time = %d Min.  %02d Sec.")  %( runtime / 60, (runtime % 60)))
 					try:
-						if BOX_MODEL == "edision":
-						    xml = "\n< Transponder SNR =['%.2fdb'-%s], LNB Power = %.2f >\n< %s /> " %(self.signaltp, tpstatus, self.signaltp2, strftime("%a, %d %b %Y %H:%M:%S", localtime()))
-						if BOX_MODEL != "edision":
-						    xml = "\n< Transponder SNR =['%sdb'-%s], LNB Power = %.2f >\n< %s /> " %(self.signaltp, tpstatus, self.signaltp2, strftime("%a, %d %b %Y %H:%M:%S", localtime()))						
+						xml = "\n< Transponder SNR =['%s' raw=%s -%s], Strength = %.1f%% >\n< %s /> " %(self.signaltp, self.signaltp3, tpstatus, self.signaltp2, strftime("%a, %d %b %Y %H:%M:%S", localtime()))
 						xml += "< \n\n Service Scan Completed in %d Minutes  %02d Seconds.\n\n"  %( runtime / 60, (runtime % 60))
 					except:
 						print("Non-Satellite Scan Line#309, FrontEnd id= ", self.feid)
@@ -342,6 +445,63 @@ class ServiceScan:
 			self.delaytimer.start(100, True)
 
 			
+	def pollScanSignal(self):
+		# Background sampler (300ms): remembers the last SNR raw value seen
+		# while the frontend was locked on the transponder currently being
+		# scanned. The report then shows a reading taken during the actual
+		# lock instead of a snapshot taken after the scanner has already
+		# retuned to the next transponder (the old dvbstat approach).
+		if self.state != self.Running or self.fereader is None:
+			return
+		status, snr, strength, cnr_db = self.fereader.read()
+		if status is None or not status & FE_HAS_LOCK:
+			return
+		if cnr_db is not None:
+			self.fereader.api5_seen = True
+		# Zero stats while locked mean the estimator has not converged yet
+		# (seen on ultra-narrowband carriers on the Edision driver) - keep
+		# polling rather than capturing a meaningless 0.
+		if cnr_db:
+			# API5 dB is authoritative; raw is the legacy register as-is
+			raw, db = (snr or 0), round(cnr_db, 2)
+		elif (status & 0x0F) or self.fereader.api5_seen:
+			# driver sets the intermediate status bits (Edision style):
+			# legacy register is a relative 0-65535 scale, dB unknown
+			if not snr:
+				return
+			raw, db = snr, None
+		elif snr and snr < SNR_GARBAGE_THRESHOLD:
+			# bare-lock-bit blob (Octagon style): raw is 0.01 dB units
+			raw, db = snr, round(snr / 100.0, 2)
+		else:
+			return
+		if db is None and self.tp_locked_db is not None:
+			return	# never displace a capture that had a real dB reading
+		self.tp_locked_raw = raw
+		self.tp_locked_db = db
+		if strength:
+			self.tp_locked_strength = strength
+
+	def _takeTpSignal(self):
+		# Consume the sampled reading for the transponder just finished and
+		# reset the capture for the next one. Falls back to an instantaneous
+		# read if the sampler never saw a lock on this transponder.
+		if self.tp_locked_raw is not None:
+			self.signaltp = ("%.2fdb" % self.tp_locked_db) if self.tp_locked_db is not None else "no estimate"
+			self.signaltp3 = self.tp_locked_raw
+			self.signaltp1 = FE_HAS_LOCK
+			self.signaltp2 = round((self.tp_locked_strength or 0) * 100.0 / 65535.0, 1)
+		else:
+			signal_data = get_signal_data(self.feid)
+			self.signaltp = "%.2fdb" % signal_data['snr']
+			self.signaltp3 = signal_data['snr_raw']
+			self.signaltp1 = signal_data['status']
+			self.signaltp2 = signal_data['strength']
+		self.tp_locked_raw = None
+		self.tp_locked_db = None
+		self.tp_locked_strength = None
+		return "Locked" if (isinstance(self.signaltp1, int) and self.signaltp1 & FE_HAS_LOCK) else "UnLocked"
+
 	def __init__(self, progressbar, text, servicelist, passNumber, scanList, network, transponder, frontendInfo, lcd_summary):
 		self.foundServices = 0
 		self.progressbar = progressbar
@@ -381,6 +541,13 @@ class ServiceScan:
 		self.signaltp1 =""  #return signal Lock-Status transponders
 		self.signaltp2 =""  #return LNB Power
 		self.size = 0  #Get value of Edision driver file
+		self.signaltp3 = 0  #SNR raw register value for transponders
+		self.fereader = None  #in-process frontend signal reader (replaces dvbstat)
+		self.tp_locked_raw = None  #last SNR raw sampled while locked on current tp
+		self.tp_locked_db = None  #same reading converted to dB
+		self.tp_locked_strength = None
+		self.signalpolltimer = eTimer()
+		self.signalpolltimer.callback.append(self.pollScanSignal)
 		return
 
 	def doRun(self):
@@ -440,6 +607,13 @@ class ServiceScan:
 		self.scan.newService.get().append(self.newService)
 		self.servicelist.clear()
 		self.state = self.Running
+		if self.fereader:
+			self.fereader.close()
+		self.fereader = FESignalReader(self.feid)
+		self.tp_locked_raw = None
+		self.tp_locked_db = None
+		self.tp_locked_strength = None
+		self.signalpolltimer.start(300)
 		err = self.scan.start(self.feid, self.flags, self.networkid)
 		self.frontendInfo.updateFrontendData()
 		if err:
@@ -448,6 +622,10 @@ class ServiceScan:
 		self.scanStatusChanged()
 
 	def execEnd(self):
+		self.signalpolltimer.stop()
+		if self.fereader:
+			self.fereader.close()
+			self.fereader = None
 		if self.scan is None:
 			if not self.isDone():
 				print("*** warning *** scan was not finished!")
@@ -476,8 +654,11 @@ class ServiceScan:
 		UnknownService ="(UnKnown Service)"
 		f = open(self.location, "a")
 		self.signal =""
-		for x in range(2): #from 150
-			# Get signal data using our new function
+		# prefer the background sampler's capture for the tp being scanned;
+		# instantaneous reads can hit the estimator before it has converged
+		if self.tp_locked_db is not None:
+			self.signal = self.tp_locked_db
+		else:
 			signal_data = get_signal_data(self.feid)
 			self.signal = signal_data['snr']
 		newServiceName = self.scan.getLastServiceName()

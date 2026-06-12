@@ -93,6 +93,7 @@ class PositionerSetup(Screen):
 
 	FIRST_UPDATE_INTERVAL = 800	#500		# milliseconds 500
 	UPDATE_INTERVAL = 25	#50				# milliseconds  50
+	RETUNE_KEEPALIVE_INTERVAL = 250		# milliseconds: debounce before re-arming a failed tune
 ####
 	STATUS_MSG_TIMEOUT = 2					# seconds
 	LOG_SIZE = 16 * 1024					# log buffer size
@@ -309,6 +310,7 @@ class PositionerSetup(Screen):
 		self.statusTimer.callback.append(self.updateStatus)
 		self.rotorStatusTimer.callback.append(self.startStatusTimer)
 		self.collectingStatistics = False
+		self.retuneKeepAliveTicks = 0
 		self.statusTimer.start(self.FIRST_UPDATE_INTERVAL, True)
 		self.dataAvailable = Event()
 		self.onClose.append(self.__onClose)
@@ -914,10 +916,30 @@ class PositionerSetup(Screen):
 		self["status_bar"].setText(msg)
 		self.statusMsgTimeoutTicks = (timeout * 1000 + self.UPDATE_INTERVAL / 2) / self.UPDATE_INTERVAL
 
+	def retuneKeepAlive(self):
+		# Keep the demod's acquisition window alive while unlocked, so
+		# below-lock signal readings stay live between manual dish moves.
+		# As soon as a tune attempt times out (FAILED) we re-arm it after a
+		# short debounce, chaining acquisition windows back to back; the only
+		# remaining display gap is the demod's own reset/estimation time.
+		if self.frontendStatus.get("tuner_locked", 0) == 1 or self.frontendStatus.get("tuner_state", "") == "TUNING":
+			self.retuneKeepAliveTicks = 0
+			return
+		below_lock = getattr(config.Nims[self.feid], "show_signal_below_lock", None)
+		if below_lock is not None and not below_lock.value:
+			return	# feature disabled for this NIM, nothing to keep alive
+		self.retuneKeepAliveTicks += 1
+		if self.retuneKeepAliveTicks * self.UPDATE_INTERVAL >= self.RETUNE_KEEPALIVE_INTERVAL:
+			self.retuneKeepAliveTicks = 0
+			if getattr(self.tuner, "lastparm", None):
+				self.tuner.retune()
+
 	def updateStatus(self):
 		self.statusTimer.start(self.UPDATE_INTERVAL, True)
 		if self.frontend:
 			self.frontend.getFrontendStatus(self.frontendStatus)
+			if self.rotor_diseqc and not self.collectingStatistics:
+				self.retuneKeepAlive()
 		if self.rotor_diseqc:
 			self["snr_db"].update()
 			self["snr_percentage"].update()

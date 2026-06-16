@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from os.path import exists
 from time import ctime, time
 
 from enigma import eTimer, eDVBLocalTimeHandler, eEPGCache
@@ -64,33 +63,3 @@ class NTPSyncPoller:
 
 ntpSyncPoller = NTPSyncPoller()
 ntpsyncpoller = ntpSyncPoller  # This is used by some plugins like ABM
-
-
-class FPClockPoller:
-	"""Periodically write current UTC time to /proc/stb/fp/rtc so the FP display stays live.
-	Required on hardware (e.g. BCM72604) where the FP MCU does not count autonomously."""
-
-	FP_RTC = "/proc/stb/fp/rtc"
-	INTERVAL = 30  # seconds
-
-	def __init__(self):
-		self.timer = eTimer()
-		self.timer.callback.append(self._tick)
-		self._active = False
-
-	def start(self):
-		if exists(self.FP_RTC):
-			self._active = True
-			self.timer.startLongTimer(self.INTERVAL)
-
-	def _tick(self):
-		if not self._active:
-			return
-		try:
-			open(self.FP_RTC, "w").write(str(int(time())))
-		except IOError:
-			pass
-		self.timer.startLongTimer(self.INTERVAL)
-
-
-fpClockPoller = FPClockPoller()

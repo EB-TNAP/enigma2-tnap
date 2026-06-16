@@ -700,8 +700,9 @@ keymapparser.readKeymap(config.usage.keymap.value)
 keymapparser.readKeymap(config.usage.keytrans.value)
 
 enigma.eProfileWrite("Init:NTPSync")
-from Components.NetworkTime import ntpSyncPoller
+from Components.NetworkTime import ntpSyncPoller, fpClockPoller
 ntpSyncPoller.startTimer()
+fpClockPoller.start()
 
 enigma.eProfileWrite("Network")
 from Components.Network import InitNetwork

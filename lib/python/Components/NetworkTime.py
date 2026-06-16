@@ -71,21 +71,26 @@ class FPClockPoller:
 	Required on hardware (e.g. BCM72604) where the FP MCU does not count autonomously."""
 
 	FP_RTC = "/proc/stb/fp/rtc"
-	INTERVAL = 60  # seconds
+	INTERVAL = 30  # seconds
 
 	def __init__(self):
 		self.timer = eTimer()
 		self.timer.callback.append(self._tick)
+		self._active = False
 
 	def start(self):
 		if exists(self.FP_RTC):
-			self.timer.start(self.INTERVAL * 1000, False)
+			self._active = True
+			self.timer.startLongTimer(self.INTERVAL)
 
 	def _tick(self):
+		if not self._active:
+			return
 		try:
 			open(self.FP_RTC, "w").write(str(int(time())))
 		except IOError:
 			pass
+		self.timer.startLongTimer(self.INTERVAL)
 
 
 fpClockPoller = FPClockPoller()

@@ -246,6 +246,10 @@ class Timezones:
 			e_tzset()
 		if exists("/proc/stb/fp/rtc_offset"):
 			setRTCoffset()
+			try:
+				open("/proc/stb/fp/rtc", "w").write(str(int(time())))
+			except IOError:
+				pass
 		timeFormat = "%a %d-%b-%Y %H:%M:%S"
 		print("[Timezones] Local time is '%s'  -  UTC time is '%s'." % (strftime(timeFormat, localtime(None)), strftime(timeFormat, gmtime(None))))
 		if runCallbacks:

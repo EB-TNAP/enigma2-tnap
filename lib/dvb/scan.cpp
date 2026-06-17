@@ -99,14 +99,10 @@ int eDVBScan::getSITimeout(int base_timeout) const
 		eDVBFrontendParametersSatellite parm;
 		if (!m_ch_current->getDVBS(parm) && parm.symbol_rate > 0)
 		{
-			int scaled = base_timeout;
 			if (parm.symbol_rate < 1000000)      /* < 1 Msps */
-				scaled = base_timeout * 3;
-			else if (parm.symbol_rate < 4000000) /* 1 - 4 Msps */
-				scaled = base_timeout * 2;
-			if (scaled > 12000)                  /* hard ceiling: no single table waits >12s */
-				scaled = 12000;
-			return scaled;
+				return base_timeout * 3;
+			if (parm.symbol_rate < 4000000)      /* 1 - 4 Msps */
+				return base_timeout * 2;
 		}
 	}
 	return base_timeout;
@@ -359,7 +355,7 @@ RESULT eDVBScan::startFilter()
 		if (!m_VCT && !(m_ready & validVCT))
 		{
 			m_VCT = new eTable<VirtualChannelTableSection>;
-			if (m_VCT->start(m_demux, eDVBVCTSpec().setTimeout(5000)))
+			if (m_VCT->start(m_demux, eDVBVCTSpec()))
 				m_VCT = 0;
 			else
 				CONNECT(m_VCT->tableReady, eDVBScan::VCTready);
@@ -416,7 +412,7 @@ RESULT eDVBScan::startFilter()
 		else 
 		{
 			SCAN_eDebug("[scan.cpp] tsid != -1; attempting to start SDT with eDVBSDTSpec(tsid, true).");
-			if (m_SDT->start(m_demux, eDVBSDTSpec(tsid, true).setTimeout(10500)))
+			if (m_SDT->start(m_demux, eDVBSDTSpec(tsid, true).setTimeout(getSITimeout(10500))))
 			{
 				SCAN_eDebug("[scan.cpp] First attempt with true failed; trying eDVBSDTSpec(tsid, false) as fallback.");
 				if (m_SDT->start(m_demux, eDVBSDTSpec(tsid, false).setTimeout(getSITimeout(2500))))

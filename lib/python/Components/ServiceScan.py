@@ -596,10 +596,23 @@ class ServiceScan:
 			txt = '%s %s/%s (%s)' % (_('pass'), self.run + 1, size, nimmgr.getNim(self.scanList[self.run]['feid']).slot_name)
 			self.passNumber.setText(txt)
 
+	def _fpRestoreDisplay(self):
+		t = strftime("%H:%M")
+		for dev in ("/dev/dbox/oled0", "/dev/dbox/lcd0"):
+			try:
+				open(dev, "w").write(t)
+			except OSError:
+				pass
+
 	def execBegin(self):
+		for dev in ("/dev/dbox/oled0", "/dev/dbox/lcd0"):
+			try:
+				open(dev, "w").write("SCAN")
+			except OSError:
+				pass
 		try:
 		    self.size = os.path.getsize('/lib/modules/5.15.0/extra/avl6261.ko')
-		except: 
+		except:
 		    pass
 		self.doRun()
 		self.updatePass()
@@ -638,6 +651,7 @@ class ServiceScan:
 			self.execBegin()
 		else:
 			self.state = self.Done
+			self._fpRestoreDisplay()
 		if self.name != "":
 			self.network.setText(_("%s.  (%s)") % (self.network1, self.name) )
 		if self.start_time2 > 0:                                                                           
@@ -692,6 +706,7 @@ class ServiceScan:
 
 
 	def destroy(self):
+		self._fpRestoreDisplay()
 		self.state = self.Idle
 		if self.scan is not None:
 			self.scan.statusChanged.get().remove(self.scanStatusChanged)

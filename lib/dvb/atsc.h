@@ -254,6 +254,11 @@ public:
 			eDVBTableSpec::tfHaveTID | eDVBTableSpec::tfHaveTIDMask |
 			eDVBTableSpec::tfCheckCRC | eDVBTableSpec::tfHaveTimeout;
 	}
+	eDVBVCTSpec &setTimeout(int timeout)
+	{
+		m_spec.timeout = timeout;
+		return *this;
+	}
 	operator eDVBTableSpec &()
 	{
 		return m_spec;

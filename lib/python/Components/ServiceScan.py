@@ -1,36 +1,5 @@
 from enigma import eComponentScan, iDVBFrontend, eTimer
 from Components.NimManager import nimmanager as nimmgr
-
-
-def _vfd_scan_mode(active):
-    try:
-        from Plugins.Extensions.VFDControl.plugin import setScanMode
-        setScanMode(active)
-        return
-    except Exception:
-        pass
-    # Fallback for boxes without vfdcontrol (e.g. osmio4k): write directly to VFD device.
-    # On scan start: write "SCAN" text. On scan end: force eDBoxLCD to push its pixel buffer
-    # back to hardware, immediately overwriting the "SCAN" text.
-    import os
-    for lcd in ("/dev/dbox/lcd0", "/dev/dbox/oled0"):
-        if os.path.exists(lcd):
-            if active:
-                try:
-                    open(lcd, "w").write("SCAN")
-                except Exception:
-                    pass
-            else:
-                try:
-                    from enigma import eDBoxLCD
-                    inst = eDBoxLCD.getInstance()
-                    if inst:
-                        inst.update()
-                except Exception:
-                    pass
-            break
-
-
 from Components.About import about
 from Components.TunerInfo import TunerInfo   # (Extra Import)
 from Components.TuneTest import Tuner    # (Extra Import)
@@ -638,7 +607,6 @@ class ServiceScan:
 		self.scan.newService.get().append(self.newService)
 		self.servicelist.clear()
 		self.state = self.Running
-		_vfd_scan_mode(True)
 		if self.fereader:
 			self.fereader.close()
 		self.fereader = FESignalReader(self.feid)
@@ -651,7 +619,6 @@ class ServiceScan:
 		if err:
 			self.state = self.Error
 			self.errorcode = 0
-			_vfd_scan_mode(False)
 		self.scanStatusChanged()
 
 	def execEnd(self):
@@ -671,7 +638,6 @@ class ServiceScan:
 			self.execBegin()
 		else:
 			self.state = self.Done
-			_vfd_scan_mode(False)
 		if self.name != "":
 			self.network.setText(_("%s.  (%s)") % (self.network1, self.name) )
 		if self.start_time2 > 0:                                                                           

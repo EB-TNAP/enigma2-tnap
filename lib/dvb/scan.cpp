@@ -69,7 +69,7 @@ static void tnap_scanDisplay(bool active)
 		}
 		else
 		{
-			eLCD *lcd = eDBoxLCD::getInstance();
+			eDBoxLCD *lcd = eDBoxLCD::getInstance();
 			if (lcd)
 				lcd->update();
 		}

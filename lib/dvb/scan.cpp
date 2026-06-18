@@ -27,8 +27,6 @@
 #include <lib/dvb/db.h>
 #include <lib/python/python.h>
 #include <errno.h>
-#include <unistd.h>
-#include <lib/gdi/lcd.h> // eDBoxLCD::getInstance()->update()
 #include "absdiff.h"
 
 #define SCAN_eDebug(x...) do { if (m_scan_debug) eDebug(x); } while(0)
@@ -36,46 +34,6 @@
 #define SCAN_eDebugNoNewLine(x...) do { if (m_scan_debug) eDebugNoNewLine(x); } while(0)
 
 DEFINE_REF(eDVBScan);
-
-/* --- TNAP: front-panel display refresh during scan -----------------------
- * On Edision 4K (and similar) the front LCD/OLED clock stalls while a scan
- * is running.  This mirrors the python "rejuvenate" helper:
- *   active  -> poke the panel device so it shows scan activity, not a
- *              frozen clock;
- *   !active -> ask eDBoxLCD to redraw the normal skin so the clock returns.
- *
- * Kept as a file-local static so scan.h does not need to change. Only ever
- * called from the main (eApp) thread via the scan lifecycle, which is where
- * eDBoxLCD expects to be touched.
- */
-static void tnap_scanDisplay(bool active)
-{
-	static const char *lcd_devices[] = { "/dev/dbox/lcd0", "/dev/dbox/oled0" };
-	for (unsigned int i = 0; i < sizeof(lcd_devices) / sizeof(lcd_devices[0]); ++i)
-	{
-		if (::access(lcd_devices[i], F_OK) != 0)
-			continue;
-		if (active)
-		{
-			/* O_NONBLOCK so a busy/unready panel can never stall the scan */
-			int fd = ::open(lcd_devices[i], O_WRONLY | O_NONBLOCK);
-			if (fd >= 0)
-			{
-				const char msg[] = "SCAN";
-				ssize_t w = ::write(fd, msg, sizeof(msg) - 1);
-				(void)w; /* best-effort; ignore short/failed writes */
-				::close(fd);
-			}
-		}
-		else
-		{
-			eDBoxLCD *lcd = eDBoxLCD::getInstance();
-			if (lcd)
-				lcd->update();
-		}
-		break;
-	}
-}
 
 eDVBScan::eDVBScan(iDVBChannel *channel, bool usePAT, bool debug)
 	:m_channel(channel)
@@ -95,10 +53,6 @@ eDVBScan::eDVBScan(iDVBChannel *channel, bool usePAT, bool debug)
 
 eDVBScan::~eDVBScan()
 {
-	/* If the scan object is torn down without reaching evtFinish (e.g. the
-	 * user cancels mid-scan), make sure the front panel is handed back to
-	 * the normal skin so the clock does not stay frozen. */
-	tnap_scanDisplay(false);
 }
 
 int eDVBScan::isValidONIDTSID(int orbital_position, eOriginalNetworkID onid, eTransportStreamID tsid)
@@ -333,7 +287,6 @@ RESULT eDVBScan::nextChannel()
 		{
 			SCAN_eDebug("[scan.cpp-#252] No Transponders left: %zd Transponders Scanned, %zd Transponders Unavailable, %zd Transponders in /etc/lamedb.",
 				m_ch_scanned.size(), m_ch_unavailable.size(), m_new_channels.size());
-			tnap_scanDisplay(false); /* scan complete - hand panel back to the clock */
 			m_event(evtFinish);
 			return -ENOENT;
 		}
@@ -341,8 +294,6 @@ RESULT eDVBScan::nextChannel()
 		m_ch_current = m_ch_toScan.front();
 
 		m_ch_toScan.pop_front();
-
-		tnap_scanDisplay(true); /* poke panel as we move to the next transponder */
 	}
 
 	if (m_channel->getFrontend(fe))

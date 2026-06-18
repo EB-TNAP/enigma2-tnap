@@ -207,10 +207,20 @@ eConsolePy_setNice(eConsolePy* self, PyObject *args)
 	int nice = 0;
 	if (!PyArg_ParseTuple(args, "i", &nice))
 		return NULL;
-	if (nice >= 1 && nice < 20 ) 
+	if (nice >= 1 && nice < 20 )
 		self->cont->setNice(nice);
 	else
 		eWarning("eConsoleAppContainer::setNice / nice must be (1-19) not %d", nice);
+	Py_RETURN_NONE;
+}
+
+static PyObject *
+eConsolePy_setLineMode(eConsolePy* self, PyObject *args)
+{
+	int enable = 0;
+	if (!PyArg_ParseTuple(args, "i", &enable))
+		return NULL;
+	self->cont->setLineMode(enable != 0);
 	Py_RETURN_NONE;
 }
 
@@ -335,6 +345,9 @@ static PyMethodDef eConsolePy_methods[] = {
 	},
 	{(char*)"setIONice", (PyCFunction)eConsolePy_setIONice, METH_VARARGS,
 	(char*)"set ionice"
+	},
+	{(char*)"setLineMode", (PyCFunction)eConsolePy_setLineMode, METH_VARARGS,
+	(char*)"enable line-buffered stdout/stderr via /usr/bin/stdbuf"
 	},
 	{(char*)"setCWD", (PyCFunction)eConsolePy_setCWD, METH_VARARGS,
 	 (char*)"set working dir"

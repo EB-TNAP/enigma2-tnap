@@ -1150,13 +1150,25 @@ void eListboxServiceContent::paint(gPainter &painter, eWindowStyle &style, const
 					eRect area = m_element_position[e == celFolderPixmap ? celServiceName: celServiceNumber];
 					if (m_show_two_lines)
 						area.setHeight(m_itemsize.height());
-					int correction = (m_itemsize.height() - pixmap_size.height()) / 2;
 					if (e == celFolderPixmap && m_element_position[celServiceEventProgressbar].left() == m_element_position[celServiceNumber].left())
 						area.setLeft(m_element_position[celServiceNumber].left());
-					xoffset = pixmap_size.width() + m_items_distances;
 					area.moveBy(offset);
 					painter.clip(area);
-					painter.blit(pixmap, ePoint(area.left(), offset.y() + correction), area, gPainter::BT_ALPHABLEND);
+					if (pixmap_size.height() > m_itemsize.height())
+					{
+						int slot = m_itemsize.height();
+						xoffset = slot + m_items_distances;
+						painter.blitScale(pixmap,
+							eRect(area.left(), offset.y(), slot, slot),
+							area,
+							gPainter::BT_ALPHABLEND | gPainter::BT_KEEP_ASPECT_RATIO | gPainter::BT_HALIGN_CENTER | gPainter::BT_VALIGN_CENTER);
+					}
+					else
+					{
+						int correction = (m_itemsize.height() - pixmap_size.height()) / 2;
+						xoffset = pixmap_size.width() + m_items_distances;
+						painter.blit(pixmap, ePoint(area.left(), offset.y() + correction), area, gPainter::BT_ALPHABLEND);
+					}
 					painter.clippop();
 				}
 			}

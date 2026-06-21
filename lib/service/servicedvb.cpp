@@ -4491,15 +4491,13 @@ void eDVBServicePlay::onSessionActivated(bool active)
 		// Step 1: Release HW decoder resources
 		if (m_decoder)
 		{
-			// decoder_release is configurable via GUI:
-			// 0 - "Quick" (default): immediate release, fast channel switching
-			// 1 - "Normal": pause() before release, may be more stable on some boxes
+			// 0 = Quick (no pause), 1 = Normal (pause), 2 = Aggressive (pause + full reset)
 			int decoder_release = eSimpleConfig::getInt("config.softcsa.decoderRelease", 2);
-			bool needsPause = (decoder_release == 1); // 1 = Normal
+			bool needsPause = (decoder_release >= 1);
 
 			if (needsPause)
 			{
-				eDebug("[eDVBServicePlay] Normal decoder release - calling pause() for clean release");
+				eDebug("[eDVBServicePlay] Pausing HW decoder for clean release");
 				m_decoder->pause();
 			}
 			else
@@ -4591,15 +4589,13 @@ void eDVBServicePlay::cleanupSoftwareDescrambling()
 	{
 		eDebug("[eDVBServicePlay] Cleaning up HW decoder for clean handover");
 
-		// decoder_release is configurable via GUI:
-		// 0 - "Quick" (default): immediate release, fast channel switching
-		// 1 - "Normal": pause() before release, may be more stable on some boxes
+		// 0 = Quick (no pause), 1 = Normal (pause), 2 = Aggressive (pause + full reset)
 		int decoder_release = eSimpleConfig::getInt("config.softcsa.decoderRelease", 2);
-		bool needsPause = (decoder_release == 1); // 1 = Normal
+		bool needsPause = (decoder_release >= 1);
 
 		if (needsPause)
 		{
-			eDebug("[eDVBServicePlay] Normal decoder release - calling pause() for clean handover");
+			eDebug("[eDVBServicePlay] Pausing HW decoder for clean handover");
 			m_decoder->pause();
 		}
 		else

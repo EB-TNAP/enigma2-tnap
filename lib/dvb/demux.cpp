@@ -1070,10 +1070,10 @@ eDVBTSRecorder::eDVBTSRecorder(eDVBDemux *demux, int packetsize, bool streaming,
 		m_thread = new eDVBRecordStreamThread(packetsize, -1, /*sync_mode=*/true, 4);
 	else if (use_scrambled_thread)
 		// ScrambledThread: supports optional SoftCSA descrambling via setDescrambler()
-		// Buffer size 256*188 = 47kB
+		// buffersize=-1 restores default (packetsize*1024 = 188kB), reducing LowMem pressure
 		// sync_mode=true for Live-TV (DVR device), false for file recording
 		// is_streaming_output=true when target is a socket (encrypted stream output)
-		m_thread = new eDVBRecordScrambledThread(packetsize, 256*188, sync_mode, is_streaming_output);
+		m_thread = new eDVBRecordScrambledThread(packetsize, -1, sync_mode, is_streaming_output);
 	else
 		// FileThread: SoftCSA disabled — no descrambling needed, use original full-size buffers
 		// packetsize*1024 = 188*1024 = 192kB per buffer (vs 47kB in ScrambledThread)

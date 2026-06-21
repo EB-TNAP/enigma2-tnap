@@ -1579,6 +1579,9 @@ void fillTuple(ePyObject tuple, const char *argstring, int argcount, ePyObject s
 			case 'X':
 				++argcount;
 				continue;
+			case 'Z': // primetime tolerance mode flag - no tuple entry
+				++argcount;
+				continue;
 			case 'M': // GN return 10 items only
 				continue;
 			default:  // ignore unknown
@@ -1697,6 +1700,12 @@ PyObject *eEPGCache::lookupEvent(ePyObject list, ePyObject convertFunc)
 
 	bool forceReturnOne = strchr(argstring, 'X') ? true : false;
 	if (forceReturnOne)
+		--argcount;
+
+	/* Z: primetime tolerance mode - if the event at the queried time ends within
+	 *    1200 seconds (20 min) after that time, return the following event instead. */
+	bool toleranceMode = strchr(argstring, 'Z') ? true : false;
+	if (toleranceMode)
 		--argcount;
 
 	bool forceReturnTen = strchr(argstring, 'M') ? true : false;
@@ -1857,7 +1866,20 @@ PyObject *eEPGCache::lookupEvent(ePyObject list, ePyObject convertFunc)
 					if (type == 2)
 						lookupEventId(ref, event_id, ev_data);
 					else
+					{
 						lookupEventTime(ref, stime, ev_data, type);
+						if (ev_data && toleranceMode)
+						{
+							time_t end = (time_t)ev_data->getStartTime() + ev_data->getDuration();
+							if (end <= stime + 1200)
+							{
+								const eventData *next_ev_data = 0;
+								lookupEventTime(ref, stime, next_ev_data, 1);
+								if (next_ev_data)
+									ev_data = next_ev_data;
+							}
+						}
+					}
 					if (ev_data)
 					{
 						const eServiceReferenceDVB &dref = (const eServiceReferenceDVB&)ref;

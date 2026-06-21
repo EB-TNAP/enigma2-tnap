@@ -28,7 +28,7 @@ int replacechar(char *str, char orig, char rep)
 
 int main(int argc, char *argv[])
 {
-	const char *action = NULL, *devpath = NULL, *physdevpath = NULL, *mediastatus = NULL;
+	const char *action = NULL, *devpath = NULL, *physdevpath = NULL;
 	int sd = -1;
 	struct sockaddr_un serv_addr_un;
 
@@ -65,6 +65,8 @@ int main(int argc, char *argv[])
 			}
 		}
 	}
+	if (!action || !devpath)
+		return 1;
 	if (mode != 2)
 	{
 		memset(&serv_addr_un, 0, sizeof(serv_addr_un));
@@ -118,15 +120,15 @@ int main(int argc, char *argv[])
 							{
 								char devpathnorm[255];
 								snprintf(devpathnorm, sizeof(devpathnorm) - 1, "%s", getenv("DEVNAME"));
+								devpathnorm[sizeof(devpathnorm) - 1] = '\0';
 								replacechar(devpathnorm, '/', '_');
 								FILE *f;
-								char fn[255];
-								snprintf(fn, sizeof(fn) - 1, "/tmp/hotplug%s", devpathnorm);
+								char fn[280];
+								snprintf(fn, sizeof(fn), "/tmp/hotplug%s", devpathnorm);
 								f = fopen(fn, "w");
 								if (f)
 								{
-									fprintf(f, data);
-									fprintf(f, "\n");
+									fprintf(f, "%s\n", data);
 									fclose(f);
 								}
 							}
@@ -183,4 +185,5 @@ int main(int argc, char *argv[])
 		if (mode != 2)
 			close(sd);
 	}
+	return 0;
 }

@@ -119,7 +119,7 @@ int main(int argc, char *argv[])
 							else
 							{
 								char devpathnorm[255];
-								snprintf(devpathnorm, sizeof(devpathnorm) - 1, "%s", getenv("DEVNAME"));
+								snprintf(devpathnorm, sizeof(devpathnorm), "%s", getenv("DEVNAME"));
 								devpathnorm[sizeof(devpathnorm) - 1] = '\0';
 								replacechar(devpathnorm, '/', '_');
 								FILE *f;

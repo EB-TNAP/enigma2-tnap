@@ -4494,7 +4494,7 @@ void eDVBServicePlay::onSessionActivated(bool active)
 			// decoder_release is configurable via GUI:
 			// 0 - "Quick" (default): immediate release, fast channel switching
 			// 1 - "Normal": pause() before release, may be more stable on some boxes
-			int decoder_release = eSimpleConfig::getInt("config.softcsa.decoderRelease", 0);
+			int decoder_release = eSimpleConfig::getInt("config.softcsa.decoderRelease", 2);
 			bool needsPause = (decoder_release == 1); // 1 = Normal
 
 			if (needsPause)
@@ -4594,7 +4594,7 @@ void eDVBServicePlay::cleanupSoftwareDescrambling()
 		// decoder_release is configurable via GUI:
 		// 0 - "Quick" (default): immediate release, fast channel switching
 		// 1 - "Normal": pause() before release, may be more stable on some boxes
-		int decoder_release = eSimpleConfig::getInt("config.softcsa.decoderRelease", 0);
+		int decoder_release = eSimpleConfig::getInt("config.softcsa.decoderRelease", 2);
 		bool needsPause = (decoder_release == 1); // 1 = Normal
 
 		if (needsPause)

@@ -298,14 +298,6 @@ int eDVBSoftDecoder::setupRecorder()
 		m_decode_demux->getCADemuxID(demux_id);
 		eDebug("[SoftDecoder] Decode demux ID: %d (from PVR handler)", demux_id);
 
-		// Set demux source to PVR (critical for decoder to read from DVR)
-		eDVBDemux *demux_raw = (eDVBDemux*)m_decode_demux.operator->();
-		if (demux_raw)
-		{
-			demux_raw->setSourcePVR(demux_id);
-			eDebug("[SoftDecoder] Set demux %d source to PVR (DVR%d)", demux_id, demux_id);
-		}
-
 		int fd = m_decode_demux->openDVR(O_WRONLY);
 		if (fd >= 0)
 		{

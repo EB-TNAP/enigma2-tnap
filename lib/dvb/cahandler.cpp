@@ -493,10 +493,10 @@ int eDVBCAHandler::registerService(const eServiceReferenceDVB &ref, int adapter,
 		// running and would just "continue processing" without resending the CW.
 		// We DEFER the restart to handlePMT() so the new CSA session is already
 		// activated and its engine registered with CWHandler when the CW arrives.
-		if (had_streamserver && servicetype != 7 && servicetype != 8)
+		if (had_streamserver && (servicetype == 0 || servicetype == 12))
 		{
 			caservice->m_force_cw_send = true;
-			eDebug("[eDVBCAService] deferred softcam restart (streamserver->live, type %d)", servicetype);
+			eDebug("[eDVBCAService] deferred softcam CW resend (streamserver->livetv, type %d)", servicetype);
 		}
 		else
 		{

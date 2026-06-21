@@ -467,7 +467,7 @@ void eDVBSoftDecoder::updatePids(bool withDecoder)
 {
 	int timing_pid = -1;
 	int timing_stream_type = -1;
-	int vpid = -1, vpidtype = -1, pcrpid = -1, tpid = -1;
+	int vpid = -1, vpidtype = -1, pcrpid = -1;
 
 	eDVBServicePMTHandler::program program;
 	if (m_source_handler.getProgramInfo(program))
@@ -550,7 +550,6 @@ void eDVBSoftDecoder::updatePids(bool withDecoder)
 	eDebugNoNewLine(", and the text pid is %04x\n", program.textPid);
 	if (program.textPid != -1)
 		pids_to_record.insert(program.textPid); // Videotext
-	tpid = program.textPid;
 
 	if (program.aitPid >= 0) pids_to_record.insert(program.aitPid);
 

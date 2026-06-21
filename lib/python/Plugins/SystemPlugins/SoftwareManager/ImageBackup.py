@@ -103,26 +103,28 @@ class ImageBackup(Screen):
 			flashSlot = currentImageSlot == "F"
 			currentImageSlot = int(currentImageSlot) if currentImageSlot and currentImageSlot.isdecimal() else 1
 			print(f"[ImageBackup] Current slot={currentImageSlot}, rootSlot={rootSlot}.")
-			images = []  # ChoiceEntryComponent(key, (Label, slotCode, recovery))
+			images = []  # ChoiceEntryComponent(key, (Label, slotCode, recovery, slotDistro, slotVersion))
 			if imageList:
 				for slotCode in sorted(imageList.keys()):
 					print(f"[ImageBackup]     Slot {slotCode}: {imageList[slotCode]}")
 					if imageList[slotCode]["status"] == "active" or imageList[slotCode]["status"] == "flash":
 						slotText = f'{slotCode} {"eMMC" if "mmcblk" in imageList[slotCode]["device"] else "MTD" if "mtd" in imageList[slotCode]["device"] else "UBI" if "ubi" in imageList[slotCode]["device"] else "USB"}'
+						slotDistro = imageList[slotCode].get("displaydistro") or None
+						slotVersion = imageList[slotCode].get("imgversion") or None
 						if slotCode == "1" and currentImageSlot == 1 and BoxInfo.getItem("canRecovery"):
-							images.append(ChoiceEntryComponent(None, (_("Slot %s: %s as USB Recovery") % (slotText, imageList[slotCode]["imagename"]), slotCode, True)))
+							images.append(ChoiceEntryComponent(None, (_("Slot %s: %s as USB Recovery") % (slotText, imageList[slotCode]["imagename"]), slotCode, True, slotDistro, slotVersion)))
 						if rootSlot:
-							images.append(ChoiceEntryComponent(None, ((_("Slot %s: %s")) % (slotText, imageList[slotCode]["imagename"]), slotCode, False)))
+							images.append(ChoiceEntryComponent(None, ((_("Slot %s: %s")) % (slotText, imageList[slotCode]["imagename"]), slotCode, False, slotDistro, slotVersion)))
 						else:
-							images.append(ChoiceEntryComponent(None, ((_("Slot %s: %s (Current image)") if slotCode == str(currentImageSlot) else _("Slot %s: %s")) % (slotText, imageList[slotCode]["imagename"]), slotCode, False)))
+							images.append(ChoiceEntryComponent(None, ((_("Slot %s: %s (Current image)") if slotCode == str(currentImageSlot) else _("Slot %s: %s")) % (slotText, imageList[slotCode]["imagename"]), slotCode, False, slotDistro, slotVersion)))
 				if rootSlot:
-					images.append(ChoiceEntryComponent(None, (_("Slot R: Root Slot Image Backup (Current image)"), "R", False)))
+					images.append(ChoiceEntryComponent(None, (_("Slot R: Root Slot Image Backup (Current image)"), "R", False, None, None)))
 				elif flashSlot:
-					images.append(ChoiceEntryComponent(None, (_("Slot F: Flash Slot Image Backup (Current image)"), "F", False)))
+					images.append(ChoiceEntryComponent(None, (_("Slot F: Flash Slot Image Backup (Current image)"), "F", False, None, None)))
 			else:
 				if BoxInfo.getItem("canRecovery"):
-					images.append(ChoiceEntryComponent(None, (_("Internal flash: %s %s as USB Recovery") % (displayDistro, imageVersion), "slotCode", True)))
-				images.append(ChoiceEntryComponent(None, (_("Internal flash:  %s %s ") % (displayDistro, imageVersion), "slotCode", False)))
+					images.append(ChoiceEntryComponent(None, (_("Internal flash: %s %s as USB Recovery") % (displayDistro, imageVersion), "slotCode", True, None, None)))
+				images.append(ChoiceEntryComponent(None, (_("Internal flash:  %s %s ") % (displayDistro, imageVersion), "slotCode", False, None, None)))
 			self["config"].setList(images)
 			for index, item in enumerate(images):
 				if item[0][1] == str(currentImageSlot):
@@ -134,10 +136,12 @@ class ImageBackup(Screen):
 		MultiBoot.getSlotImageList(getImageListCallback)
 
 	def keyStart(self):
-		current = self["config"].getCurrent()  # (label, slotCode, recovery)
+		current = self["config"].getCurrent()  # (label, slotCode, recovery, slotDistro, slotVersion)
+		slotDistro = current[0][3] if len(current[0]) > 3 else None
+		slotVersion = current[0][4] if len(current[0]) > 4 else None
 		if current != None:
 			targets = []
-			choiceList = []  # (label, slotCode, target, recovery)
+			choiceList = []  # (label, slotCode, target, recovery, slotDistro, slotVersion)
 			if current[0][1]:  # The MultiBoot enumeration is complete as we now have slotCodes.
 				skipped = []
 				for target in [join("/media", x) for x in listdir("/media")] + ([join("/media/net", x) for x in listdir("/media/net")] if isdir("/media/net") else []):
@@ -160,14 +164,14 @@ class ImageBackup(Screen):
 					except Exception as e:
 						print(f"[ImageBackup] Warning: inode check failed for '{target}': {e}")
 					targets.append(target)
-					choiceList.append((target, current[0][1], target, current[0][2]))
+					choiceList.append((target, current[0][1], target, current[0][2], slotDistro, slotVersion))
 				if not targets and skipped:
 					details = "\n".join(f"  {path}  ({reason})" for path, reason in skipped)
 					self.session.open(MessageBox,
 						_("No usable USB drive was found.\n\n%s\n\nPlease check that your USB drive is formatted FAT32 or ext4, has at least 500 MB free space and is fully inserted.") % details,
 						MessageBox.TYPE_ERROR, timeout=20, windowTitle=self.getTitle())
 					return
-				choiceList.append((_("Do not backup the image"), False, None, False))
+				choiceList.append((_("Do not backup the image"), False, None, False, None, None))
 				print(f"[ImageBackup] Potential target{"" if len(targets) == 1 else "s"}: '{"', '".join(targets)}'.")
 				self.session.openWithCallback(self.runImageBackup, ChoiceBox, title=_("Please select the target location to save the backup:"), list=choiceList, windowTitle=self.getTitle())
 		else:
@@ -182,7 +186,7 @@ class ImageBackup(Screen):
 			print("[ImageBackup] Image backup completed.")
 			self.close()
 
-		label, slotCode, target, recovery = answer if answer else (None, None, None, None)
+		label, slotCode, target, recovery, slotDistro, slotVersion = answer if answer else (None, None, None, None, None, None)
 		if slotCode:
 			# Make sure that the image backup target exists.
 			target = join(target, "images")
@@ -280,6 +284,15 @@ class ImageBackup(Screen):
 			cmdLines.append("\tDisplayDistro=Unknown")
 			cmdLines.append("\tImageVersion=Unknown")
 			cmdLines.append("fi")
+			# Prefer the slot's resolved displaydistro/imgversion
+			if slotDistro:
+				safeDistro = "".join(c if c.isalnum() or c in "._+-" else "_" for c in slotDistro).strip("_") or "Unknown"
+				shellDisplayDistro = slotDistro.replace("'", "'\\''")
+				cmdLines.append(f"Distro={safeDistro}")
+				cmdLines.append(f"DisplayDistro='{shellDisplayDistro}'")
+			if slotVersion:
+				safeVersion = "".join(c if c.isalnum() or c in "._+-" else "_" for c in slotVersion).strip("_") or "Unknown"
+				cmdLines.append(f"ImageVersion={safeVersion}")
 			cmdLines.append(f"{self.echoCmd} \"{_("Image version")} $DisplayDistro $ImageVersion.\"")
 			# Build the "imageversion" inventory file.
 			cmdLines.append(f"{self.echoCmd} \"[Image Version]\" > /tmp/imageversion")

@@ -169,27 +169,24 @@ void eFilePushThread::thread()
 				if (m_stop)
 					break;
 
-				/* in stream_mode, we are sending EOF events
-				   over and over until somebody responds.
-
-				   in stream_mode, think of evtEOF as "buffer underrun occurred". */
+				if (m_flags == 1) { /* timeshift — at live edge, wait for more data */
+#ifdef DREAMNEXTGEN
+					usleep(15000);  /* 15ms — balance between responsiveness and CPU */
+#else
+					usleep(200000);  /* 200ms */
+#endif
+					continue;
+				}
+				/* In stream_mode, send EOF events repeatedly until
+				 * somebody responds. Think of evtEOF as "buffer underrun". */
 				if (m_sof == 0)
 					sendEvent(evtEOF);
 				else
-					sendEvent(evtUser); // start of file event
+					sendEvent(evtUser); /* start-of-file event */
 
 				if (m_stream_mode) {
 					eDebug("[eFilePushThread] reached EOF, but we are in stream mode. delaying 1 second.");
 					sleep(1);
-					continue;
-				}
-				else if (m_flags == 1) { // timeshift
-
-#ifdef DREAMNEXTGEN
-					usleep(15000);  // 15 milliseconds - balance between responsiveness and CPU
-#else
-					usleep(200000);  // 200 milliseconds
-#endif
 					continue;
 				}
 				else if (++eofcount < 10)

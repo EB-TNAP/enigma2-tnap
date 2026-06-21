@@ -1007,6 +1007,9 @@ class AttributeParser:
 	def borderWidth(self, value):
 		self.guiObject.setBorderWidth(self.applyVerticalScale(value))
 
+	def condition(self, value):
+		pass
+
 	def conditional(self, value):
 		pass
 
@@ -1674,7 +1677,7 @@ class additionalWidget:
 		self.children = []
 
 
-class ComponentTemplates():
+class ComponentTemplates:
 	def __init__(self):
 		self.changedTimes = {}
 		self.templates = {}

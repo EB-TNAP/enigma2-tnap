@@ -2003,6 +2003,10 @@ RESULT eDVBScan::processVCT(eDVBNamespace dvbnamespace, const VirtualChannelTabl
 	/* save correct CHID for this channel */
 	m_chid_current = chid;
 
+	int vct_system = iDVBFrontend::feSatellite;
+	if (m_ch_current)
+		m_ch_current->getSystem(vct_system);
+
 	for (VirtualChannelListConstIterator s(services.begin()); s != services.end(); ++s)
 	{
 		unsigned short service_id = (*s)->getServiceId();
@@ -2063,7 +2067,12 @@ RESULT eDVBScan::processVCT(eDVBNamespace dvbnamespace, const VirtualChannelTabl
 			ref.set(chid);
 			ref.setServiceID(service_id);
 			ref.setServiceType(servicetype);
-			ref.setSourceID(source_id);
+			/* source_id in the service ref key is only meaningful for native feATSC
+			 * (where ATSC EIT lookup uses it).  On DVB-S/C transponders carrying
+			 * ATSC PSIP, including it makes the ref key differ from the PMT-derived
+			 * generic entry (which has source_id=0), causing duplicates. */
+			if (vct_system == iDVBFrontend::feATSC)
+				ref.setSourceID(source_id);
 			service->m_service_name = (*s)->getName();
 			/* strip trailing spaces */
 			service->m_service_name = service->m_service_name.erase(service->m_service_name.find_last_not_of(" ") + 1);

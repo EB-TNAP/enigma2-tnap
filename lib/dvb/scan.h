@@ -64,6 +64,7 @@ class eDVBScan: public sigc::trackable, public iObject
 
 	std::map<unsigned short, service> m_pmts_to_read;
 	std::map<unsigned short, service>::iterator m_pmt_in_progress;
+	std::set<unsigned short> m_pat_programs; /* all program_numbers from PAT; persists after m_pmts_to_read is drained */
 	bool m_pmt_running;
 	bool m_abort_current_pmt;
 

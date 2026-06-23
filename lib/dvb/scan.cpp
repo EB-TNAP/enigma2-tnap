@@ -257,6 +257,7 @@ RESULT eDVBScan::nextChannel()
 	 * is stale. Reset it so leftover PMT PIDs from the previous transport
 	 * stream are not read on the next one. */
 	m_pmts_to_read.clear();
+	m_pat_programs.clear();
 	m_pmt_running = false;
 	m_abort_current_pmt = false;
 
@@ -383,7 +384,11 @@ RESULT eDVBScan::startFilter()
 				const ProgramAssociationSection &pat = **i;
 				ProgramAssociationConstIterator program = pat.getPrograms()->begin();
 				for (; program != pat.getPrograms()->end(); ++program)
-					m_pmts_to_read.insert(std::pair<unsigned short, service>((*program)->getProgramNumber(), service((*program)->getProgramMapPid())));
+				{
+					unsigned short pn = (*program)->getProgramNumber();
+					m_pmts_to_read.insert(std::pair<unsigned short, service>(pn, service((*program)->getProgramMapPid())));
+					m_pat_programs.insert(pn);
+				}
 			}
 			m_PMT = new eTable<ProgramMapSection>;
 			CONNECT(m_PMT->tableReady, eDVBScan::PMTready);
@@ -1423,6 +1428,7 @@ void eDVBScan::start(const eSmartPtrList<iDVBFrontendParameters> &known_transpon
 	m_new_services.clear();
 	m_new_servicerefs.clear();
 	m_last_service = m_new_services.end();
+	m_pat_programs.clear();
 
 	if (m_flags & scanBlindSearch)
 	{
@@ -2001,6 +2007,17 @@ RESULT eDVBScan::processVCT(eDVBNamespace dvbnamespace, const VirtualChannelTabl
 	{
 		unsigned short service_id = (*s)->getServiceId();
 		unsigned short source_id = (*s)->getSourceId();
+		/* Some ATSC PSIP broadcasters (e.g. satellite uplinks of Mexican/Canadian OTA)
+		 * have incorrect program_number fields in their VCT that don't match the PAT.
+		 * If the VCT program_number is not a valid PAT program but source_id is, use
+		 * source_id as the service ID so the channel tunes correctly. */
+		if (!m_pat_programs.empty() &&
+		    m_pat_programs.find(service_id) == m_pat_programs.end() &&
+		    m_pat_programs.find(source_id) != m_pat_programs.end())
+		{
+			SCAN_eDebug("[eDVBScan] VCT program_number %04x not in PAT; using source_id %04x instead", service_id, source_id);
+			service_id = source_id;
+		}
 		SCAN_eDebugNoNewLineStart("[scan.cpp-#1478] SID %04x, source_id %04x: ", service_id, source_id);
 		bool is_crypted = (*s)->isAccessControlled();
 
@@ -2078,14 +2095,25 @@ RESULT eDVBScan::processVCT(eDVBNamespace dvbnamespace, const VirtualChannelTabl
 			if (is_crypted and !service->m_ca.size())
 				service->m_ca.push_front(0);
 
-			m_new_servicerefs.push_back(ref);
-			std::pair<std::map<eServiceReferenceDVB, ePtr<eDVBService> >::iterator, bool> i =
-				m_new_services.insert(std::pair<eServiceReferenceDVB, ePtr<eDVBService> >(ref, service));
-
-			if (i.second)
+			/* If a generic PMT-derived entry already occupies this SID (from VCT
+			 * program_number remapping via source_id), overwrite its name/metadata
+			 * with the VCT-supplied values.  Avoid pushing a duplicate to
+			 * m_new_servicerefs so the Last Scanned bouquet stays de-duped. */
+			auto existing = m_new_services.find(ref);
+			if (existing != m_new_services.end())
 			{
-				m_last_service = i.first;
-				m_event(evtNewService);
+				existing->second = service;
+				m_last_service = existing;
+			}
+			else
+			{
+				m_new_servicerefs.push_back(ref);
+				auto i = m_new_services.insert(std::pair<eServiceReferenceDVB, ePtr<eDVBService>>(ref, service));
+				if (i.second)
+				{
+					m_last_service = i.first;
+					m_event(evtNewService);
+				}
 			}
 		}
 		if (m_pmt_running && m_pmt_in_progress->first == service_id)

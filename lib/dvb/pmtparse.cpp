@@ -329,9 +329,10 @@ int eDVBPMTParser::getProgramInfo(program &program)
 									isaudio = 1;
 									audio.type = audioStream::atAC3;
 									break;
-								case 0x42535344: // == 'BSSD' (LPCM)
+								case 0x42535344: // == 'BSSD': LPCM in HDMV/Blu-ray; AC-3 in ATSC cable (stream_type 0x81)
 									isaudio = 1;
-									audio.type = audioStream::atLPCM;
+									if (is_hdmv)
+										audio.type = audioStream::atLPCM;
 									break;
 								case 0x44524131: /* DRA is "DRA1" */
 									isaudio = 1;

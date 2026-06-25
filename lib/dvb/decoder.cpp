@@ -16,6 +16,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <vector>
 
 #include <lib/dvb/fccdecoder.h>
 
@@ -923,9 +924,10 @@ static int64_t get_pts_video()
 		if (size > 0)
 		{
 			unsigned long pts = strtoul(pts_str, NULL, 16);
-			return pts;
+			return (int64_t)pts;
 		}
 	}
+	return -1;
 }
 #endif
 
@@ -1356,7 +1358,7 @@ int eTSMPEGDecoder::setState()
 	if (changed & (changeState|changeVideo|changeAudio))
 	{
 					/* play, slowmotion, fast-forward */
-		int state_table[6][4] =
+		int state_table[6][3] =
 			{
 				/* [stateStop] =                 */ {0, 0, 0},
 				/* [statePause] =                */ {0, 0, 0},
@@ -1689,11 +1691,11 @@ RESULT eTSMPEGDecoder::showSinglePic(const char *filename)
 				off_t pos=0;
 				unsigned char pes_header[] = { 0x00, 0x00, 0x01, 0xE0, 0x00, 0x00, 0x80, 0x80, 0x05, 0x21, 0x00, 0x01, 0x00, 0x01 };
 				unsigned char seq_end[] = { 0x00, 0x00, 0x01, 0xB7 };
-				unsigned char iframe[s.st_size];
+				std::vector<unsigned char> iframe(s.st_size);
 				unsigned char stuffing[8192];
 				int streamtype;
 				memset(stuffing, 0, sizeof(stuffing));
-				ssize_t ret = read(f, iframe, s.st_size);
+				ssize_t ret = read(f, iframe.data(), s.st_size);
 				if (ret < 0) eDebug("[eTSMPEGDecoder] read failed: %m");
 				if (iframe[0] == 0x00 && iframe[1] == 0x00 && iframe[2] == 0x00 && iframe[3] == 0x01 && (iframe[4] & 0x0f) == 0x07)
 					streamtype = VIDEO_STREAMTYPE_MPEG4_H264;
@@ -1716,7 +1718,7 @@ RESULT eTSMPEGDecoder::showSinglePic(const char *filename)
 					writeAll(m_video_clip_fd, pes_header, sizeof(pes_header));
 				else
 					iframe[4] = iframe[5] = 0x00;
-				writeAll(m_video_clip_fd, iframe, s.st_size);
+				writeAll(m_video_clip_fd, iframe.data(), s.st_size);
 				if (!seq_end_avail)
 				{
 					ret = write(m_video_clip_fd, seq_end, sizeof(seq_end));

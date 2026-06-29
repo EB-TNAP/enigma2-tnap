@@ -65,10 +65,173 @@ if fileExists("/proc/stb/info/boxtype") and not fileExists("/proc/stb/info/hwmod
 	except:
 		pass
 
+# ---------------------------------------------------------------------------
+# TNAP embedded Signal-finder skin
+# ---------------------------------------------------------------------------
+# Rationale: every skin ships its own <screen name="Satfinder"> and most of them
+# omit the widgets this plugin relies on (onid/tsid/pos, the "Load Blindscan"
+# blue key, the large readouts). By giving the screen a UNIQUE skinName that no
+# installed skin defines, enigma2's readSkin() never finds a match in the loaded
+# skins and falls back to the embedded self.skin below -- so our layout always
+# wins, regardless of the active skin. Same pattern used for BlindscanState.
+#
+# The skin is fully self-contained: no <panel> includes, no skin-defined color
+# names, no skin-private pixmaps. Colours are inlined as #AARRGGBB (enigma2:
+# 0x00 alpha byte = opaque, 0xFF = transparent). The only external pixmap is
+# infobar/bar_big.png, which lives in skin_default and therefore resolves on
+# every skin via the standard GUI-skin search path. Designed at 1920x1080;
+# resolution="1920,1080" lets forks that support it auto-scale on other panels.
+#
+# Layout coordinates match the PLi-FullNightHD Satfinder so the on-screen
+# result is the one shown in the reference screenshot.
+
+# Shared building blocks ----------------------------------------------------
+
+# Absolute path to our own gradient bar, derived from where the plugin is
+# installed so it always resolves (an embedded skin has no owning skin dir, so
+# a relative "infobar/bar_big.png" wrongly falls back to skin_default's white
+# bar). If the PNG is ever missing, the Progress widgets below carry a green
+# foregroundColor fallback, so the bar is never an unreadable white block.
+PLUGIN_PATH = os.path.dirname(os.path.realpath(__file__))
+_BAR_PIXMAP = os.path.join(PLUGIN_PATH, "signalbar.png")
+
+_SAT_SKIN_HEADER = """
+	<eLabel position="0,0" size="1920,1080" backgroundColor="#00000000" zPosition="-2"/>
+	<widget source="Title" render="Label" position="30,22" size="1500,66" font="Regular;46" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left" noWrap="1"/>
+	<widget source="global.CurrentTime" render="Label" position="1430,18" size="460,56" font="Regular;46" foregroundColor="#00f0f0f0" transparent="1" halign="right" valign="center">
+		<convert type="ClockToText">Format:%H:%M</convert>
+	</widget>
+	<widget source="global.CurrentTime" render="Label" position="1230,78" size="660,40" font="Regular;30" foregroundColor="#00b6b6b6" transparent="1" halign="right" valign="center">
+		<convert type="ClockToText">Date</convert>
+	</widget>
+	<eLabel position="0,124" size="1920,2" backgroundColor="#00303030" zPosition="-1"/>
+"""
+
+_SAT_SKIN_METERS = """
+	<widget source="Frontend" render="Progress" pixmap="%(bar)s" position="30,150" size="1860,75" borderWidth="1" borderColor="#00808888" foregroundColor="#0056c856">
+		<convert type="FrontendInfo">SNR</convert>
+	</widget>
+	<eLabel text="SNR:" position="37,150" size="150,75" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
+	<widget source="Frontend" render="Label" position="1552,150" size="330,75" halign="right" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2">
+		<convert type="FrontendInfo">SNR</convert>
+	</widget>
+
+	<widget source="Frontend" render="Progress" pixmap="%(bar)s" position="30,240" size="1860,75" borderWidth="1" borderColor="#00808888" foregroundColor="#0056c856">
+		<convert type="FrontendInfo">AGC</convert>
+	</widget>
+	<eLabel text="AGC:" position="37,240" size="150,75" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
+	<widget source="Frontend" render="Label" position="1552,240" size="330,75" halign="right" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2">
+		<convert type="FrontendInfo">AGC</convert>
+	</widget>
+
+	<eLabel text="SNR:" position="30,360" size="180,30" transparent="1" zPosition="5" font="Regular;27"/>
+	<widget source="Frontend" render="Label" position="30,390" size="450,112" font="Regular;108" halign="left" transparent="1">
+		<convert type="FrontendInfo">SNRdB</convert>
+	</widget>
+	<eLabel text="AGC:" position="30,540" size="180,30" transparent="1" zPosition="5" font="Regular;27"/>
+	<widget source="Frontend" render="Label" position="30,570" size="450,112" font="Regular;108" halign="left" transparent="1">
+		<convert type="FrontendInfo">AGC</convert>
+	</widget>
+	<eLabel text="BER:" position="30,720" size="180,30" transparent="1" zPosition="5" font="Regular;27"/>
+	<widget source="Frontend" render="Label" position="30,750" size="450,112" font="Regular;108" halign="left" transparent="1">
+		<convert type="FrontendInfo">BER</convert>
+	</widget>
+	<widget text="LOCK" source="Frontend" render="FixedLabel" position="30,895" size="465,120" font="Regular;108" halign="left" foregroundColor="#0056c856" transparent="1">
+		<convert type="FrontendInfo">LOCK</convert>
+		<convert type="ConditionalShowHide"/>
+	</widget>
+
+	<widget name="config" valueFont="Regular;28" position="450,360" size="1440,643" itemHeight="49" font="Regular;40" transparent="1" enableWrapAround="1" scrollbarMode="showOnDemand"/>
+""" % {"bar": _BAR_PIXMAP}
+
+# ONID / TSID / POS row -- only present on SatfinderExtra (needs dvbreader)
+_SAT_SKIN_DVBROW = """
+	<eLabel text="ONID:" position="452,320" size="160,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center"/>
+	<eLabel position="618,317" size="230,46" backgroundColor="#25333333" zPosition="1"/>
+	<widget source="onid" render="Label" position="620,319" size="226,42" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="2"/>
+
+	<eLabel text="TSID:" position="870,320" size="160,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center"/>
+	<eLabel position="1036,317" size="230,46" backgroundColor="#25333333" zPosition="1"/>
+	<widget source="tsid" render="Label" position="1038,319" size="226,42" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="2"/>
+
+	<eLabel text="POS:" position="1290,320" size="130,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center"/>
+	<eLabel position="1426,317" size="434,46" backgroundColor="#25333333" zPosition="1"/>
+	<widget source="pos" render="Label" position="1428,319" size="430,42" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="2"/>
+"""
+
+# Bottom colour-key bar. Red/Green/Blue chips are always present. The Yellow
+# key only exists on SatfinderExtra, so it lives in its own block and is
+# rendered as conditional coloured text -- visible only when the plugin sets
+# key_yellow ("Service list") and hidden otherwise.
+_SAT_SKIN_BUTTONS_RGB = """
+	<eLabel position="190,1035" size="30,30" backgroundColor="#00ff4a3c" zPosition="2"/>
+	<widget source="key_red" render="Label" position="235,1030" size="320,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
+
+	<eLabel position="620,1035" size="30,30" backgroundColor="#0056c856" zPosition="2"/>
+	<widget source="key_green" render="Label" position="665,1030" size="320,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
+"""
+
+# Blue "Load/Clear Blindscan" key, shown only when key_blue has text (i.e. a
+# blindscan file exists or one is loaded). The chip is a key_blue-bound Label
+# with matching fore/background so it paints as a solid blue square (its text is
+# hidden by the colour match); ConditionalShowHide then hides the chip and the
+# adjacent text label together when key_blue is empty -- no extra asset needed.
+_SAT_SKIN_BUTTON_BLUE = """
+	<widget source="key_blue" render="Label" position="1480,1035" size="30,30" font="Regular;1" backgroundColor="#00879ce1" foregroundColor="#00879ce1" zPosition="2">
+		<convert type="ConditionalShowHide"/>
+	</widget>
+	<widget source="key_blue" render="Label" position="1525,1030" size="365,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left">
+		<convert type="ConditionalShowHide"/>
+	</widget>
+"""
+
+_SAT_SKIN_BUTTON_YELLOW = """
+	<widget source="key_yellow" render="Label" position="1010,1030" size="430,40" font="Regular;34" foregroundColor="#00F9C731" transparent="1" valign="center" halign="left">
+		<convert type="ConditionalShowHide"/>
+	</widget>
+"""
+
+# Full screens --------------------------------------------------------------
+
+# Base Satfinder (no AutoBouquetsMaker / dvbreader) -- no ONID/TSID/POS row.
+SATFINDER_SKIN_BASE = (
+	'<screen name="TNAP_Satfinder" position="0,0" size="1920,1080" '
+	'title="Signal finder" flags="wfNoBorder" backgroundColor="#00000000" '
+	'resolution="1920,1080">'
+	+ _SAT_SKIN_HEADER
+	+ _SAT_SKIN_METERS
+	+ _SAT_SKIN_BUTTONS_RGB
+	+ _SAT_SKIN_BUTTON_BLUE
+	+ '</screen>'
+)
+
+# SatfinderExtra -- includes the ONID/TSID/POS network-info row.
+SATFINDER_SKIN_EXTRA = (
+	'<screen name="TNAP_Satfinder" position="0,0" size="1920,1080" '
+	'title="Signal finder" flags="wfNoBorder" backgroundColor="#00000000" '
+	'resolution="1920,1080">'
+	+ _SAT_SKIN_HEADER
+	+ _SAT_SKIN_DVBROW
+	+ _SAT_SKIN_METERS
+	+ _SAT_SKIN_BUTTONS_RGB
+	+ _SAT_SKIN_BUTTON_YELLOW
+	+ _SAT_SKIN_BUTTON_BLUE
+	+ '</screen>'
+)
+
+
 class Satfinder(ScanSetup, ServiceScan):
 	"""Inherits StaticText [key_red] and [key_green] properties from ScanSetup"""
 
 	def __init__(self, session):
+		# Force our own self-contained layout instead of whatever the active
+		# skin ships for "Satfinder". skinName is unique so readSkin() misses
+		# every installed skin and falls back to self.skin below. (readSkin runs
+		# after __init__ completes, so setting these here is enough; SatfinderExtra
+		# overrides them with its ONID/TSID/POS variant.)
+		self.skin = SATFINDER_SKIN_BASE
+		self.skinName = ["TNAP_Satfinder"]
+
 		self.initcomplete = False
 		service = session and session.nav.getCurrentService()
 		feinfo = service and service.frontendInfo()
@@ -112,7 +275,7 @@ class Satfinder(ScanSetup, ServiceScan):
 		self.entryChanged = self.newConfig
 		self.setTitle(_("Signal finder") + " for " + BOX_MODEL + " " + BOX_NAME)
 		self["Frontend"] = FrontendStatus(frontend_source=lambda: self.frontend, update_interval=100)
-		self["key_blue"] = StaticText(_("Load Blindscan"))
+		self["key_blue"] = StaticText("")
 
 		self["actions"] = ActionMap(["SetupActions", "ColorActions"],
 		{
@@ -127,6 +290,8 @@ class Satfinder(ScanSetup, ServiceScan):
 		self.session.nav.stopService()
 		self.onClose.append(self.__onClose)
 		self.onShow.append(self.prepareFrontend)
+		# Hide the blue "Load Blindscan" key unless a blindscan file is present.
+		self._updateBlueButton()
 
 	def openFrontend(self):
 		try:
@@ -512,12 +677,30 @@ class Satfinder(ScanSetup, ServiceScan):
 		else:
 			ScanSetup.predefinedTranspondersList(self, self.tuning_sat.orbital_position)
 
+	def _hasBlindscanFiles(self):
+		"""Cheap presence check (no XML parsing): any blindscan_*.xml in /tmp."""
+		try:
+			return any(f.startswith("blindscan_") and f.endswith(".xml")
+					   for f in os.listdir("/tmp"))
+		except OSError:
+			return False
+
+	def _updateBlueButton(self):
+		"""Show the blue key only when there's something to load or clear.
+		Empty text -> the skin's ConditionalShowHide hides the key entirely."""
+		if self.blindscan_transponders is not None:
+			self["key_blue"].setText(_("Clear Blindscan"))
+		elif self._hasBlindscanFiles():
+			self["key_blue"].setText(_("Load Blindscan"))
+		else:
+			self["key_blue"].setText("")
+
 	def keyBlue(self):
 		if self.blindscan_transponders is not None:
 			# Clear blindscan — revert to satellites.xml transponders
 			self.blindscan_transponders = None
 			self._blindscan_orbpos = None
-			self["key_blue"].setText(_("Load Blindscan"))
+			self._updateBlueButton()
 			self.tuning_type.value = "predefined_transponder"
 			self.createSetup()
 			self.retune()
@@ -633,7 +816,7 @@ class Satfinder(ScanSetup, ServiceScan):
 			self._blindscan_orbpos = int(self.tuning_sat.value)
 		except (ValueError, TypeError):
 			self._blindscan_orbpos = None
-		self["key_blue"].setText(_("Clear Blindscan"))
+		self._updateBlueButton()
 		self.tuning_type.value = "blindscan_transponder"
 
 		if show_message:
@@ -725,7 +908,7 @@ class Satfinder(ScanSetup, ServiceScan):
 			# No blindscan for this satellite — fall back to satellites.xml
 			self.blindscan_transponders = None
 			self._blindscan_orbpos = None
-			self["key_blue"].setText(_("Load Blindscan"))
+			self._updateBlueButton()
 
 	def retuneCab(self):
 		if not self.initcomplete:
@@ -975,7 +1158,10 @@ class SatfinderExtra(Satfinder):
 	def __init__(self, session):
 		# Keep existing init code
 		Satfinder.__init__(self, session)
-		self.skinName = ["Satfinder"]
+		# Override with the variant that adds the ONID/TSID/POS network-info row.
+		# Unique skinName -> no installed skin matches -> our embedded self.skin wins.
+		self.skin = SATFINDER_SKIN_EXTRA
+		self.skinName = ["TNAP_Satfinder"]
 
 		# Add thread control
 		global THREAD_RUNNING
@@ -1382,7 +1568,7 @@ class SatfinderExtra(Satfinder):
 		if diff <= 5: # 0.5 degree tolerance for nominal-position fuzz, e.g. 0.8W vs 1.0W
 			return text + " - " + _("verified")
 		expected_text = "{:0.1f}{}".format((3600 - expected) / 10. if expected > 1800 else expected / 10., "W" if expected > 1800 else "E")
-		return text + " - " + _("MISMATCH! tuner is set to %s") % expected_text
+		return text + " - " + _("(Not %s)") % expected_text
 
 	def getOrbitalPosition(self, bcd, w_e_flag=1):
 		# 4 bit BCD (binary coded decimal)
@@ -1502,19 +1688,30 @@ class SatfinderExtra(Satfinder):
 
 
 class ServicesFound(Screen):
+	# Self-contained layout under a unique skinName so no installed skin's
+	# <screen name="ServicesFound"> overrides it, and wfNoBorder + a solid
+	# background remove the skin's default window decoration (the teal/green
+	# border that was bleeding through).
 	skin = """
-		<screen name="ServicesFound" position="center,center" size="1000,970">
-			<widget name="legend" position="0,0" size="590,100" zPosition="10" font="Regular;29" transparent="1"/>
-			<widget name="servicesfound" position="0,105" size="590,800" zPosition="10" font="Regular;30" transparent="1"/>
-			<ePixmap pixmap="skin_default/buttons/red.png" position="10,925" size="140,40" alphatest="on" />
-			<widget render="Label" source="key_red" position="10,900" zPosition="1" size="140,25" font="Regular;20" halign="center" valign="center" backgroundColor="#9f1313" transparent="1"/>
-			<ePixmap pixmap="skin_default/buttons/green.png" position="160,925" size="140,40" alphatest="on" />
-			<widget render="Label" source="key_green" position="160,900" zPosition="1" size="140,25" font="Regular;20" halign="center" valign="center" backgroundColor="#1f771f" transparent="1"/>
+		<screen name="TNAP_ServicesFound" position="0,0" size="1920,1080" title="Services found" flags="wfNoBorder" backgroundColor="#00000000" resolution="1920,1080">
+			<eLabel position="0,0" size="1920,1080" backgroundColor="#00000000" zPosition="-2"/>
+			<widget source="Title" render="Label" position="60,22" size="1500,66" font="Regular;46" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left" noWrap="1"/>
+			<eLabel position="0,110" size="1920,2" backgroundColor="#00303030"/>
+			<widget name="legend" position="60,128" size="1800,56" zPosition="10" font="Regular;30" transparent="1" valign="center"/>
+			<widget name="servicesfound" position="60,200" size="1800,790" zPosition="10" font="Regular;32" transparent="1"/>
+			<eLabel position="0,1010" size="1920,2" backgroundColor="#00303030"/>
+			<eLabel position="60,1035" size="30,30" backgroundColor="#00ff4a3c" zPosition="2"/>
+			<widget source="key_red" render="Label" position="105,1030" size="320,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
+			<eLabel position="490,1035" size="30,30" backgroundColor="#0056c856" zPosition="2"/>
+			<widget source="key_green" render="Label" position="535,1030" size="320,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left">
+				<convert type="ConditionalShowHide"/>
+			</widget>
 		</screen>"""
 
 	def __init__(self, session, text, legend, show_scan=True):
 		Screen.__init__(self, session)
-		self.setTitle(_("Information"))
+		self.skinName = ["TNAP_ServicesFound"]
+		self.setTitle(_("Services found"))
 
 		self["key_red"] = StaticText(_("Close"))
 		self["key_green"] = StaticText(_("Scan") if show_scan else "")

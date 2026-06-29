@@ -8,6 +8,7 @@ from Screens.InfoBar import InfoBar
 from Components.Label import Label
 from Components.Button import Button
 from Components.Sources.StaticText import StaticText
+from Components.Sources.FrontendStatus import FrontendStatus
 from Components.ConfigList import ConfigList, ConfigListScreen
 from Components.TunerInfo import TunerInfo
 from Components.ActionMap import NumberActionMap, ActionMap
@@ -21,7 +22,7 @@ from Tools.Transponder import ConvertToHumanReadable
 from skin import parameters
 from Tools.Directories import fileExists # Extra Import
 
-from time import sleep, strftime, time
+from time import sleep, strftime
 from operator import mul as mul
 from random import SystemRandom as SystemRandom
 from threading import Thread as Thread
@@ -29,7 +30,6 @@ from threading import Event as Event
 import os  # Extra Import
 from . import log
 from . import rotor_calc
-from Tools.Directories import fileExists #extra import
 
 BOX_MODEL = ""
 BOX_NAME = ""
@@ -56,6 +56,80 @@ if fileExists("/proc/stb/info/boxtype") and not fileExists("/proc/stb/info/hwmod
 		nimfile.close()
 	except:
 		pass
+
+
+# ---------------------------------------------------------------------------
+# TNAP embedded Positioner-Setup skin
+# ---------------------------------------------------------------------------
+# Same approach used for the Signal finder: a unique skinName that no installed
+# skin defines, so enigma2's readSkin() falls back to the embedded self.skin
+# below and our layout always wins -- including the gradient signal bars.
+#
+# Fully self-contained: no <panel> includes, no skin-private colours. The only
+# external pixmap is signalbar.png (ship it next to this file). The TunerInfo
+# snr_bar/agc_bar eSliders accept a fill pixmap exactly like stock skins do;
+# the bar is full width (1860) so the slider's native-width, value-clipped blit
+# yields the correct fill length. foregroundColor is a green fallback if the
+# PNG is ever missing (clean green bar instead of an unreadable white block).
+_POS_PLUGIN_PATH = os.path.dirname(os.path.realpath(__file__))
+_POS_BAR_PIXMAP = os.path.join(_POS_PLUGIN_PATH, "signalbar.png")
+
+POSITIONER_SKIN = ("""
+	<screen name="TNAP_PositionerSetup" position="0,0" size="1920,1080" title="TNAP Positioner Setup" flags="wfNoBorder" backgroundColor="#00000000" resolution="1920,1080">
+		<eLabel position="0,0" size="1920,1080" backgroundColor="#00000000" zPosition="-2"/>
+
+		<!-- header: title + clock + date -->
+		<widget source="Title" render="Label" position="30,22" size="1500,66" font="Regular;46" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left" noWrap="1"/>
+		<widget source="global.CurrentTime" render="Label" position="1430,18" size="460,56" font="Regular;46" foregroundColor="#00f0f0f0" transparent="1" halign="right" valign="center">
+			<convert type="ClockToText">Format:%H:%M</convert>
+		</widget>
+		<widget source="global.CurrentTime" render="Label" position="1230,78" size="660,40" font="Regular;30" foregroundColor="#00b6b6b6" transparent="1" halign="right" valign="center">
+			<convert type="ClockToText">Date</convert>
+		</widget>
+		<eLabel position="0,124" size="1920,2" backgroundColor="#00303030" zPosition="-1"/>
+
+		<!-- SNR gradient bar -->
+		<widget name="snr_bar" position="30,150" size="1860,75" pixmap="__BAR__" borderWidth="1" borderColor="#00808888" foregroundColor="#0056c856"/>
+		<eLabel text="SNR:" position="37,150" size="150,75" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
+		<widget name="snr_percentage" position="1552,150" size="330,75" halign="right" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
+
+		<!-- BER gradient bar -->
+		<widget name="ber_bar" position="30,240" size="1860,75" pixmap="__BAR__" borderWidth="1" borderColor="#00808888" foregroundColor="#0056c856"/>
+		<eLabel text="BER:" position="37,240" size="150,75" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
+		<widget name="ber_value" position="1552,240" size="330,75" halign="right" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
+
+		<!-- left column readouts -->
+		<eLabel text="SNR:" position="30,355" size="200,30" transparent="1" zPosition="5" font="Regular;27"/>
+		<widget name="snr_db" position="30,385" size="410,95" font="Regular;78" halign="left" transparent="1"/>
+		<widget name="lock_state" position="30,510" size="410,70" font="Regular;56" halign="left" foregroundColor="#0056c856" transparent="1"/>
+
+		<!-- status / message line: prominent, horizontally centered on screen -->
+		<widget name="status_bar" position="480,705" size="960,100" font="Regular;46" halign="center" valign="center" transparent="1" foregroundColor="#00F9C731" zPosition="10"/>
+
+		<eLabel text="Frequency:" position="30,800" size="205,34" transparent="1" font="Regular;28" foregroundColor="#00b6b6b6"/>
+		<widget name="frequency_value" position="245,800" size="195,34" font="Regular;28" halign="left" transparent="1"/>
+		<eLabel text="Symbol rate:" position="30,840" size="205,34" transparent="1" font="Regular;28" foregroundColor="#00b6b6b6"/>
+		<widget name="symbolrate_value" position="245,840" size="195,34" font="Regular;28" halign="left" transparent="1"/>
+		<eLabel text="FEC:" position="30,880" size="205,34" transparent="1" font="Regular;28" foregroundColor="#00b6b6b6"/>
+		<widget name="fec_value" position="245,880" size="195,34" font="Regular;28" halign="left" transparent="1"/>
+		<widget name="rotorstatus" position="30,930" size="435,80" font="Regular;26" halign="left" transparent="1"/>
+
+		<!-- menu -->
+		<widget name="list" position="470,360" size="1420,560" itemHeight="49" font="Regular;40" valueFont="Regular;36" transparent="1" enableWrapAround="1" scrollbarMode="showOnDemand"/>
+
+		<!-- bottom keys -->
+		<eLabel text="MENU" position="40,1038" size="90,28" backgroundColor="#00303030" foregroundColor="#00b6b6b6" font="Regular;20" halign="center" valign="center"/>
+		<eLabel text="INFO" position="138,1038" size="80,28" backgroundColor="#00303030" foregroundColor="#00b6b6b6" font="Regular;20" halign="center" valign="center"/>
+
+		<eLabel position="240,1035" size="30,30" backgroundColor="#00ff4a3c" zPosition="2"/>
+		<widget name="key_red" position="285,1030" size="300,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
+		<eLabel position="620,1035" size="30,30" backgroundColor="#0056c856" zPosition="2"/>
+		<widget name="key_green" position="665,1030" size="340,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
+		<eLabel position="1040,1035" size="30,30" backgroundColor="#00F9C731" zPosition="2"/>
+		<widget name="key_yellow" position="1085,1030" size="340,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
+		<eLabel position="1480,1035" size="30,30" backgroundColor="#00879ce1" zPosition="2"/>
+		<widget name="key_blue" position="1525,1030" size="365,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
+	</screen>""".replace("__BAR__", _POS_BAR_PIXMAP))
 
 
 class PositionerSetup(Screen):
@@ -100,6 +174,11 @@ class PositionerSetup(Screen):
 
 	def __init__(self, session, feid):
 		Screen.__init__(self, session)
+		# Force our own self-contained layout (with gradient signal bars) instead
+		# of whatever the active skin ships for "PositionerSetup". Unique skinName
+		# -> readSkin() misses every installed skin and uses self.skin below.
+		self.skin = POSITIONER_SKIN
+		self.skinName = ["TNAP_PositionerSetup"]
 		self.setTitle(_("TNAP Positioner Setup - " + BOX_NAME))
 		self.feid = feid
 		self.oldref = self.session.nav.getCurrentlyPlayingServiceOrGroup()
@@ -216,6 +295,7 @@ class PositionerSetup(Screen):
 		print("Current Transponder = ", tp[0],pol,"-",tp[1],"Symbol Rate", file=log )
 		self.tp = tp[0]
 		self.tuner.tune(tp)
+		self._lastTp = tp	# remembered so we can re-tune after the Tune editor returns
 		self.isMoving = False
 		self.stopOnLock = False
 
@@ -651,6 +731,13 @@ class PositionerSetup(Screen):
 			feparm = self.tuner.lastparm.getDVBS()
 			fe_data["orbital_position"] = feparm.orbital_position
 			self.statusTimer.stop()
+			# Release the frontend so the Tune editor can allocate and drive it
+			# live; we reclaim it in tune() when the editor closes.
+			self.frontend = None
+			if hasattr(self, 'raw_channel') and self.raw_channel:
+				del self.raw_channel
+				self.raw_channel = None
+			self.tuner = None
 			self.session.openWithCallback(self.tune, TunerScreen, self.feid, fe_data)
 
 	def greenKey(self):
@@ -838,12 +925,26 @@ class PositionerSetup(Screen):
 		self.tuner.retune()
 
 	def tune(self, transponder):
+		# The Tune editor released and drove the frontend; reclaim it.
+		if self.frontend is None:
+			if self.openFrontend():
+				self.diseqc = Diseqc(self.frontend)
+				self.tuner = Tuner(self.frontend, ignore_rotor=True)
 		# re-start the update timer
 		self.statusTimer.start(self.UPDATE_INTERVAL, True)
 		self.createSetup()
+		if self.frontend is None or self.tuner is None:
+			return	# couldn't reclaim a tuner (all in use); avoid touching a stale one
 		if transponder is not None:
 			self.tuner.tune(transponder)
 			self.tuningChangedTo(transponder)
+			self._lastTp = transponder
+		elif self.frontend and self.tuner and getattr(self, "_lastTp", None) is not None:
+			# Cancelled: restore the transponder we were on before the editor.
+			self.tuner.tune(self._lastTp)
+			self.tuningChangedTo(self._lastTp)
+		if self.tuner is None or getattr(self.tuner, "lastparm", None) is None:
+			return
 		feparm = self.tuner.lastparm.getDVBS()
 		orb_pos = feparm.orbital_position
 		m = PositionerSetup.satposition2metric(orb_pos)
@@ -895,9 +996,9 @@ class PositionerSetup(Screen):
 	def gotTsidOnid(self, tsid, onid):
 		colors = parameters.get("PositionerOnidTsidcolors", (0x0000FF00, 0x00FF0000)) # "valid", "not valid"
 		if tsid == self.tsid and onid == self.onid:
-			msg = "\c%08x" % colors[0] + _("This valid ONID/TSID")
+			msg = "\\c%08x" % colors[0] + _("This valid ONID/TSID")
 		else:
-			msg = "\c%08x" % colors[1] + _("This not valid ONID/TSID")
+			msg = "\\c%08x" % colors[1] + _("This not valid ONID/TSID")
 		self.statusMsg(msg, blinking=True)
 		if self.raw_channel:
 			self.raw_channel.receivedTsidOnid.get().remove(self.gotTsidOnid)
@@ -1247,7 +1348,6 @@ class PositionerSetup(Screen):
 			elif x < 0:
 				self.diseqccommand("moveWest", x & 0xFF)
 			if x != 0:
-				time = int(abs(x) * self.tuningstepsize / turningspeed + 2 * self.TURNING_START_STOP_DELAY)
 				sleep(.8) #(time * self.MAX_LOW_RATE_ADAPTER_COUNT)
 ####
 
@@ -1282,7 +1382,6 @@ class PositionerSetup(Screen):
 				return _("east")
 
 		self.logMsg(_("Auto focus commencing..."))
-		turningspeed = self.getTurningspeed()
 		measurements = {}
 		maxsteps = 200 #max(min(round(self.MAX_FOCUS_ANGLE / self.tuningstepsize), 0x1F), 3)
 		self.measure()
@@ -1527,28 +1626,97 @@ class ONIDTSIDScreen(ConfigListScreen, Screen):
 
 
 class TunerScreen(ConfigListScreen, Screen):
-	skin = """
-		<screen position="center,center" size="520,450" title="Tune">
-			<ePixmap pixmap="buttons/red.png" position="0,0" size="140,40" alphatest="on"/>
-			<ePixmap pixmap="buttons/green.png" position="140,0" size="140,40" alphatest="on"/>
-			<widget source="key_red" render="Label" position="0,0" zPosition="1" size="140,40" font="Regular;20" halign="center" valign="center" backgroundColor="#9f1313" transparent="1"/>
-			<widget source="key_green" render="Label" position="140,0" zPosition="1" size="140,40" font="Regular;20" halign="center" valign="center" backgroundColor="#1f771f" transparent="1"/>
-			<widget name="config" position="10,50" size="500,350" scrollbarMode="showOnDemand" />
-			<widget name="introduction" position="60,420" size="450,23" halign="left" font="Regular;20" />
-		</screen>"""
+	# Self-contained override (unique skinName) -> no installed skin's "Tune"
+	# screen applies, which also removes the duplicated/ghosted title the default
+	# window decoration was drawing. wfNoBorder + solid background.
+	#
+	# Live signal works the same way Satfinder's "user defined transponder" does
+	# (replicated here, NOT imported, so there is no dependency on Satfinder
+	# being installed): the screen allocates its OWN frontend, drives it with a
+	# Tuner, and reads it through a FrontendStatus source feeding the gradient
+	# Progress bars. The positioner releases its frontend before opening this
+	# editor and reclaims it on return.
+	skin = ("""
+		<screen name="TNAP_TunerScreen" position="0,0" size="1920,1080" title="Tune" flags="wfNoBorder" backgroundColor="#00000000" resolution="1920,1080">
+			<eLabel position="0,0" size="1920,1080" backgroundColor="#00000000" zPosition="-2"/>
+
+			<widget source="Title" render="Label" position="30,22" size="1500,66" font="Regular;46" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left" noWrap="1"/>
+			<widget source="global.CurrentTime" render="Label" position="1430,18" size="460,56" font="Regular;46" foregroundColor="#00f0f0f0" transparent="1" halign="right" valign="center">
+				<convert type="ClockToText">Format:%H:%M</convert>
+			</widget>
+			<widget source="global.CurrentTime" render="Label" position="1230,78" size="660,40" font="Regular;30" foregroundColor="#00b6b6b6" transparent="1" halign="right" valign="center">
+				<convert type="ClockToText">Date</convert>
+			</widget>
+			<eLabel position="0,124" size="1920,2" backgroundColor="#00303030" zPosition="-1"/>
+
+			<widget source="Frontend" render="Progress" pixmap="__BAR__" position="30,150" size="1860,75" borderWidth="1" borderColor="#00808888" foregroundColor="#0056c856">
+				<convert type="FrontendInfo">SNR</convert>
+			</widget>
+			<eLabel text="SNR:" position="37,150" size="150,75" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
+			<widget source="Frontend" render="Label" position="1552,150" size="330,75" halign="right" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2">
+				<convert type="FrontendInfo">SNR</convert>
+			</widget>
+
+			<widget source="Frontend" render="Progress" pixmap="__BAR__" position="30,240" size="1860,75" borderWidth="1" borderColor="#00808888" foregroundColor="#0056c856">
+				<convert type="FrontendInfo">AGC</convert>
+			</widget>
+			<eLabel text="AGC:" position="37,240" size="150,75" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
+			<widget source="Frontend" render="Label" position="1552,240" size="330,75" halign="right" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2">
+				<convert type="FrontendInfo">AGC</convert>
+			</widget>
+
+			<eLabel text="SNR:" position="30,355" size="200,30" transparent="1" zPosition="5" font="Regular;27"/>
+			<widget source="Frontend" render="Label" position="30,385" size="410,95" font="Regular;78" halign="left" transparent="1">
+				<convert type="FrontendInfo">SNRdB</convert>
+			</widget>
+			<widget text="LOCK" source="Frontend" render="FixedLabel" position="30,520" size="410,70" font="Regular;56" halign="left" foregroundColor="#0056c856" transparent="1">
+				<convert type="FrontendInfo">LOCK</convert>
+				<convert type="ConditionalShowHide"/>
+			</widget>
+
+			<widget name="config" position="470,360" size="1420,520" itemHeight="49" font="Regular;40" valueFont="Regular;36" transparent="1" enableWrapAround="1" scrollbarMode="showOnDemand"/>
+			<widget name="introduction" position="470,905" size="1420,40" font="Regular;30" halign="center" valign="center" transparent="1" foregroundColor="#00F9C731"/>
+
+			<eLabel position="240,1035" size="30,30" backgroundColor="#00ff4a3c" zPosition="2"/>
+			<widget source="key_red" render="Label" position="285,1030" size="300,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
+			<eLabel position="620,1035" size="30,30" backgroundColor="#0056c856" zPosition="2"/>
+			<widget source="key_green" render="Label" position="665,1030" size="300,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
+		</screen>""".replace("__BAR__", _POS_BAR_PIXMAP))
+
+	STATUS_INTERVAL = 500		# ms, frontend-state poll (for retune-on-failure)
+	RETUNE_DEBOUNCE = 300		# ms, settle time after a config edit before retuning
 
 	def __init__(self, session, feid, fe_data):
 		self.feid = feid
 		self.fe_data = fe_data
+		self.frontend = None
+		self.raw_channel = None
+		self.tuner = None
 		Screen.__init__(self, session)
+		self.skinName = ["TNAP_TunerScreen"]
 		self.setTitle(_("Tune"))
 		ConfigListScreen.__init__(self, None)
 		self.createConfig(fe_data)
 		self.initialSetup()
 		self.createSetup()
+
+		# FrontendStatus polls our own frontend and feeds the gradient bars.
+		self["Frontend"] = FrontendStatus(frontend_source=lambda: self.frontend, update_interval=100)
+
+		self.statusTimer = eTimer()
+		self.statusTimer.callback.append(self._updateStatus)
+		self.retuneTimer = eTimer()
+		self.retuneTimer.callback.append(self._retune)
+
 		self.tuning.sat.addNotifier(self.tuningSatChanged)
 		self.tuning.type.addNotifier(self.tuningTypeChanged)
 		self.scan_sat.system.addNotifier(self.systemChanged)
+		# Re-tune live whenever a tuning field changes (digit entry doesn't go
+		# through keyLeft/keyRight). initial_call=False avoids firing at init.
+		for cfg in (self.scan_sat.frequency, self.scan_sat.symbolrate, self.scan_sat.polarization,
+					self.scan_sat.fec, self.scan_sat.fec_s2, self.scan_sat.inversion,
+					self.scan_sat.modulation):
+			cfg.addNotifier(self._onConfigChanged, initial_call=False)
 
 		self["actions"] = NumberActionMap(["SetupActions", "ColorActions"],
 		{
@@ -1561,6 +1729,64 @@ class TunerScreen(ConfigListScreen, Screen):
 		self["key_red"] = StaticText(_("Cancel"))
 		self["key_green"] = StaticText(_("OK"))
 		self["introduction"] = Label(_("Press OK, save and exit..."))
+
+		self.onClose.append(self._cleanup)
+		self.onLayoutFinish.append(self._prepareFrontend)
+
+	def _openFrontend(self):
+		try:
+			res_mgr = eDVBResourceManager.getInstance()
+			if res_mgr:
+				self.raw_channel = res_mgr.allocateRawChannel(self.feid)
+				if self.raw_channel:
+					self.frontend = self.raw_channel.getFrontend()
+					if self.frontend:
+						return True
+		except Exception as e:
+			print("[TunerScreen] openFrontend failed:", e)
+		return False
+
+	def _prepareFrontend(self):
+		if self._openFrontend():
+			self.tuner = Tuner(self.frontend, ignore_rotor=True)
+			self._retune()
+		self.statusTimer.start(self.STATUS_INTERVAL, True)
+
+	def _updateStatus(self):
+		# Keep retrying the current transponder if the demod drops/fails, so an
+		# edited (and momentarily invalid) transponder re-locks once it's valid.
+		if self.frontend is not None:
+			try:
+				d = {}
+				self.frontend.getFrontendStatus(d)
+				if d.get("tuner_state") in ("FAILED", "LOSTLOCK"):
+					self._retune()
+			except Exception:
+				pass
+		self.statusTimer.start(self.STATUS_INTERVAL, True)
+
+	def _onConfigChanged(self, *args):
+		self._scheduleRetune()
+
+	def _scheduleRetune(self):
+		if self.frontend is not None:
+			self.retuneTimer.start(self.RETUNE_DEBOUNCE, True)
+
+	def _retune(self):
+		if self.frontend is None or self.tuner is None:
+			return
+		try:
+			self.tuner.tune(self._buildTransponder())
+		except Exception:
+			pass	# bad/partial config while editing -- ignore, next edit retries
+
+	def _cleanup(self):
+		self.statusTimer.stop()
+		self.retuneTimer.stop()
+		self.frontend = None
+		if self.raw_channel:
+			del self.raw_channel
+			self.raw_channel = None
 
 	def createConfig(self, frontendData):
 		satlist = nimmanager.getRotorSatListForNim(self.feid)
@@ -1591,7 +1817,6 @@ class TunerScreen(ConfigListScreen, Screen):
 			"pls_mode": eDVBFrontendParametersSatellite.PLS_Gold,
 			"pls_code": eDVBFrontendParametersSatellite.PLS_Default_Gold_Code}
 		if frontendData is not None:
-			ttype = frontendData.get("tuner_type", "UNKNOWN")
 			defaultSat["system"] = frontendData.get("system", eDVBFrontendParametersSatellite.System_DVB_S)
 			_freq_khz = frontendData.get("frequency", 0)
 			defaultSat["frequency"] = _freq_khz // 1000
@@ -1747,19 +1972,20 @@ class TunerScreen(ConfigListScreen, Screen):
 
 	def keyLeft(self):
 		ConfigListScreen.keyLeft(self)
+		self._scheduleRetune()
 
 	def keyRight(self):
 		ConfigListScreen.keyRight(self)
+		self._scheduleRetune()
 
-	def keyGo(self):
-		returnvalue = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 1, -1)
+	def _buildTransponder(self):
 		satpos = int(self.tuning.sat.value)
 		if self.tuning.type.value == "manual_transponder":
 			if self.scan_sat.system.value == eDVBFrontendParametersSatellite.System_DVB_S2:
 				fec = self.scan_sat.fec_s2.value
 			else:
 				fec = self.scan_sat.fec.value
-			returnvalue = (
+			return (
 				self.scan_sat.frequency.floatint / 1000.0,
 				self.scan_sat.symbolrate.value,
 				self.scan_sat.polarization.value,
@@ -1775,11 +2001,13 @@ class TunerScreen(ConfigListScreen, Screen):
 				self.scan_sat.pls_code.value,
 				self.scan_sat.t2mi_plp_id.value,
 				self.scan_sat.t2mi_pid.value)
-		elif self.tuning.type.value == "predefined_transponder":
+		else:	# "predefined_transponder"
 			transponder = nimmanager.getTransponders(satpos)[self.tuning.transponder.index]
-			returnvalue = (transponder[1] / 1000.0, transponder[2] // 1000,
+			return (transponder[1] / 1000.0, transponder[2] // 1000,
 				transponder[3], transponder[4], 2, satpos, transponder[5], transponder[6], transponder[8], transponder[9], transponder[10], transponder[11], transponder[12], transponder[13], transponder[14])
-		self.close(returnvalue)
+
+	def keyGo(self):
+		self.close(self._buildTransponder())
 
 	def keyCancel(self):
 		self.close(None)

@@ -18,3 +18,8 @@ install_PYTHON = \
 	InputDeviceSetup.py DVD.py SoftwareUpdate.py AutoDiseqc.py InstallWizard.py ScreenSaver.py \
 	Hotkey.py StreamingClientsInfo.py SoftcamSetup.py FlashManager.py SetupFallbacktuner.py \
 	SkinSelector.py LogManager.py OScamInfo.py Time.py CronTimer.py OSDCalibration.py
+
+# TNAP: gradient signal-bar PNG used by the embedded TNAP_ServiceScan skin.
+# Resolved at runtime via os.path.dirname(__file__) in ServiceScan.py so the
+# path is always correct regardless of install prefix.
+install_DATA = signalbar.png

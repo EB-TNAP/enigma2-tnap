@@ -1,3 +1,26 @@
+# TNAP modifications to Components/ServiceScan.py:
+#
+# 1. FESignalReader — in-process DVB frontend reader (replaces the external
+#    dvbstat binary).  Opens the frontend O_RDONLY so it is safe alongside an
+#    active scan.  Handles two silicon families:
+#      - Octagon SF8008 blob: no DVB API5 stats; FE_READ_SNR is in 0.01 dB
+#        units with garbage sentinel values that must be filtered out.
+#      - Edision / proper drivers: DVB API5 DTV_STAT_CNR in real dB.
+#    The reader probes API5 first and falls back to the legacy ioctl path.
+#
+# 2. pollScanSignal / _takeTpSignal — a 300 ms eTimer samples SNR while the
+#    frontend is locked on each transponder so the scan report captures a
+#    reading taken during the actual lock rather than after the scanner has
+#    already retuned to the next transponder.
+#
+# 3. _updateLiveSignal — drives the on-screen SNR/AGC bars in the TNAP skin.
+#    No-ops when the optional slider/text widgets were not supplied, so the
+#    component remains compatible with vanilla callers.
+#
+# 4. onScanComplete callback list — fired once in execEnd() when all scan runs
+#    finish.  The Screen (Screens/ServiceScan.py) appends _scanComplete to this
+#    list to trigger the keep/discard dialog at the right moment.
+
 from enigma import eComponentScan, iDVBFrontend, eTimer
 from Components.NimManager import nimmanager as nimmgr
 from Components.About import about
@@ -78,6 +101,7 @@ if fileExists("/proc/stb/info/boxtype") and not fileExists("/proc/stb/info/hwmod
 
 FE_HAS_LOCK = 0x10
 SNR_GARBAGE_THRESHOLD = 15536	# legacy-path sentinel filter (Octagon blob)
+SNR_DB_FULL_SCALE = 20.0	# dB value mapped to 100% on the live SNR bar
 DTV_STAT_CNR = 63
 FE_SCALE_DECIBEL = 1
 _MAX_DTV_STATS = 4
@@ -454,10 +478,15 @@ class ServiceScan:
 		if self.state != self.Running or self.fereader is None:
 			return
 		status, snr, strength, cnr_db = self.fereader.read()
-		if status is None or not status & FE_HAS_LOCK:
-			return
 		if cnr_db is not None:
 			self.fereader.api5_seen = True
+		# Drive the on-screen live meter on every poll, locked or not, so the
+		# bars track acquisition. This must run BEFORE the capture lock-gate
+		# below (which returns early when unlocked).
+		self._updateLiveSignal(status, snr, strength, cnr_db)
+		# --- capture-for-report path (unchanged behaviour) ----------------
+		if status is None or not status & FE_HAS_LOCK:
+			return
 		# Zero stats while locked mean the estimator has not converged yet
 		# (seen on ultra-narrowband carriers on the Edision driver) - keep
 		# polling rather than capturing a meaningless 0.
@@ -502,7 +531,82 @@ class ServiceScan:
 		self.tp_locked_strength = None
 		return "Locked" if (isinstance(self.signaltp1, int) and self.signaltp1 & FE_HAS_LOCK) else "UnLocked"
 
-	def __init__(self, progressbar, text, servicelist, passNumber, scanList, network, transponder, frontendInfo, lcd_summary):
+	# ------------------------------------------------------------------
+	# TNAP modern ServiceScan: live signal meter + transponder plan.
+	# All of these are no-ops when their widgets were not supplied, so the
+	# component stays compatible with callers that do not pass them.
+	# ------------------------------------------------------------------
+	def _setBar(self, slider, percent):
+		if slider is None:
+			return
+		try:
+			v = int(percent)
+			if v < 0:
+				v = 0
+			elif v > 100:
+				v = 100
+			slider.setValue(v)
+		except:
+			pass
+
+	def _updateLiveSignal(self, status, snr, strength, cnr_db):
+		# Translate a raw frontend reading into on-screen SNR/AGC bars and
+		# text. Mirrors the Octagon-vs-Edision logic used for the report so
+		# the meter behaves correctly on both driver styles.
+		locked = bool(status is not None and status & FE_HAS_LOCK)
+		if not locked:
+			self._setBar(self.snrSlider, 0)
+			self._setBar(self.agcSlider, 0)
+			if self.snrText is not None:
+				self.snrText.setText("SNR ---")
+			if self.agcText is not None:
+				self.agcText.setText("AGC ---")
+			if self.lockText is not None:
+				self.lockText.setText(_("Searching..."))
+			return
+
+		# AGC / signal strength: register is a 0-65535 relative scale.
+		agc_pct = None
+		if strength:
+			agc_pct = strength * 100.0 / 65535.0
+		self._setBar(self.agcSlider, agc_pct if agc_pct is not None else 0)
+		if self.agcText is not None:
+			self.agcText.setText(("AGC %d%%" % int(agc_pct)) if agc_pct is not None else "AGC ---")
+
+		# SNR / quality.
+		snr_pct = None
+		snr_db = None
+		if cnr_db:
+			# API5 dB is authoritative for the text; bar from the relative
+			# register when present, otherwise map dB onto the bar scale.
+			snr_db = round(cnr_db, 2)
+			if snr:
+				snr_pct = snr * 100.0 / 65535.0
+			else:
+				snr_pct = snr_db * 100.0 / SNR_DB_FULL_SCALE
+		elif (status & 0x0F) or self.fereader.api5_seen:
+			# Edision-style intermediate path: register is relative 0-65535.
+			if snr:
+				snr_pct = snr * 100.0 / 65535.0
+		elif snr and snr < SNR_GARBAGE_THRESHOLD:
+			# Octagon-style bare-lock blob: register is 0.01 dB units.
+			snr_db = round(snr / 100.0, 2)
+			snr_pct = snr_db * 100.0 / SNR_DB_FULL_SCALE
+
+		self._setBar(self.snrSlider, snr_pct if snr_pct is not None else 0)
+		if self.snrText is not None:
+			if snr_db is not None:
+				self.snrText.setText("SNR %.1f dB" % snr_db)
+			elif snr_pct is not None:
+				self.snrText.setText("SNR %d%%" % int(snr_pct))
+			else:
+				self.snrText.setText("SNR ---")
+
+		if self.lockText is not None:
+			self.lockText.setText(_("Locked"))
+
+
+	def __init__(self, progressbar, text, servicelist, passNumber, scanList, network, transponder, frontendInfo, lcd_summary, snrSlider=None, snrText=None, agcSlider=None, agcText=None, lockText=None):
 		self.foundServices = 0
 		self.progressbar = progressbar
 		self.text = text
@@ -512,6 +616,15 @@ class ServiceScan:
 		self.frontendInfo = frontendInfo
 		self.transponder = transponder
 		self.network = network
+		# Optional live-signal widgets (TNAP modern ServiceScan). All default
+		# to None so older callers / other images keep working unchanged.
+		self.snrSlider = snrSlider
+		self.snrText = snrText
+		self.agcSlider = agcSlider
+		self.agcText = agcText
+		self.lockText = lockText
+		# Callbacks fired once, when the whole scan (all runs) has finished.
+		self.onScanComplete = []
 		self.run = 0
 		self.lcd_summary = lcd_summary
 		self.scan = None
@@ -614,6 +727,15 @@ class ServiceScan:
 		self.tp_locked_db = None
 		self.tp_locked_strength = None
 		self.signalpolltimer.start(300)
+		# Reset the live meter to a neutral "searching" state at scan start.
+		self._setBar(self.snrSlider, 0)
+		self._setBar(self.agcSlider, 0)
+		if self.snrText is not None:
+			self.snrText.setText("SNR ---")
+		if self.agcText is not None:
+			self.agcText.setText("AGC ---")
+		if self.lockText is not None:
+			self.lockText.setText(_("Searching..."))
 		err = self.scan.start(self.feid, self.flags, self.networkid)
 		self.frontendInfo.updateFrontendData()
 		if err:
@@ -638,6 +760,24 @@ class ServiceScan:
 			self.execBegin()
 		else:
 			self.state = self.Done
+			# Scan finished: settle the live meter so it does not show a
+			# stale reading from the last transponder.
+			self._setBar(self.snrSlider, 0)
+			self._setBar(self.agcSlider, 0)
+			if self.snrText is not None:
+				self.snrText.setText("SNR ---")
+			if self.agcText is not None:
+				self.agcText.setText("AGC ---")
+			if self.lockText is not None:
+				self.lockText.setText(_("Done"))
+			# Notify the screen that all runs are complete (drives the
+			# keep/discard prompt). Guarded so a bad callback can never
+			# break the scan teardown.
+			for cb in self.onScanComplete:
+				try:
+					cb()
+				except:
+					pass
 		if self.name != "":
 			self.network.setText(_("%s.  (%s)") % (self.network1, self.name) )
 		if self.start_time2 > 0:                                                                           

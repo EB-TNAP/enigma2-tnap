@@ -1113,7 +1113,7 @@ class NetworkInformation(InformationBase):
 				callback()
 
 	def isBlacklisted(self, interface):
-		for type in ("lo", "wifi", "wmaster", "sit", "tun", "sys", "p2p", "ip6_vti", "ip_vti", "ip6tn", "wg", "tap"):
+		for type in ("lo", "wifi", "wmaster", "sit", "tun", "sys", "p2p", "ip6_vti", "ip_vti", "ip6tn", "tap"):
 			if interface.startswith(type):
 				return True
 		return False

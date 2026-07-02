@@ -132,10 +132,12 @@ SERVICESCAN_SKIN = """
 		<eLabel position="910,158" size="980,2" backgroundColor="#00303030"/>
 		<widget name="servicelist" position="910,168" size="980,832" itemHeight="40" font="Regular;30" scrollbarMode="showOnDemand" transparent="1" foregroundColor="#00f0f0f0" backgroundColor="#00101010" backgroundColorSelected="#00313a46"/>
 
-		<eLabel position="30,1028" size="30,30" backgroundColor="#00ff4a3c"/>
-		<widget name="key_red" position="72,1022" size="320,42" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" verticalAlignment="center"/>
-		<eLabel position="410,1028" size="30,30" backgroundColor="#0056c856"/>
-		<widget name="key_green" position="452,1022" size="320,42" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" verticalAlignment="center"/>
+		<eLabel position="30,1026" size="36,36" backgroundColor="#0056c856" borderWidth="1" borderColor="#00348a34"/>
+		<widget name="key_green" position="80,1022" size="220,44" font="Regular;32" foregroundColor="#00f0f0f0" transparent="1" verticalAlignment="center" noWrap="1"/>
+		<eLabel text="OK" position="330,1026" size="70,36" backgroundColor="#00232323" borderWidth="1" borderColor="#00707070" font="Regular;26" foregroundColor="#00d0d0d0" horizontalAlignment="center" verticalAlignment="center"/>
+		<widget name="key_ok" position="416,1022" size="320,44" font="Regular;32" foregroundColor="#00f0f0f0" transparent="1" verticalAlignment="center" noWrap="1"/>
+		<eLabel position="766,1026" size="36,36" backgroundColor="#00ff4a3c" borderWidth="1" borderColor="#00a3312a"/>
+		<widget name="key_red" position="816,1022" size="240,44" font="Regular;32" foregroundColor="#00f0f0f0" transparent="1" verticalAlignment="center" noWrap="1"/>
 	</screen>""".replace("__BAR__", _BAR_PIXMAP).replace("__BOX__", BOX_NAME_XML)
 
 
@@ -249,27 +251,43 @@ class ServiceScan(Screen):
 			self.cancel()
 
 	def ok(self):
+		# At the keep/discard prompt, OK means "keep these results AND jump to the
+		# highlighted service". GREEN still keeps-and-closes, RED still discards.
+		# We must keep before we can zap: zapping needs reloadBouquets() to have
+		# made the "Last Scanned" bouquet live so enterUserbouquet() can find it.
 		if self._awaitingDecision:
-			self._keepResults(True)
+			self._keepResults(True, zap=True)
 			return
 		if self["scan"].isDone():
-			if self.currentInfobar.__class__.__name__ == "InfoBar":
-				selectedService = self["servicelist"].getCurrentSelection()
-				if selectedService and self.currentServiceList is not None:
-					self.currentServiceList.setTvMode()
-					bouquets = self.currentServiceList.getBouquetList()
-					last_scanned_bouquet = bouquets and next((x[1] for x in bouquets if x[0] == "Last Scanned"), None)
-					if last_scanned_bouquet:
-						self.currentServiceList.enterUserbouquet(last_scanned_bouquet)
-						self.currentServiceList.setCurrentSelection(eServiceReference(selectedService[1]))
-						service = self.currentServiceList.getCurrentSelection()
-						if not self.session.postScanService or service != self.session.postScanService:
-							self.session.postScanService = service
-							self.currentServiceList.addToHistory(service)
-						config.servicelist.lastmode.save()
-						self.currentServiceList.saveChannel(service)
-						self.doCloseRecursive()
+			self._zapToSelection()
+
+	def _zapToSelection(self):
+		# Tune the running InfoBar to the service highlighted in the found-services
+		# list, then close recursively so we land on that channel. Assumes the
+		# "Last Scanned" bouquet is already in memory (reloadBouquets() has run).
+		# Any path that cannot zap falls back to a plain close.
+		if self.currentInfobar is None or self.currentInfobar.__class__.__name__ != "InfoBar":
 			self.cancel()
+			return
+		selectedService = self["servicelist"].getCurrentSelection()
+		if not selectedService or self.currentServiceList is None:
+			self.cancel()
+			return
+		self.currentServiceList.setTvMode()
+		bouquets = self.currentServiceList.getBouquetList()
+		last_scanned_bouquet = bouquets and next((x[1] for x in bouquets if x[0] == "Last Scanned"), None)
+		if not last_scanned_bouquet:
+			self.cancel()
+			return
+		self.currentServiceList.enterUserbouquet(last_scanned_bouquet)
+		self.currentServiceList.setCurrentSelection(eServiceReference(selectedService[1]))
+		service = self.currentServiceList.getCurrentSelection()
+		if not self.session.postScanService or service != self.session.postScanService:
+			self.session.postScanService = service
+			self.currentServiceList.addToHistory(service)
+		config.servicelist.lastmode.save()
+		self.currentServiceList.saveChannel(service)
+		self.doCloseRecursive()
 
 	def cancel(self):
 		if self._awaitingDecision:
@@ -338,8 +356,13 @@ class ServiceScan(Screen):
 		self["servicelist"] = ScrollingList()
 
 		self["FrontendInfo"] = FrontendInfo()
+		# Footer key legend. During the scan only RED (Cancel) is active; the
+		# Keep / Keep & Watch / Discard choices are revealed in _scanComplete
+		# once results exist, so the footer never advertises a key that does
+		# nothing yet.
 		self["key_red"] = Label(_("Cancel"))
-		self["key_green"] = Label(_("OK"))
+		self["key_green"] = Label("")
+		self["key_ok"] = Label("")
 
 		self["actions"] = ActionMap(["SetupActions", "MenuActions", "DirectionActions", "NavigationActions", "ColorActions"],
 		{
@@ -399,12 +422,14 @@ class ServiceScan(Screen):
 		if found <= 0:
 			return
 		self._awaitingDecision = True
-		self["scan_state"].setText(_("Done — %d channel(s) found. Keep or Discard?") % found)
-		self["pass"].setText(_("Scroll list then press  GREEN = Keep   RED = Discard"))
+		self["scan_state"].setText(_("Done — %d channel(s) found.") % found)
+		self["pass"].setText(_("Scroll the list to a channel, then choose below."))
+		# Footer now reads: GREEN = Keep    OK = Keep & Watch    RED = Discard
 		self["key_green"].setText(_("Keep"))
+		self["key_ok"].setText(_("Keep & Watch"))
 		self["key_red"].setText(_("Discard"))
 
-	def _keepResults(self, keep):
+	def _keepResults(self, keep, zap=False):
 		self._awaitingDecision = False
 		db = eDVBDB.getInstance()
 		if db is None:
@@ -422,7 +447,10 @@ class ServiceScan(Screen):
 				except Exception:
 					pass
 			db.reloadBouquets()
-			self.cancel()
+			if zap:
+				self._zapToSelection()
+			else:
+				self.cancel()
 		else:
 			# Delete the three files that eComponentScan wrote, then restore the
 			# pre-scan snapshots from /tmp. Writing both lamedb and lamedb5 (same

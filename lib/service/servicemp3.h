@@ -269,21 +269,19 @@ public:
 
 	struct audioStream {
 		GstPad* pad;
-		audiotype_t type;
+		audiotype_t type = atUnknown;
 		std::string language_code; /* iso-639, if available. */
 		std::string codec; /* clear text codec description */
 		std::string title;
-		audioStream() : pad(0), type(atUnknown) {}
-		bool operator==(const audioStream& lhs) const {
-			return (lhs.type == type) && (lhs.language_code == language_code) && (lhs.codec == codec);
-		}
-		bool operator!=(const audioStream& lhs) const {
-			return (lhs.type != type) || (lhs.language_code != language_code) || (lhs.codec != codec);
-		}
+		audioStream() : pad(0) {}
+
+		bool operator==(const audioStream& rhs) const { return type == rhs.type && language_code == rhs.language_code && codec == rhs.codec; }
+
+		bool operator!=(const audioStream& rhs) const { return !(*this == rhs); }
 	};
 	struct subtitleStream {
 		GstPad* pad;
-		subtype_t type;
+		subtype_t type = stUnknown;
 		std::string language_code; /* iso-639, if available. */
 		std::string title;
 		subtitleStream() : pad(0) {}
@@ -295,15 +293,13 @@ public:
 		}
 	};
 	struct sourceStream {
-		audiotype_t audiotype;
-		containertype_t containertype;
-		gboolean is_audio;
-		gboolean is_video;
-		gboolean is_streaming;
-		gboolean is_hls;
-		sourceStream()
-			: audiotype(atUnknown), containertype(ctNone), is_audio(FALSE), is_video(FALSE), is_streaming(FALSE),
-			  is_hls(FALSE) {}
+		audiotype_t audiotype = atUnknown;
+		containertype_t containertype = ctNone;
+		gboolean is_audio = FALSE;
+		gboolean is_video = FALSE;
+		gboolean is_streaming = FALSE;
+		gboolean is_hls = FALSE;
+		sourceStream() {}
 	};
 	struct bufferInfo {
 		gint bufferPercent;

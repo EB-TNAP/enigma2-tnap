@@ -96,6 +96,11 @@ namespace DVB_S2_MODCOD
 	};
 }
 
+#define ioctlMeasureStart \
+	struct timeval start = {}, end = {}; \
+	int duration = 0; \
+	if (m_debuglevel==5) { gettimeofday(&start, NULL); }
+
 // The namespace alias is no longer needed as we're fixing the classes in idvb.h
 
 #define eDebugNoSimulate(x...) \

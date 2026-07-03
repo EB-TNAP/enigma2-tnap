@@ -243,6 +243,13 @@ class Navigation:
 		if self.getstandby != 1 and not self.skipWakeup:
 			self.gotopower()
 
+	def isRestartUI(self):
+		result = config.misc.RestartUI.value
+		if result:
+			config.misc.RestartUI.value = False
+			config.misc.RestartUI.save()
+		return result
+
 	def wasTimerWakeup(self):
 		return self.__wasTimerWakeup
 

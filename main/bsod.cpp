@@ -69,15 +69,28 @@ static void getKlog(FILE* f)
 
 	std::vector<char> buf(len, 0);
 
-	len = klogctl(4, &buf[0], len); /* read and clear ring buffer */
+	/* TNAP: klogctl(3) = SYSLOG_ACTION_READ_ALL, NON-destructive.
+	 * The old klogctl(4) read-and-CLEARED the kernel ring buffer, which
+	 * meant (a) any second crash in the same boot got an empty dmesg
+	 * section, and (b) the post-crash "dmesg > dmesg_post_*.log" capture
+	 * in enigma2.sh always read an empty buffer. */
+	len = klogctl(3, &buf[0], len);
 	if (len == -1)
 	{
 		fprintf(f, "Error reading klog %d - %m\n", errno);
 		return;
 	}
+	else if (len == 0)
+	{
+		fprintf(f, "(kernel log empty - drained by a syslog daemon?)\n");
+		return;
+	}
 
-	buf.resize(len);
-	fprintf(f, "%s\n", &buf[0]);
+	/* fwrite, not fprintf("%s"): the old code dereferenced &buf[0] after a
+	 * possible resize(0) (UB) and relied on leftover zero-fill for the NUL
+	 * terminator. */
+	fwrite(buf.data(), 1, (size_t)len, f);
+	fputc('\n', f);
 }
 
 static void stringFromFile(FILE* f, const char* context, const char* filename)
@@ -167,13 +180,23 @@ void bsodFatal(const char *component)
 	const char* logp2 = NULL;
 	unsigned int logs2 = 0;
 	retrieveLogBuffer(&logp1, &logs1, &logp2, &logs2);
-	/* We need a copy to clearRingBuffer */
-	char logb1[logs1+1];
-	char logb2[logs2+1];
-	memcpy(logb1, logp1, logs1);
-	memcpy(logb2, logp2, logs2);
-	logp1 = logb1;
-	logp2 = logb2;
+	/* We need a copy to clearRingBuffer. TNAP: static buffers, NOT stack
+	 * VLAs - bsodFatal also runs from handleFatalSignal() on a possibly
+	 * corrupted stack, where a large VLA (up to 2x RINGBUFFER_SIZE) is a
+	 * reliable way to double-fault and truncate the crash log mid-write.
+	 * Single-shot use is already serialized by the bsodhandled guard. */
+	static char logb1[RINGBUFFER_SIZE];
+	static char logb2[RINGBUFFER_SIZE];
+	if (logp1)
+	{
+		memcpy(logb1, logp1, logs1);
+		logp1 = logb1;
+	}
+	if (logp2)
+	{
+		memcpy(logb2, logp2, logs2);
+		logp2 = logb2;
+	}
 
 	FILE *f;
 	std::string crashlog_name;
@@ -236,6 +259,12 @@ void bsodFatal(const char *component)
 			enigma2_branch,
 			enigma2_rev,
 			component);
+
+		/* TNAP: triage aids. debuglevel tells us instantly whether the box
+		 * ran at the default level; crashcount exposes the bsodpython
+		 * counter (a count > 1 means the ring buffer only covers activity
+		 * since the previous crash of this same enigma2 process). */
+		fprintf(f, "debuglevel=%d\ncrashcount=%d\n", debugLvl, bsodcnt);
 
 		eModelInformation &modelinformation = eModelInformation::getInstance();
 

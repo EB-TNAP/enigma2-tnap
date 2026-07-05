@@ -90,7 +90,7 @@ static pthread_mutex_t DebugLock =
     PTHREAD_MUTEX_INITIALIZER;
 #endif
 
-#define RINGBUFFER_SIZE 16384
+/* RINGBUFFER_SIZE now lives in eerror.h (shared with bsod.cpp) - TNAP */
 static char ringbuffer[RINGBUFFER_SIZE];
 static unsigned int ringbuffer_head;
 static void logOutput(const char *data, unsigned int len)
@@ -201,10 +201,16 @@ void eDebugImpl(int flags, const char* fmt, ...)
 		buf[pos++] = '\n';
 	}
 
+	/* TNAP: always capture to the in-memory ring buffer so crash logs
+	 * carry full context; the runtime debug level (from ENIGMA_DEBUG_LVL /
+	 * config.crash.debugLevel) only gates the console write below. */
 	logOutput(buf, pos);
 
-	ssize_t ret = ::write(2, buf, pos);
-	if (ret < 0) (void)ret;
+	int lvl = (flags & _DBGFLG_LVLMASK) >> _DBGFLG_LVLSHIFT;
+	if (lvl <= debugLvl) {
+		ssize_t ret = ::write(2, buf, pos);
+		if (ret < 0) (void)ret;
+	}
 
 	delete[] buf;
 	if (flags & _DBGFLG_FATAL)
@@ -213,10 +219,12 @@ void eDebugImpl(int flags, const char* fmt, ...)
 
 void ePythonOutput(const char *string, int lvl)
 {
-#ifdef DEBUG
-	if (debugLvl >= lvl)
-		eDebugImpl(_DBGFLG_NONEWLINE, "%s", string);
-#endif
+	/* TNAP: deliberately NOT wrapped in #ifdef DEBUG and NOT pre-gated on
+	 * debugLvl. Python tracebacks arrive here (sys.stderr -> EnigmaLogFatal,
+	 * lvl 1) and MUST land in the ring buffer / crash log in every build
+	 * configuration. eDebugImpl applies the runtime level gate to the
+	 * console write, so visible output behaviour is unchanged. */
+	eDebugImpl(_DBGFLG_NONEWLINE | _DBGFLG_LVL(lvl), "%s", string);
 }
 
 int eGetEnigmaDebugLvl()

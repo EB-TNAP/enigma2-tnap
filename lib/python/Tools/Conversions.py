@@ -62,6 +62,12 @@ def formatNetworkSpeed(speedMbps):
 	return f"{speedMbps} Mbps"
 
 
+def formatNetworkSpeed(speedMbit: int) -> str:
+	if speedMbit >= 1000:
+		return f"{speedMbit // 1000} Gbit/s"
+	return f"{speedMbit} Mbit/s"
+
+
 class UnitMultipliers:
 	Si = (
 		("", 10 ** 0),

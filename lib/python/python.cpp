@@ -148,6 +148,84 @@ int ePython::execFile(const char *file)
 	return ret;
 }
 
+/* TNAP: emit the pending Python exception directly into the enigma2 log
+ * (and therefore the crash-log ring buffer) at lvlError, WITHOUT relying on
+ * sys.stderr. Twisted's log.startLogging() (StartEnigma.py) and various
+ * plugins replace sys.stdout/sys.stderr, which silently diverted
+ * PyErr_Print() tracebacks away from ePythonOutput - the reason crash logs
+ * carried no traceback for years. Like PyErr_Print(), the error indicator
+ * is cleared. Falls back to PyErr_Print() if formatting fails. Caller must
+ * hold the GIL (true at every call site below). */
+static bool ePyEmitTracebackLines(PyObject *lines)
+{
+	if (!lines || !PyList_Check(lines))
+		return false;
+	Py_ssize_t n = PyList_Size(lines);
+	for (Py_ssize_t i = 0; i < n; ++i)
+	{
+		const char *s = PyUnicode_AsUTF8(PyList_GetItem(lines, i));
+		if (s)
+			eDebugImpl(_DBGFLG_NONEWLINE | _DBGFLG_LVL(lvlError), "%s", s);
+	}
+	return true;
+}
+
+static void ePyLogException()
+{
+	if (!PyErr_Occurred())
+		return;
+
+	/* fetch the exception BEFORE any other Python API call: even a cached
+	 * PyImport_ImportModule() destroys the pending error indicator */
+#if PY_VERSION_HEX >= 0x030C0000
+	PyObject *exc = PyErr_GetRaisedException();
+	PyObject *tbmod = PyImport_ImportModule("traceback");
+	PyErr_Clear(); /* the import itself may have raised */
+	PyObject *lines = NULL;
+	if (tbmod && exc)
+		lines = PyObject_CallMethod(tbmod, "format_exception", "(O)", exc);
+	if (ePyEmitTracebackLines(lines))
+	{
+		PyErr_Clear(); /* formatting may have raised */
+		Py_XDECREF(exc);
+	}
+	else
+	{
+		PyErr_Clear();
+		if (exc)
+			PyErr_SetRaisedException(exc); /* steals the reference */
+		if (PyErr_Occurred())
+			PyErr_Print();
+	}
+#else
+	PyObject *ptype = NULL, *pvalue = NULL, *ptb = NULL;
+	PyErr_Fetch(&ptype, &pvalue, &ptb);
+	PyErr_NormalizeException(&ptype, &pvalue, &ptb);
+	PyObject *tbmod = PyImport_ImportModule("traceback");
+	PyErr_Clear(); /* the import itself may have raised */
+	PyObject *lines = NULL;
+	if (tbmod && ptype)
+		lines = PyObject_CallMethod(tbmod, "format_exception", "(OOO)",
+			ptype, pvalue ? pvalue : Py_None, ptb ? ptb : Py_None);
+	if (ePyEmitTracebackLines(lines))
+	{
+		PyErr_Clear();
+		Py_XDECREF(ptype);
+		Py_XDECREF(pvalue);
+		Py_XDECREF(ptb);
+	}
+	else
+	{
+		PyErr_Clear();
+		PyErr_Restore(ptype, pvalue, ptb); /* steals the references */
+		if (PyErr_Occurred())
+			PyErr_Print();
+	}
+#endif
+	Py_XDECREF(lines);
+	Py_XDECREF(tbmod);
+}
+
 int ePython::execute(const std::string &pythonfile, const std::string &funcname)
 {
 	ePyObject pName, pModule, pDict, pFunc, pArgs, pValue;
@@ -175,14 +253,14 @@ int ePython::execute(const std::string &pythonfile, const std::string &funcname)
 			} else
 			{
 				Py_DECREF(pModule);
-				PyErr_Print();
+				ePyLogException();
 				return 1;
 			}
 		}
 	} else
 	{
 		if (PyErr_Occurred())
-			PyErr_Print();
+			ePyLogException();
 		return 1;
 	}
 	return 0;
@@ -204,7 +282,7 @@ int ePython::call(ePyObject pFunc, ePyObject pArgs)
 			Py_DECREF(pValue);
 		} else
 		{
-		 	PyErr_Print();
+		 	ePyLogException();
 			ePyObject FuncStr = PyObject_Str(pFunc);
 			ePyObject ArgStr = PyObject_Str(pArgs);
 			eDebug("[ePyObject] (PyObject_CallObject(%s,%s) failed)", PyUnicode_AsUTF8(FuncStr), PyUnicode_AsUTF8(ArgStr));
@@ -236,6 +314,6 @@ ePyObject ePython::resolve(const std::string &pythonfile, const std::string &fun
 		Py_XINCREF(pFunc);
 		Py_DECREF(pModule);
 	} else if (PyErr_Occurred())
-		PyErr_Print();
+		ePyLogException();
 	return pFunc;
 }

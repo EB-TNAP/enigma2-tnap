@@ -153,10 +153,15 @@ enigma.eProfileWrite("Plugin")
 
 from twisted.python import log
 config.misc.enabletwistedlog = ConfigYesNo(default=False)
+# setStdout=False keeps sys.stdout/sys.stderr on Tools/RedirectOutput, so
+# Python tracebacks reach ePythonOutput and the crash-log ring buffer.
+# Twisted's default (setStdout=1) replaces both with its own proxies, which
+# diverted every traceback away from crash logs (into /tmp/twisted.log when
+# enabletwistedlog is on, or demoted/timestamped when off).
 if config.misc.enabletwistedlog.value == True:
-	log.startLogging(open('/tmp/twisted.log', 'w'))
+	log.startLogging(open('/tmp/twisted.log', 'w'), setStdout=False)
 else:
-	log.startLogging(sys.stdout)
+	log.startLogging(sys.stdout, setStdout=False)
 
 # initialize autorun plugins and plugin menu entries
 from Components.PluginComponent import plugins

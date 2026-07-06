@@ -274,13 +274,13 @@ class ServiceScan:
 				message += ngettext(" of %d)" , "of %d)", total) % total
 				#TRANSLATORS: Intermediate scanning result, '%d' channel(s) have been found so far
 				message += ngettext("  Channels Found = %d", "  Channels Found = %d", result) % result
-				if self.l == 1 and tpnumb > 1: 
+				if self.l == 1 and tpnumb > 1:
 					tpstatus = self._takeTpSignal()
 
 					try:
 						xml = "\n< Transponder SNR =['%s' raw=%s -%s], Strength = %.1f%% >\n< %s /> " %(self.signaltp, self.signaltp3, tpstatus, self.signaltp2, strftime("%a, %d %b %Y %H:%M:%S", localtime()))
-						f = open(self.location, "a")
-						f.writelines(xml)
+						with open(self.location, "a") as f:
+							f.writelines(xml)
 					except:
 						print("Non-Satellite Scan!")
 				self.t = self.t+1
@@ -399,39 +399,56 @@ class ServiceScan:
 					    if os.path.exists("/media/usb/ServiceScan"):
 						    self.xml_dir = "/media/usb/ServiceScan"
 					    if os.path.exists("/media/FTA/ServiceScan"):
-						    self.xml_dir = "/media/FTA/ServiceScan" 
+						    self.xml_dir = "/media/FTA/ServiceScan"
 					    if os.path.exists("/media/hdd/ServiceScan"):
 						    self.xml_dir = "/media/hdd/ServiceScan"
 					except:
 					    self.xml_dir = "/tmp"                                                                                                                                                                                              ##
 					self.location = '%s/%s_Scan-Report_%s' %(self.xml_dir, self.network1, strftime("%d-%m-%Y_%H-%M-%S"))
 					self.l = 1
-					xml = ['                         Scan Report \n\n']
-					xml.append ('< File created on %s > \n' %(strftime("%A, %B %d, %Y at %H:%M:%S")))
-					xml.append ("< Satellite =  %s >\n" % network) 
-					xml.append ("< Receiver = %s %s >\n" %(BOX_MODEL, BOX_NAME))
+					# This method runs as a C++ signal callback: any exception that
+					# escapes it brings the whole of enigma2 down (green screen).
+					# The scan report is a nice-to-have, so no report I/O may ever
+					# propagate an error into the scan itself.
 					try:
-					    xml.append ('< Enigma2 Image = %s > \n' % (about.getImageTypeString()))
+						xml = ['                         Scan Report \n\n']
+						xml.append ('< File created on %s > \n' %(strftime("%A, %B %d, %Y at %H:%M:%S")))
+						xml.append ("< Satellite =  %s >\n" % network)
+						xml.append ("< Receiver = %s %s >\n" %(BOX_MODEL, BOX_NAME))
+						try:
+						    xml.append ('< Enigma2 Image = %s > \n' % (about.getImageTypeString()))
+						except:
+						    xml.append ('< Enigma2 Image = unknown > \n')
+						try:
+							xml.append ('< Kernel Version = %s > \n' % (about.getKernelVersionString()))
+							xml.append ('< DVB Driver Date = %s > \n' % (about.getDriverInstalledDate()))
+						except:
+							pass
+						xml.append ('< Blindscan Frequency Range = %s to %s MHz > \n' % (self.freq1, self.freq2))
+						xml.append ('< Blindscan Symbol Rate Range = %s to %s Msps > \n' % (self.symbol1, self.symbol2))
+						xml.append ('< Blindscan Only Free Channels or Services? = %s  > \n' % (self.free))
+						if self.tuner != "":
+						    xml.append ("< Tuner = %s >\n" % self.tuner)
+						with open(self.location, "w") as f:
+							f.writelines(xml)
 					except:
-					    from boxbranding import getImageVersion
-					    xml.append ('< Enigma2 Image = %s > \n' % (getImageVersion()))
-					xml.append ('< Kernel Version = %s > \n' % (about.getKernelVersionString()))
-					xml.append ('< DVB Driver Date = %s > \n' % (about.getDriverInstalledDate()))
-					xml.append ('< Blindscan Frequency Range = %s to %s MHz > \n' % (self.freq1, self.freq2))
-					xml.append ('< Blindscan Symbol Rate Range = %s to %s Msps > \n' % (self.symbol1, self.symbol2))
-					xml.append ('< Blindscan Only Free Channels or Services? = %s  > \n' % (self.free))
-					if self.tuner != "":
-					    xml.append ("< Tuner = %s >\n" % self.tuner)
-					f = open(self.location, "w")
-					f.writelines(xml)
+						print("[ServiceScan] could not create scan report %s" % self.location)
 
 				if tpnumb != 0:                                                                                                                                                                                                ##
-					f = open(self.location, "a")
-					xml = "\n\n< '%s' > Tp# %s" %(tp_text, tpnumb)
-					f.writelines(xml)
+					try:
+						xml = "\n\n< '%s' > Tp# %s" %(tp_text, tpnumb)
+						with open(self.location, "a") as f:
+							f.writelines(xml)
+					except:
+						print("[ServiceScan] could not append to scan report")
 				self.network.setText(network)
 				self.transponder.setText(tp_text)
-		if self.state == self.DonePartially:
+		# The C++ scanner can emit further statusChanged events during the
+		# 100ms delaytimer window after completion; without this guard the
+		# block below would run again, double-counting foundServices and
+		# re-trying the report rename (which then flashes "Scan Error!!").
+		if self.state == self.DonePartially and not self._runDoneProcessed:
+			self._runDoneProcessed = True
 			runtime = int(time()) - int(self.start_time)
 			runtime = runtime + self.start_time1
 			self.foundServices += self.scan.getNumServices()
@@ -628,6 +645,8 @@ class ServiceScan:
 		self.run = 0
 		self.lcd_summary = lcd_summary
 		self.scan = None
+		self._runDoneProcessed = False  # completion block ran for current run
+		self._tt_counted_run = -1  # last run index counted into self.tt
 		self.delaytimer = eTimer()
 		self.delaytimer.callback.append(self.execEnd)
 		self.t = 0
@@ -696,12 +715,18 @@ class ServiceScan:
 
 		self.networkid = 0
 		if "networkid" in self.scanList[self.run]:
-			self.networkid = self.scanList[self.run]["networkid"]			
+			self.networkid = self.scanList[self.run]["networkid"]
 		self.state = self.Idle
+		self._runDoneProcessed = False
 		self.scanStatusChanged()
+		# Only count this run's transponders into the total once: doRun() runs
+		# again for the same run when the screen is suspended and resumed.
+		count_this_run = self._tt_counted_run != self.run
 		for x in self.scanList[self.run]["transponders"]:
-			self.tt = self.tt+1
+			if count_this_run:
+				self.tt = self.tt+1
 			self.scan.addInitial(x)
+		self._tt_counted_run = self.run
 
 	def updatePass(self):
 		size = len(self.scanList)
@@ -755,6 +780,13 @@ class ServiceScan:
 		self.scan.statusChanged.get().remove(self.scanStatusChanged)
 		self.scan.newService.get().remove(self.newService)
 		self.scan = None
+		if self.state == self.Running:
+			# execEnd() arrived while the run was still scanning: the Screen
+			# was closed or suspended (a dialog opened on top of it), not the
+			# scan finishing. Do not start the next run or declare completion
+			# here - that would launch a new scan on a hidden/closing screen.
+			self.state = self.Idle
+			return
 		if self.run != len(self.scanList) - 1:
 			self.run += 1
 			self.execBegin()
@@ -790,9 +822,10 @@ class ServiceScan:
 		return self.state == self.Done or self.state == self.Error
 
 	def newService(self):
+		# Runs as a C++ signal callback: an exception escaping here takes all
+		# of enigma2 down (green screen). Keep the GUI update unconditional and
+		# make sure the report bookkeeping can never raise.
 		NoName = "NoName"
-		UnknownService ="(UnKnown Service)"
-		f = open(self.location, "a")
 		self.signal =""
 		# prefer the background sampler's capture for the tp being scanned;
 		# instantaneous reads can hit the estimator before it has converged
@@ -806,25 +839,29 @@ class ServiceScan:
 		newServiceRef = self.scan.getLastServiceRef()
 		if newServiceName =="":
 			newServiceName = newServiceName + NoName
-		if newServiceRef[4] >= "2.1":                                
-			if newServiceRef[4] !="B":
-			    if newServiceRef[4] !="C":
-			        if newServiceRef[4] !="A":
-			            newServiceName += " --- UnKnown Service Type %s%s" %(newServiceRef[4],newServiceRef[5] )
-		if newServiceRef[4] == "2" or newServiceRef[4] == "A":
-			self.r = self.r + 1                                                                    
-			newServiceName += ("   (Radio #%d)" % self.r)
+		# eDVBScan::getLastServiceRef() returns "" when it has no last service,
+		# so never index the ref without checking its length first.
+		if len(newServiceRef) > 5:
+			if newServiceRef[4] >= "2.1":
+				if newServiceRef[4] !="B":
+				    if newServiceRef[4] !="C":
+				        if newServiceRef[4] !="A":
+				            newServiceName += " --- UnKnown Service Type %s%s" %(newServiceRef[4],newServiceRef[5] )
+			if newServiceRef[4] == "2" or newServiceRef[4] == "A":
+				self.r = self.r + 1
+				newServiceName += ("   (Radio #%d)" % self.r)
 		try:
-			if BOX_MODEL == "edision":
-			    xml = ('\n< [%s] %s  %s SNR = %.2f  /> '% (self.y, newServiceName, newServiceRef, self.signal))
-			if BOX_MODEL != "edision":
-			    xml = ('\n< [%s] %s  %s SNR = %s  /> '% (self.y, newServiceName, newServiceRef, self.signal))
+			try:
+				if BOX_MODEL == "edision":
+				    xml = ('\n< [%s] %s  %s SNR = %.2f  /> '% (self.y, newServiceName, newServiceRef, self.signal))
+				if BOX_MODEL != "edision":
+				    xml = ('\n< [%s] %s  %s SNR = %s  /> '% (self.y, newServiceName, newServiceRef, self.signal))
+			except:
+				xml = ('\n< [%s] %s  %s  /> '% (self.y, newServiceName, newServiceRef))
+			with open(self.location, "a") as f:
+				f.writelines(xml)
 		except:
-			if BOX_MODEL == "edision":
-			    xml = ('\n< [%s] %s  %s  /> '% (self.y, newServiceName, newServiceRef))
-			if BOX_MODEL != "edision":
-			    xml = ('\n< [%s] %s  %s  /> '% (self.y, newServiceName, newServiceRef))
-		f.writelines(xml)
+			print("[ServiceScan] could not append service to scan report")
 		self.y = self.y + 1
 		self.servicelist.addItem((newServiceName, newServiceRef))
 		self.lcd_summary and self.lcd_summary.updateService(newServiceName)

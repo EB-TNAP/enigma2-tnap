@@ -3053,6 +3053,9 @@ msgstr "Keela taimer"
 msgid "Disabled"
 msgstr "Keelatud"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Salvestistele tagatud kettaruum (GB)"
 
@@ -3281,6 +3284,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Valmis - paigaldatud, täiendatud või eemaldatud %d pakett (%s)"
 msgstr[1] "Valmis - paigaldatud, täiendatud või eemaldatud %d paketti (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5259,6 +5265,12 @@ msgstr "Ka-SAT"
 
 msgid "Kazakhstan"
 msgstr "Kasahstan"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Jää teenusele"
@@ -8278,6 +8290,9 @@ msgstr "Liigutamise viide"
 msgid "Scroll repeats"
 msgstr "Liigutamise kordused"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 #, fuzzy
 msgid "Search"
 msgstr "Otsing"
@@ -8840,6 +8855,9 @@ msgstr "Teenuse nimi"
 
 msgid "Services"
 msgstr "Kanalid"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

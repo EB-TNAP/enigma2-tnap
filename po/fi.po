@@ -3349,6 +3349,9 @@ msgstr "Poista tämä ajastus käytöstä"
 msgid "Disabled"
 msgstr "Ei käytössä"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Tallennuksille varattu levytila (GB)"
 
@@ -3612,6 +3615,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Valmis - asennettu, päivitetty tai poistettu %d ohjelmapaketti (%s)"
 msgstr[1] "Valmis - asennettu, päivitetty tai poistettu %d ohjelmapakettia (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5778,6 +5784,12 @@ msgstr "KA-SAT (9°E)"
 
 msgid "Kazakhstan"
 msgstr "Kasakstan"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 #
 msgid "Keep service"
@@ -9207,6 +9219,9 @@ msgstr ""
 msgid "Scroll repeats"
 msgstr ""
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr "Etsi"
 
@@ -9836,6 +9851,9 @@ msgstr ""
 #
 msgid "Services"
 msgstr "Palvelut"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

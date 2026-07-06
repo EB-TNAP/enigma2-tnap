@@ -3117,6 +3117,9 @@ msgstr "Matikan pewaktu"
 msgid "Disabled"
 msgstr "Dimatikan"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Alokasikan space harddisk untuk merekam (dalam GB)"
 
@@ -3348,6 +3351,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Selesai - Terpasang, dinaiktingkatkan atau dihapus %d paket (%s)"
 msgstr[1] "Selesai - Terpasang, dinaiktingkatkan atau dihapus %d paket (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5380,6 +5386,12 @@ msgstr "KA-SAT"
 
 msgid "Kazakhstan"
 msgstr "Kazakhstan"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Tetap pada layanan"
@@ -8448,6 +8460,9 @@ msgstr "Tunda gulir"
 msgid "Scroll repeats"
 msgstr "Ulang gulir"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 #, fuzzy
 msgid "Search"
 msgstr "Mencari"
@@ -9014,6 +9029,9 @@ msgstr "Nama layanan"
 
 msgid "Services"
 msgstr "Layanan"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

@@ -3489,6 +3489,9 @@ msgstr "Izklop časovnika"
 msgid "Disabled"
 msgstr "Onemogočeno"
 
+msgid "Discard"
+msgstr ""
+
 #
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Prostor na disku rezerviran za snemanje (v GB)"
@@ -3762,6 +3765,9 @@ msgstr[0] "Končano - nameščen, nadgrajen ali izbrisan je bil %d paket (%s)."
 msgstr[1] "Končano - nameščena, nadgrajena ali izbrisana sta bila %d paketa (%s)."
 msgstr[2] "Končano - nameščeni, nadgrajeni ali izbrisani so bili %d paketi (%s)."
 msgstr[3] "Končano - nameščenih, nadgrajenih ali izbrisanih je bilo %d paketov (%s)."
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -6015,6 +6021,12 @@ msgid "KA-SAT"
 msgstr ""
 
 msgid "Kazakhstan"
+msgstr ""
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
 msgstr ""
 
 #
@@ -9536,6 +9548,9 @@ msgstr ""
 msgid "Scroll repeats"
 msgstr ""
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 #, fuzzy
 msgid "Search"
 msgstr "Iskanje"
@@ -10192,6 +10207,9 @@ msgstr ""
 #
 msgid "Services"
 msgstr "Kanali"
+
+msgid "Services found"
+msgstr ""
 
 #
 #, fuzzy, python-format

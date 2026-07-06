@@ -3103,6 +3103,9 @@ msgstr ""
 msgid "Disabled"
 msgstr "ไม่ใช้งาน"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr ""
 
@@ -3338,6 +3341,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "เสร็จแล้ว - ติดตั้งปรับปรุงหรือลบ %d รายการ พบข้อผิดพลาด %d รายการ"
 msgstr[1] "เสร็จแล้ว - ติดตั้งปรับปรุงหรือลบ %d รายการ พบข้อผิดพลาด %d รายการ"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5338,6 +5344,12 @@ msgid "KA-SAT"
 msgstr ""
 
 msgid "Kazakhstan"
+msgstr ""
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
 msgstr ""
 
 msgid "Keep service"
@@ -8445,6 +8457,9 @@ msgstr ""
 msgid "Scroll repeats"
 msgstr ""
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 #, fuzzy
 msgid "Search"
 msgstr "ค้นหาทางทิศตะวันออก"
@@ -9024,6 +9039,9 @@ msgstr ""
 
 msgid "Services"
 msgstr "บริการต่างๆ"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

@@ -3039,6 +3039,9 @@ msgstr "Išjungti laikmatį"
 msgid "Disabled"
 msgstr "Išjungtas"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Įrašams rezervuota disko apimtis (GB)"
 
@@ -3266,6 +3269,9 @@ msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Baigta - įdiegtas, atnaujintas, ar pašalintas %d paketas (%s)"
 msgstr[1] "Baigta - įdiegti, atnaujinti ar pašalinti %d paketai (%s)"
 msgstr[2] "Baigta - įdiegta,atnaujinta ar pašalinta %d paketų (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5213,6 +5219,12 @@ msgstr "KA-PALYDOVAS"
 
 msgid "Kazakhstan"
 msgstr "Kazachstanas"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Išlaikyti kanalą"
@@ -8200,6 +8212,9 @@ msgstr "Slinkties delsa"
 msgid "Scroll repeats"
 msgstr "Slinktis kartojasi"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr "Paieška"
 
@@ -8745,6 +8760,9 @@ msgstr "Kanalo pavadinimas"
 
 msgid "Services"
 msgstr "Kanalai"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

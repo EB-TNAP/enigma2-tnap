@@ -3163,6 +3163,9 @@ msgstr "Timer uitschakelen"
 msgid "Disabled"
 msgstr "Gedéactiveerd"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Te reserveren schijfruimte voor opnames (in GB)"
 
@@ -3395,6 +3398,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Gereed - %d pakket geïnstalleerd, vervangen of verwijderd (%s)"
 msgstr[1] "Gereed - %d pakketten geïnstalleerd, vervangen of verwijderd (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5326,6 +5332,12 @@ msgstr "KA-SAT"
 
 msgid "Kazakhstan"
 msgstr "Kazachstan"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Blijf op de huidige zender"
@@ -8320,6 +8332,9 @@ msgstr "Scroll vertraging"
 msgid "Scroll repeats"
 msgstr "Scroll herhalingen"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr "Zoeken"
 
@@ -8856,6 +8871,9 @@ msgstr "Zendernaam"
 
 msgid "Services"
 msgstr "Zenders"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

@@ -3006,6 +3006,9 @@ msgstr "Vypnúť časovač"
 msgid "Disabled"
 msgstr "Vypnuté"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Miesto na disku rezervované pre nahrávky (v GB)"
 
@@ -3229,6 +3232,9 @@ msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Hotovo - Nainštalovaný, aktualizovaný alebo odstránený %d balíček (%s)"
 msgstr[1] "Hotovo - Nainštalové, aktualizované alebo odstránené %d balíčky (%s)"
 msgstr[2] "Hotovo - Nainštalovaných, aktualizovaných alebo odstránených %d balíčkov (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5144,6 +5150,12 @@ msgstr "KA-SAT"
 
 msgid "Kazakhstan"
 msgstr "Kazachstan"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Ponechať stanicu"
@@ -8106,6 +8118,9 @@ msgstr "Oneskorenie rolovania"
 msgid "Scroll repeats"
 msgstr "Opakovanie rolovania"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr "Vyhľadať"
 
@@ -8638,6 +8653,9 @@ msgstr "Názov stanice"
 
 msgid "Services"
 msgstr "Stanice"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

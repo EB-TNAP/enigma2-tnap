@@ -3022,6 +3022,9 @@ msgstr "Tắt bộ hẹn giờ"
 msgid "Disabled"
 msgstr "Cho phép/không cho phép"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Dung lượng đĩa để dự trữ cho bản ghi (tính bằng GB)"
 
@@ -3246,6 +3249,9 @@ msgstr "Làm xong"
 msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Xong - Đã cài đặt, nâng cấp hoặc gỡ bỏ gói%d (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5211,6 +5217,12 @@ msgstr "KA-SAT"
 
 msgid "Kazakhstan"
 msgstr "Kazakhstan"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Giữ dịch vụ"
@@ -8198,6 +8210,9 @@ msgstr "Độ trễ cuộn"
 msgid "Scroll repeats"
 msgstr "Cuộn lặp lại"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr "Tìm kiếm"
 
@@ -8746,6 +8761,9 @@ msgstr "Tên dịch vụ"
 
 msgid "Services"
 msgstr "Dịch vụ"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

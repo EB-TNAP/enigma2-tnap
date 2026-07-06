@@ -2998,6 +2998,9 @@ msgstr "Izslēgt taimeri"
 msgid "Disabled"
 msgstr "Izslēgts"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Rezerve ierakstiem diskā (GB)"
 
@@ -3221,6 +3224,9 @@ msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Pabeigts - instalēta, atjaunināta vai dzēsta %d pakotne (%s)"
 msgstr[1] "Pabeigts - instalētas, atjauninātas vai dzēstas %d pakotnes (%s)"
 msgstr[2] "Pabeigts - instalētas, atjauninātas vai dzēstas %d pakotnes (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5130,6 +5136,12 @@ msgstr "KA-SAT"
 
 msgid "Kazakhstan"
 msgstr "Kazahstāna"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Paturēt kanālu"
@@ -8083,6 +8095,9 @@ msgstr "Ritināšanas aizture"
 msgid "Scroll repeats"
 msgstr "Ritināšanas atkārtojums"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr "Meklē"
 
@@ -8612,6 +8627,9 @@ msgstr "Kanāla nosaukums"
 
 msgid "Services"
 msgstr "Kanāli"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

@@ -3412,6 +3412,9 @@ msgstr "Afbryd timer"
 msgid "Disabled"
 msgstr "Afbrudt"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Plads der skal reseveres til optagelser (I GB)"
 
@@ -3680,6 +3683,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Færdig - Installeret, opgraderet eller fjernet %d pakken (%s)"
 msgstr[1] "Færdig - Installeret, opgraderet eller fjernet %d pakkerne (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5883,6 +5889,12 @@ msgid "KA-SAT"
 msgstr ""
 
 msgid "Kazakhstan"
+msgstr ""
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
 msgstr ""
 
 msgid "Keep service"
@@ -9352,6 +9364,9 @@ msgstr "Scroll forsinkelse"
 msgid "Scroll repeats"
 msgstr "Scroll gentagelser"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 #, fuzzy
 msgid "Search"
 msgstr "Søger"
@@ -9984,6 +9999,9 @@ msgstr "Servicenavn"
 #
 msgid "Services"
 msgstr "Kanaler"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

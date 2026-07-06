@@ -2921,6 +2921,9 @@ msgstr ""
 msgid "Disabled"
 msgstr ""
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr ""
 
@@ -3133,6 +3136,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] ""
 msgstr[1] ""
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5001,6 +5007,12 @@ msgid "KA-SAT"
 msgstr ""
 
 msgid "Kazakhstan"
+msgstr ""
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
 msgstr ""
 
 msgid "Keep service"
@@ -7909,6 +7921,9 @@ msgstr ""
 msgid "Scroll repeats"
 msgstr ""
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr ""
 
@@ -8429,6 +8444,9 @@ msgid "Servicename"
 msgstr ""
 
 msgid "Services"
+msgstr ""
+
+msgid "Services found"
 msgstr ""
 
 #, python-format

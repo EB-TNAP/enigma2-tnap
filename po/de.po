@@ -3029,6 +3029,9 @@ msgstr "Timer deaktivieren"
 msgid "Disabled"
 msgstr "Deaktiviert"
 
+msgid "Discard"
+msgstr "Verwerfen"
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Reservierter Speicherplatz für Aufnahmen (in GB)"
 
@@ -3249,6 +3252,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Abgeschlossen - %d Paket installiert, aktualisiert oder entfernt (%s)"
 msgstr[1] "Abgeschlossen - %d Pakete installiert, aktualisiert oder entfernt (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr "Fertig — %d Sender gefunden."
 
 #, python-format
 msgid ""
@@ -5200,6 +5206,12 @@ msgstr "KA-SAT"
 
 msgid "Kazakhstan"
 msgstr "Kasachstan"
+
+msgid "Keep"
+msgstr "Übernehmen"
+
+msgid "Keep & Watch"
+msgstr "Übernehmen und ansehen"
 
 msgid "Keep service"
 msgstr "Aktueller Sender"
@@ -8194,6 +8206,9 @@ msgstr "Scroll Verzögerrung"
 msgid "Scroll repeats"
 msgstr "Scroll wiederholt"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr "Zu einem Sender scrollen und dann unten auswählen."
+
 msgid "Search"
 msgstr "Suche"
 
@@ -8740,6 +8755,9 @@ msgstr "Sendername"
 
 msgid "Services"
 msgstr "Kanäle"
+
+msgid "Services found"
+msgstr "Gefundene Sender"
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

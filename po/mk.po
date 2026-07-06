@@ -3042,6 +3042,9 @@ msgstr "Деактивирајте го тајмерот"
 msgid "Disabled"
 msgstr "Деактивирано"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Резервиран простор за складирање на снимки (во GB)"
 
@@ -3267,6 +3270,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Gotovo - Instaliran, ažuriran ili отстранет %d paket (%s)"
 msgstr[1] "Gotovo - Instaliran, ažuriran ili отстранет %d paket (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5232,6 +5238,12 @@ msgstr "KA-SAT"
 
 msgid "Kazakhstan"
 msgstr "Казахстан"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Тековен канал"
@@ -8222,6 +8234,9 @@ msgstr "Доцнење на лизгање"
 msgid "Scroll repeats"
 msgstr "Скролувајте повторено"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr "Барај"
 
@@ -8770,6 +8785,9 @@ msgstr "Име на Каналот"
 
 msgid "Services"
 msgstr "Канали"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

@@ -2991,6 +2991,9 @@ msgstr "禁用定时器"
 msgid "Disabled"
 msgstr "已禁用"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "为录制保留的磁盘空间（以 GB 为单位）。"
 
@@ -3213,6 +3216,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "完成 - 安装、更新或删除了 %d 个软件包（%s）"
 msgstr[1] "完成 - 安装、更新或删除了 %d 个软件包（%s）"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5128,6 +5134,12 @@ msgstr "KA-SAT"
 
 msgid "Kazakhstan"
 msgstr "哈萨克斯坦"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "保留频道"
@@ -8083,6 +8095,9 @@ msgstr "滚动延迟"
 msgid "Scroll repeats"
 msgstr "滚动重复"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr "搜索"
 
@@ -8615,6 +8630,9 @@ msgstr "频道名称"
 
 msgid "Services"
 msgstr "频道"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

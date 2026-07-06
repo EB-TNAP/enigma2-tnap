@@ -3367,6 +3367,9 @@ msgstr "Desactivar temporizador"
 msgid "Disabled"
 msgstr "Desactivado"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Reserva de espazo en disco para as gravacións (en GB)"
 
@@ -3623,6 +3626,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Feito - %d Paquete (%s) instalado, actualizado ou eliminado"
 msgstr[1] "Feito - %d Paquetes (%s) instalados, actualizados ou eliminados"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5776,6 +5782,12 @@ msgstr "KA-SAT"
 
 msgid "Kazakhstan"
 msgstr "Casaquistán"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Manter servizo"
@@ -9144,6 +9156,9 @@ msgstr "Retardo no desprazamento"
 msgid "Scroll repeats"
 msgstr "Repeticións do desprazamento"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr "Buscar"
 
@@ -9757,6 +9772,9 @@ msgstr "Nome do servizo"
 #
 msgid "Services"
 msgstr "Servizos"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

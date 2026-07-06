@@ -3003,6 +3003,9 @@ msgstr "Вимкнути таймер"
 msgid "Disabled"
 msgstr "Вимкнуто"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Зарезервувати дисковий простір для записів (у ГБ)"
 
@@ -3226,6 +3229,9 @@ msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Виконано - Встановлено, оновлено чи видалено %d пакет (%s)"
 msgstr[1] "Виконано - Встановлено, оновлено чи видалено %d пакети (%s)"
 msgstr[2] "Виконано - Встановлено, оновлено чи видалено %d пакетів (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5146,6 +5152,12 @@ msgstr ""
 
 msgid "Kazakhstan"
 msgstr "Казахстан"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Зберігати поточний канал"
@@ -8124,6 +8136,9 @@ msgstr "Затримка прокрутки"
 msgid "Scroll repeats"
 msgstr "Повтор прокрутки"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr "Пошук"
 
@@ -8656,6 +8671,9 @@ msgstr "Назва каналу"
 
 msgid "Services"
 msgstr "Канали"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

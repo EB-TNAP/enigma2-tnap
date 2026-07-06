@@ -3036,6 +3036,9 @@ msgstr "Időzítő letiltása"
 msgid "Disabled"
 msgstr "Letiltva"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Felvételeknek fenntartott tárterület (GB-ban)"
 
@@ -3261,6 +3264,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "%d szoftvercsomag telepítése, frissítése vagy eltávolítása elkészült (%s)"
 msgstr[1] "%d szoftvercsomag telepítése, frissítése vagy eltávolítása elkészült (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5224,6 +5230,12 @@ msgstr "KA-SAT"
 
 msgid "Kazakhstan"
 msgstr "Kazahsztán"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Csatorna megtartása"
@@ -8216,6 +8228,9 @@ msgstr "Görgetés késleltetése"
 msgid "Scroll repeats"
 msgstr "Görgetés ismétlése"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr "Keresés"
 
@@ -8763,6 +8778,9 @@ msgstr "Csatornanév"
 
 msgid "Services"
 msgstr "Csatornák"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

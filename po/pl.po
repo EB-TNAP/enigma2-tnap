@@ -3033,6 +3033,9 @@ msgstr "Wyłącz timer"
 msgid "Disabled"
 msgstr "Wyłączone"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Przestrzeń dyskowa zarezerwowana dla nagrań (w GB)"
 
@@ -3258,6 +3261,9 @@ msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Gotowe - zainstalowano, zaktualizowano lub usunięto %d pakiet (%s)"
 msgstr[1] "Gotowe - zainstalowano, zaktualizowano lub usunięto %d pakiety (%s)"
 msgstr[2] "Gotowe - zainstalowano, zaktualizowano lub usunięto %d pakietów (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5208,6 +5214,12 @@ msgstr ""
 
 msgid "Kazakhstan"
 msgstr "Kazachstan"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Zostaw na aktualnym"
@@ -8225,6 +8237,9 @@ msgstr "Opóźnienie przewijania"
 msgid "Scroll repeats"
 msgstr "Powtórzenia przewijania"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr "Szukaj"
 
@@ -8771,6 +8786,9 @@ msgstr "Nazwa kanału"
 
 msgid "Services"
 msgstr "Kanały"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

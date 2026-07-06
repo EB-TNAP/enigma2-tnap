@@ -3328,6 +3328,9 @@ msgstr "Desactivar programador"
 msgid "Disabled"
 msgstr "Desactivat"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Espai de disc reservat per a enregistraments (en GB)"
 
@@ -3590,6 +3593,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Fet: s’ha instal·lat, actualitzat o eliminat %d paquet (%s)"
 msgstr[1] "Fet: s’han instal·lat, actualitzat o eliminat %d paquets (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5737,6 +5743,12 @@ msgstr "KA-SAT"
 
 msgid "Kazakhstan"
 msgstr "Kazakhstan"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Mantenir el servei"
@@ -9119,6 +9131,9 @@ msgstr "Retard de desplaçament"
 msgid "Scroll repeats"
 msgstr "Repeticions de desplaçament"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 #
 msgid "Search"
 msgstr "Cercar"
@@ -9738,6 +9753,9 @@ msgstr "Nom de servei"
 #
 msgid "Services"
 msgstr "Serveis"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

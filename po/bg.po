@@ -2992,6 +2992,9 @@ msgstr "Спиране на таймер"
 msgid "Disabled"
 msgstr "Спрян"
 
+msgid "Discard"
+msgstr ""
+
 msgid "Disk space to reserve for recordings (in GB)"
 msgstr "Запазено дисково пространство за записи (в GB)"
 
@@ -3214,6 +3217,9 @@ msgid "Done - Installed, updated or removed %d package (%s)"
 msgid_plural "Done - Installed, updated or removed %d packages (%s)"
 msgstr[0] "Изпълнено - Инсталиран, обновен или изтрит %d пакет (%s)"
 msgstr[1] "Изпълнено - Инсталирани, обновени или изтрити %d пакета (%s)"
+
+msgid "Done — %d channel(s) found."
+msgstr ""
 
 #, python-format
 msgid ""
@@ -5127,6 +5133,12 @@ msgstr "KA-спътник"
 
 msgid "Kazakhstan"
 msgstr "Казахстан"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
 
 msgid "Keep service"
 msgstr "Задръж на канала"
@@ -8074,6 +8086,9 @@ msgstr "Задръжка на превъртането"
 msgid "Scroll repeats"
 msgstr "Брой повторения"
 
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
 msgid "Search"
 msgstr "Търси"
 
@@ -8606,6 +8621,9 @@ msgstr "Име на канала"
 
 msgid "Services"
 msgstr "Канали"
+
+msgid "Services found"
+msgstr ""
 
 #, fuzzy, python-format
 msgid "Set %s as default?"

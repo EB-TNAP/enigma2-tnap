@@ -439,6 +439,12 @@ msgstr "الأطلسي"
 msgid "AUDIO"
 msgstr "صوت"
 
+msgid "Discard"
+msgstr ""
+
+msgid "Done — %d channel(s) found."
+msgstr ""
+
 msgid "Edit Settings"
 msgstr "تعديل الإعدادات"
 
@@ -1149,6 +1155,18 @@ msgstr "الباهاما"
 
 msgid "Bahrain"
 msgstr "البحرين"
+
+msgid "Keep"
+msgstr ""
+
+msgid "Keep & Watch"
+msgstr ""
+
+msgid "Scroll the list to a channel, then choose below."
+msgstr ""
+
+msgid "Services found"
+msgstr ""
 
 msgid "Tuner Information"
 msgstr "معلومات الموالف"

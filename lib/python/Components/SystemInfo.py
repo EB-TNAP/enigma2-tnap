@@ -444,7 +444,7 @@ BoxInfo.setItem("FrontpanelLEDFadeControl", fileExists("/proc/stb/fp/led_fade"))
 BoxInfo.setItem("inadyn", fileExists("/etc/init.d/inadyn-mt"))
 BoxInfo.setItem("minidlna", fileExists("/etc/init.d/minidlna"))
 BoxInfo.setItem("ushare", fileExists("/etc/init.d/ushare"))
-BoxInfo.setItem("nfsserver", exists("/etc/init.d/nfsserver"))
+BoxInfo.setItem("nfsserver", fileExists("/etc/init.d/nfsserver"))
 BoxInfo.setItem("samba", fileExists("/etc/init.d/samba"))
 BoxInfo.setItem("zerotier", fileExists("/etc/init.d/zerotier"))
 

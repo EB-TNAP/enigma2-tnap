@@ -297,13 +297,23 @@ class ServiceScan:
 						orb_pos = tp.orbital_position
 						try:
 							sat_name = str(nimmgr.getSatDescription(orb_pos))
-						except KeyError:
+						except:
+							# Matches the defensive pattern used everywhere else in this
+							# function (see newService()'s own comment on why an uncaught
+							# exception here is not acceptable): this runs as a C++ signal
+							# callback, so anything other than a KeyError escaping this
+							# lookup would take all of enigma2 down mid-scan.
 							sat_name = ''
 						if orb_pos > 1800:
 							orb_pos = 3600 - orb_pos
-							h = _('W')
+							h = 'W'
 						else:
-							h = _('E')
+							h = 'E'
+						# self.network1 feeds the report FILENAME, so the hemisphere
+						# letter must stay untranslated ('E'/'W'); gettext locales
+						# translate the letter (e.g. German 'E' -> 'O' for Ost) which
+						# made filenames locale-dependent. The translated letter is
+						# still used for the on-screen display text below.
 						try:
 							self.network1 = ("%d.%d%s") % ( orb_pos / 10, orb_pos % 10, h)  ##
 						except:
@@ -311,11 +321,19 @@ class ServiceScan:
 						if '%d.%d' % (orb_pos / 10, orb_pos % 10) in sat_name:
 							network = sat_name
 						else:
-							network = '%s %d.%d %s' % (sat_name, orb_pos / 10, orb_pos % 10, h)
-						if "Ku-band" in sat_name:
-							self.network1 += "_Ku-band"
-						if "Ku-band" not in sat_name:
+							network = '%s %d.%d %s' % (sat_name, orb_pos / 10, orb_pos % 10, _(h))
+						# Band tag from the ACTUAL downlink frequency, not from the
+						# satellite's name text. Only dual-band twin entries in
+						# satellites.xml carry "Ku-band"/"C-band" in their names, so
+						# the old substring test mislabelled every single-band Ku
+						# satellite (e.g. "19.2E Astra 1KR/1L/1M/1N") as C-band.
+						# tp.frequency is in kHz and already corrected to real RF by
+						# the blindscan path: C-band downlink 3400-4800 MHz, Ku-band
+						# 10700-12750 MHz, so a 5 GHz split is unambiguous.
+						if tp.frequency < 5000000:
 							self.network1 += "_C-band"
+						else:
+							self.network1 += "_Ku-band"
 						tp_text = {tp.System_DVB_S: 'DVB-S', tp.System_DVB_S2: 'DVB-S2'}.get(tp.system, '')
 						if tp_text == 'DVB-S2':
 							tp_text = '%s %s' % (tp_text,
@@ -567,28 +585,36 @@ class ServiceScan:
 			pass
 
 	def _updateLiveSignal(self, status, snr, strength, cnr_db):
-		# Translate a raw frontend reading into on-screen SNR/AGC bars and
+		# Translate a raw frontend reading into on-screen SNR/AGC/S bars and
 		# text. Mirrors the Octagon-vs-Edision logic used for the report so
 		# the meter behaves correctly on both driver styles.
 		locked = bool(status is not None and status & FE_HAS_LOCK)
-		if not locked:
-			self._setBar(self.snrSlider, 0)
-			self._setBar(self.agcSlider, 0)
-			if self.snrText is not None:
-				self.snrText.setText("SNR ---")
-			if self.agcText is not None:
-				self.agcText.setText("AGC ---")
-			if self.lockText is not None:
-				self.lockText.setText(_("Searching..."))
-			return
 
-		# AGC / signal strength: register is a 0-65535 relative scale.
+		# AGC / signal strength: raw AGC-derived strength register. Valid the
+		# instant there is RF on the LNB feed - no demod lock required - which
+		# is the entire point of showing it: it lets you see whether you're
+		# even pointed at a satellite before the receiver ever locks anything.
+		# Deliberately NOT gated on `locked` - only SNR below is, since a
+		# quality/CNR number is genuinely meaningless without a lock to
+		# measure against, but raw strength is not.
+		#
+		# `strength is not None` (not a truthiness check): a real reading of
+		# exactly 0 is legitimate and should show "0%", not fall through to
+		# "---" as if no reading were available at all.
 		agc_pct = None
-		if strength:
+		if strength is not None:
 			agc_pct = strength * 100.0 / 65535.0
 		self._setBar(self.agcSlider, agc_pct if agc_pct is not None else 0)
 		if self.agcText is not None:
 			self.agcText.setText(("AGC %d%%" % int(agc_pct)) if agc_pct is not None else "AGC ---")
+
+		if not locked:
+			self._setBar(self.snrSlider, 0)
+			if self.snrText is not None:
+				self.snrText.setText("SNR ---")
+			if self.lockText is not None:
+				self.lockText.setText(_("Searching..."))
+			return
 
 		# SNR / quality.
 		snr_pct = None

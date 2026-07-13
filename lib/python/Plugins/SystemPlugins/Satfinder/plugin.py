@@ -14,8 +14,12 @@ from Tools.Transponder import getChannelNumber, channel2frequency
 from Tools.BoundFunction import boundFunction
 from Screens.Screen import Screen # for services found class
 from Components.Sources.StaticText import StaticText
+from Components.ProgressBar import ProgressBar  # live AGC bar (raw ioctl driven)
+from Components.Label import Label              # live AGC value labels
 from Tools.Directories import fileExists   # Extra Import
 import os  # Extra Import
+import struct  # AGCReader ioctl buffers
+import fcntl   # AGCReader ioctl calls
 import threading  # Use threading instead of _thread
 import time
 import datetime
@@ -64,6 +68,71 @@ if fileExists("/proc/stb/info/boxtype") and not fileExists("/proc/stb/info/hwmod
 		nimfile.close()
 	except:
 		pass
+
+# ---------------------------------------------------------------------------
+# Raw AGC reader -- signal strength below lock
+# ---------------------------------------------------------------------------
+# Why this exists: the skin's AGC widgets used to be driven by the
+# FrontendInfo converter, but eDVBFrontend::readFrontendData(signalPower)
+# in the enigma2 core is gated on m_state == stateLock, so AGC blanked to
+# 0/N-A whenever the tuner was not locked -- i.e. exactly when you are
+# swinging the dish and need it most (the Sonicview pre-lock "S" reading).
+#
+# FE_READ_SIGNAL_STRENGTH is NOT lock-gated at the driver level: both the
+# Octagon (HiSilicon blob) and Edision (open-source AVL) drivers return the
+# live AGC register regardless of lock state, on a 0-65535 relative scale.
+# This was hardware-verified with fe-monitor / dish_monitor and is the same
+# in-process ioctl approach already used by FESignalReader in ServiceScan.py.
+#
+# The frontend device allows additional O_RDONLY opens while enigma2 holds
+# its O_RDWR handle, and FE_READ_* ioctls are permitted on read-only fds,
+# so this side-channel never interferes with tuning. strength == 0 is a
+# valid reading (deep null / no carrier); only an ioctl/open failure means
+# "no value present".
+
+FE_READ_SIGNAL_STRENGTH = 0x80026F47  # _IOR('o', 71, __u16)
+
+
+class AGCReader:
+	"""Side read-only fd on the frontend device for ungated AGC reads."""
+
+	def __init__(self, feid):
+		self.feid = feid
+		self._fd = -1
+		self._open()
+
+	def _open(self):
+		for path in ("/dev/dvb/adapter0/frontend%d" % self.feid,
+					"/dev/dvb/adapter%d/frontend0" % self.feid):
+			if os.path.exists(path):
+				try:
+					self._fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+					return
+				except OSError as e:
+					print("[Satfinder][AGCReader] open %s failed: %s" % (path, e))
+		self._fd = -1
+
+	def read(self):
+		"""Return raw strength 0-65535, or None if no value is available."""
+		if self._fd < 0:
+			self._open()  # device may appear late (e.g. tuner switch)
+			if self._fd < 0:
+				return None
+		try:
+			buf = bytearray(2)
+			fcntl.ioctl(self._fd, FE_READ_SIGNAL_STRENGTH, buf)
+			return struct.unpack("H", bytes(buf))[0]
+		except (OSError, IOError):
+			return None
+
+	def close(self):
+		if self._fd >= 0:
+			try:
+				os.close(self._fd)
+			except OSError:
+				pass
+			self._fd = -1
+
 
 # ---------------------------------------------------------------------------
 # TNAP embedded Signal-finder skin
@@ -116,22 +185,16 @@ _SAT_SKIN_METERS = """
 		<convert type="FrontendInfo">SNR</convert>
 	</widget>
 
-	<widget source="Frontend" render="Progress" pixmap="%(bar)s" position="30,240" size="1860,75" borderWidth="1" borderColor="#00808888" foregroundColor="#0056c856">
-		<convert type="FrontendInfo">AGC</convert>
-	</widget>
+	<widget name="agc_bar" pixmap="%(bar)s" position="30,240" size="1860,75" borderWidth="1" borderColor="#00808888" foregroundColor="#0056c856"/>
 	<eLabel text="AGC:" position="37,240" size="150,75" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
-	<widget source="Frontend" render="Label" position="1552,240" size="330,75" halign="right" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2">
-		<convert type="FrontendInfo">AGC</convert>
-	</widget>
+	<widget name="agc_value" position="1552,240" size="330,75" halign="right" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
 
 	<eLabel text="SNR:" position="30,360" size="180,30" transparent="1" zPosition="5" font="Regular;27"/>
 	<widget source="Frontend" render="Label" position="30,390" size="450,112" font="Regular;108" halign="left" transparent="1">
 		<convert type="FrontendInfo">SNRdB</convert>
 	</widget>
 	<eLabel text="AGC:" position="30,540" size="180,30" transparent="1" zPosition="5" font="Regular;27"/>
-	<widget source="Frontend" render="Label" position="30,570" size="450,112" font="Regular;108" halign="left" transparent="1">
-		<convert type="FrontendInfo">AGC</convert>
-	</widget>
+	<widget name="agc_big" position="30,570" size="450,112" font="Regular;108" halign="left" transparent="1"/>
 	<eLabel text="BER:" position="30,720" size="180,30" transparent="1" zPosition="5" font="Regular;27"/>
 	<widget source="Frontend" render="Label" position="30,750" size="450,112" font="Regular;108" halign="left" transparent="1">
 		<convert type="FrontendInfo">BER</convert>
@@ -277,6 +340,18 @@ class Satfinder(ScanSetup, ServiceScan):
 		self["Frontend"] = FrontendStatus(frontend_source=lambda: self.frontend, update_interval=100)
 		self["key_blue"] = StaticText("")
 
+		# Live AGC -- raw ioctl, NOT the lock-gated FrontendInfo path, so a
+		# value is shown at all times the driver reports one (i.e. below
+		# lock too, for dish alignment). See AGCReader above. 250ms poll is
+		# plenty: the drivers refresh the AGC register at only 0.6-1.3 Hz.
+		self["agc_bar"] = ProgressBar()
+		self["agc_value"] = Label("")
+		self["agc_big"] = Label("")
+		self._agc_reader = None
+		self.agc_timer = eTimer()
+		self.agc_timer.callback.append(self._updateAGC)
+		self.agc_timer.start(250)
+
 		self["actions"] = ActionMap(["SetupActions", "ColorActions"],
 		{
 			"save": self.keyGoScan,
@@ -360,10 +435,50 @@ class Satfinder(ScanSetup, ServiceScan):
 			print(f"Error updating frontend status: {e}")
 			self.timer.start(1000, True)  # Retry after a longer delay
 
+	def _updateAGC(self):
+		"""Poll raw signal strength and paint the AGC bar/labels.
+
+		Runs on the main thread via eTimer, so touching GUI components here
+		is safe. Independent of lock state and of the retune cycle: the side
+		fd keeps reading the AGC register even while updateFrontendStatus()
+		is busy re-tuning after FAILED/LOSTLOCK.
+		"""
+		feid = getattr(self, "feid", None)
+		if feid is None:
+			self._setAGC(None)
+			return
+		# (Re)open the reader on first use or after a tuner switch.
+		if self._agc_reader is None or self._agc_reader.feid != feid:
+			if self._agc_reader is not None:
+				self._agc_reader.close()
+			self._agc_reader = AGCReader(feid)
+		strength = self._agc_reader.read()
+		if strength is None:
+			self._setAGC(None)  # no value present (ioctl/open failure only)
+		else:
+			# 0 is a valid reading (deep null) -- show it, don't blank it.
+			self._setAGC(strength * 100 // 65535)
+
+	def _setAGC(self, pct):
+		if pct is None:
+			self["agc_bar"].setValue(0)
+			self["agc_value"].setText("---")
+			self["agc_big"].setText("---")
+		else:
+			text = "%d %%" % pct  # match the FrontendInfo SNR label format
+			self["agc_bar"].setValue(pct)
+			self["agc_value"].setText(text)
+			self["agc_big"].setText(text)
+
 	def __onClose(self):
 		try:
 			if hasattr(self, 'timer') and self.timer:
 				self.timer.stop()
+			if hasattr(self, 'agc_timer') and self.agc_timer:
+				self.agc_timer.stop()
+			if getattr(self, '_agc_reader', None) is not None:
+				self._agc_reader.close()
+				self._agc_reader = None
 			if hasattr(self, 'frontend'):
 				self.frontend = None
 			if hasattr(self, 'raw_channel') and self.raw_channel:

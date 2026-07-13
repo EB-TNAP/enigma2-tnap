@@ -486,19 +486,19 @@ def parseFont(value, scale=((1, 1), (1, 1))):
 
 
 def parseFontScale(value, scale=((1, 1), (1, 1))):
-    scaleType, *size = value.split(";")
-    try:
-        size = int(int(size[0] if size else -4) * scale[1][0] / scale[1][1])
-    except ValueError as err:
-        print(f"[Skin] Error ({type(err).__name__} - {err}): Font scale size in '{value}' is '{size}' and is invalid!")
-        size = 0
-    if scaleType in ("size", "width"):
-        scaleType = 1 if scaleType == "size" else 2
-    else:
-        print(f"[Skin] Error: Font scale must be 'size' or 'width' not '{scaleType}'!")
-        size = 0
-        scaleType = 0
-    return scaleType, size
+	scaleType, *size = value.split(";")
+	try:
+		size = int(int(size[0] if size else -4) * scale[1][0] / scale[1][1])
+	except ValueError as err:
+		print(f"[Skin] Error ({type(err).__name__} - {err}): Font scale size in '{value}' is '{size}' and is invalid!")
+		size = 0
+	if scaleType in ("size", "width"):
+		scaleType = 1 if scaleType == "size" else 2
+	else:
+		print(f"[Skin] Error: Font scale must be 'size' or 'width' not '{scaleType}'!")
+		size = 0
+		scaleType = 0
+	return scaleType, size
 
 
 def parseGradient(value):

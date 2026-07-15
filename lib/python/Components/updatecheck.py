@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from Screens.MessageBox import MessageBox
 from Components.config import ConfigSubsection, ConfigYesNo, config, ConfigSelection
-from enigma import eTimer, eConsoleAppContainer, getBoxType, eDVBDB
+from enigma import eTimer, getBoxType, eDVBDB
 from Components.Label import Label
 from time import time, strftime, localtime
 from Tools import Notifications
@@ -20,8 +20,6 @@ import datetime
 import os
 import gettext
 import json
-
-opkg_ugradable_filename = '/tmp/.opkg_ugradable'
 
 config.updatecheck = ConfigSubsection()
 config.updatecheck.check_update_notifier = ConfigSelection(default='604800', choices=[('-1', _('disabled')),
@@ -80,10 +78,9 @@ def AutoCheck(session=None, **kwargs):
 class InstallerUpdateCheck:
 
         def __init__(self, session):
-            if os.path.exists(opkg_ugradable_filename):
-                os.remove(opkg_ugradable_filename)
             self.total_packages = None
             self.session = session
+            self.opkg = None
             self.timer = eTimer()
             self.timer.callback.append(self.checkForUpdate)
             config.updatecheck.check_update_notifier.addNotifier(self.configChange, initial_call=True)
@@ -112,45 +109,25 @@ class InstallerUpdateCheck:
                 cprintoff('[startTimer-UpdateCheck] is offline')
 
         def checkForUpdate(self):
-            #logdata('checkForUpdate', 'started')
-            self.upgradableListData = ''
-            self.container = eConsoleAppContainer()
-            self.container.appClosed.append(self.runFinished)
             cprint('[UpdateCheck] Check...')
-            self.container.execute('opkg update')
+            self.opkg = OpkgComponent()
+            self.opkg.addCallback(self.opkgCallback)
+            self.opkg.runCommand(OpkgComponent.CMD_REFRESH_UPDATES)
 
-        def runFinished(self, retval):
-            #logdata('runFinished', 'started')
-            self.container.dataAvail.append(self.dataAvail)
-            self.container.appClosed.remove(self.runFinished)
-            self.container.appClosed.append(self.upgradableListFinished)
-            self.container.execute('opkg list_upgradable && opkg list_upgradable > %s' % opkg_ugradable_filename)
+        def opkgCallback(self, event, parameter):
+            if event == OpkgComponent.EVENT_LIST_UPDATES_DONE:
+                self.upgradableListFinished(parameter)
+            elif event == OpkgComponent.EVENT_DONE:
+                self.opkg.removeCallback(self.opkgCallback)
+                self.opkg = None
 
-        def dataAvail(self, line):
-            #logdata('line dataAvail', line)
-            if line.find(b'Read-only') == -1 and line.find(b'Permission denied') == -1 and line.find(b'HOLD') == -1 and line.find(b'PREFER') == -1:
-                if line.strip():
-                    self.upgradableListData += str(line)
-
-        def getOpkgUpgradale(self):
-            count = None
-            try:
-                with open(opkg_ugradable_filename, 'r') as f:
-                    count = sum(1 for line in f if line.strip())
-                print('[upgradable_list] updatable packages: %d' % count)
-            except:
-                pass
-            return count
-
-        def upgradableListFinished(self, value):
-            #logdata('value', value)
-            self.total_packages = self.getOpkgUpgradale()
-            if self.total_packages and self.total_packages > 0:
+        def upgradableListFinished(self, packages):
+            self.total_packages = len(packages)
+            if self.total_packages > 0:
                 cprint('[UpdateCheck] Updates available...')
                 Notifications.AddNotificationWithCallback(self.runUpgrade, MessageBox, '\n' + _('[ %s ] updated package available.') % self.total_packages + '\n' + _('\nDo you want to start the firmware upgrade now?'), timeout=10, default=False)
             else:
                 cprint('[UpdateCheck] No updates available')
-            self.container = None
             self.startTimer()
 
         def runUpgrade(self, result):

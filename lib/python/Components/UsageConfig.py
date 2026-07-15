@@ -55,10 +55,11 @@ def InitUsageConfig():
 		(1, _("Bouquets start at 1")),
 		(2, _("LCN numbering"))
 	])
-	config.usage.numberMode.addNotifier(setNumberModeChange, initial_call=False)
 
 	# Fallback old settigs will be removed later because this setting is probably used in plugins
 	config.usage.alternative_number_mode = ConfigYesNo(default=config.usage.numberMode.value != 0)
+
+	config.usage.numberMode.addNotifier(setNumberModeChange, initial_call=True)
 
 	config.usage.hide_number_markers = ConfigYesNo(default=True)
 	config.usage.hide_number_markers.addNotifier(refreshServiceList)

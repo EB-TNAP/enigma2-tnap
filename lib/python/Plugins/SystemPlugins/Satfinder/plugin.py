@@ -20,6 +20,8 @@ from Tools.Directories import fileExists   # Extra Import
 import os  # Extra Import
 import struct  # AGCReader ioctl buffers
 import fcntl   # AGCReader ioctl calls
+import select  # NIT network-name reader demux polling
+import errno   # NIT network-name reader demux read errors
 import threading  # Use threading instead of _thread
 import time
 import datetime
@@ -135,6 +137,152 @@ class AGCReader:
 
 
 # ---------------------------------------------------------------------------
+# NIT network-name reader -- pure-Python demux section filter
+# ---------------------------------------------------------------------------
+# Why this exists: dvbreader.read_nit() only returns entries from the NIT's
+# second loop (the transport-stream loop carrying the delivery-system
+# descriptors), so the network-level FIRST descriptor loop -- where the
+# network_name_descriptor (tag 0x40) lives -- never reaches Python. Feed
+# transponders frequently broadcast a NIT with a network name but no
+# satellite_delivery_system_descriptor at all, in which case the POS field
+# can only say "No NIT data" even though the NIT identifies the uplinker
+# (hardware-verified on the sf8008 with enigma2_nit_dump.py: network_name
+# "Ericsson", no 0x43 descriptor in the section).
+#
+# Each open() on a demux node is an independent Linux-DVB section filter, so
+# this reader coexists with the dvbreader fds on the same demux device
+# without disturbing them. DMX_CHECK_CRC makes the kernel verify the section
+# CRC_32 before delivery; the kernel-side timeout is disabled and the
+# reader's own deadline plus the plugin's thread controls bound the capture.
+
+_DMX_FILTER_SIZE = 16
+_DMX_CHECK_CRC = 1
+_DMX_IMMEDIATE_START = 4
+
+# Native C layout of struct dmx_sct_filter_params:
+#   __u16 pid; __u8 filter[16]; __u8 mask[16]; __u8 mode[16];
+#   __u32 timeout; __u32 flags;
+_DMX_SCT_STRUCT = "@H16s16s16sII"
+
+# _IOW('o', 43, struct dmx_sct_filter_params) -- computed from the pack
+# format so the encoded size always matches the struct actually sent.
+_DMX_SET_FILTER = ((1 << 30)
+	| (struct.calcsize(_DMX_SCT_STRUCT) << 16)
+	| (ord("o") << 8)
+	| 43)
+
+_NIT_PID = 0x10
+_NIT_ACTUAL_TABLE_ID = 0x40
+
+
+def _nitActualFilterParams():
+	"""Section-filter parameters: PID 0x0010, table_id 0x40 (NIT actual)."""
+	filter_bytes = bytearray(_DMX_FILTER_SIZE)
+	mask_bytes = bytearray(_DMX_FILTER_SIZE)
+	filter_bytes[0] = _NIT_ACTUAL_TABLE_ID
+	mask_bytes[0] = 0xFF
+	return struct.pack(_DMX_SCT_STRUCT, _NIT_PID,
+		bytes(filter_bytes), bytes(mask_bytes), b"\x00" * _DMX_FILTER_SIZE,
+		0, _DMX_CHECK_CRC | _DMX_IMMEDIATE_START)
+
+
+def _cleanDvbText(text):
+	"""Strip control codes for OSD display.
+
+	Besides C0 controls this also handles the DVB single-byte control codes
+	(EN 300 468 annex A.1): 0x8A (and its two-byte-table twin U+E08A) is a
+	mandated CR/LF and becomes a space; the remaining 0x80-0x9F/U+E080-E09F
+	codes (character emphasis on/off etc.) are dropped entirely."""
+	out = []
+	for ch in text:
+		code = ord(ch)
+		if code in (0x8A, 0xE08A):
+			out.append(" ")
+		elif code < 0x20 or 0x80 <= code <= 0x9F or 0xE080 <= code <= 0xE09F:
+			if ch == "\t":
+				out.append(" ")
+		else:
+			out.append(ch)
+	return "".join(out).strip()
+
+
+def _decodeDvbText(data):
+	"""Practical DVB text decoder (EN 300 468 annex A subset).
+
+	Handles plain ASCII/ISO-6937 defaults plus the common explicitly
+	signalled character sets; latin-1 is the readable fallback for the rest.
+	"""
+	if not data:
+		return ""
+	try:
+		first = data[0]
+		if first == 0x15:                        # UTF-8
+			return _cleanDvbText(data[1:].decode("utf-8", "replace"))
+		if first == 0x11:                        # ISO/IEC 10646-1, UCS-2
+			return _cleanDvbText(data[1:].decode("utf-16-be", "replace"))
+		if 0x01 <= first <= 0x0B:                # ISO-8859-5 .. -15
+			return _cleanDvbText(data[1:].decode("iso8859_%d" % (first + 4), "replace"))
+		if first == 0x10 and len(data) >= 3 and data[1] == 0x00 and 1 <= data[2] <= 15:
+			return _cleanDvbText(data[3:].decode("iso8859_%d" % data[2], "replace"))
+		return _cleanDvbText(data.decode("latin-1", "replace"))
+	except (LookupError, UnicodeError):
+		return _cleanDvbText(data.decode("latin-1", "replace"))
+
+
+def _splitNitSections(buf):
+	"""Extract complete table-0x40 sections from accumulated demux reads.
+
+	Section-filter reads normally deliver one complete section, but this also
+	copes with concatenated or partially accumulated reads. Returns
+	(sections, remainder)."""
+	sections = []
+	offset = 0
+	while offset + 3 <= len(buf):
+		if buf[offset] != _NIT_ACTUAL_TABLE_ID:
+			offset += 1
+			continue
+		total_length = 3 + (((buf[offset + 1] & 0x0F) << 8) | buf[offset + 2])
+		if total_length < 12 or total_length > 1024:
+			offset += 1
+			continue
+		if offset + total_length > len(buf):
+			break
+		sections.append(buf[offset:offset + total_length])
+		offset += total_length
+	return sections, buf[offset:]
+
+
+def _nitNetworkNames(section):
+	"""Return (network_name, multilingual_fallback) from one NIT section.
+
+	Walks only the network-level (first) descriptor loop; either value is
+	None when the corresponding descriptor is absent or empty."""
+	if len(section) < 12 or section[0] != _NIT_ACTUAL_TABLE_ID:
+		return None, None
+	section_length = ((section[1] & 0x0F) << 8) | section[2]
+	crc_start = min(3 + section_length, len(section)) - 4
+	loop_length = ((section[8] & 0x0F) << 8) | section[9]
+	offset = 10
+	loop_end = min(offset + loop_length, crc_start)
+	name = ml_name = None
+	while offset + 2 <= loop_end:
+		tag = section[offset]
+		length = section[offset + 1]
+		if offset + 2 + length > loop_end:
+			break  # truncated/malformed descriptor -- stop walking
+		body = section[offset + 2:offset + 2 + length]
+		if tag == 0x40 and name is None:
+			name = _decodeDvbText(body) or None
+		elif tag == 0x5B and ml_name is None and len(body) >= 4:
+			# multilingual_network_name_descriptor: first language entry.
+			name_length = body[3]
+			if 4 + name_length <= len(body):
+				ml_name = _decodeDvbText(body[4:4 + name_length]) or None
+		offset += 2 + length
+	return name, ml_name
+
+
+# ---------------------------------------------------------------------------
 # TNAP embedded Signal-finder skin
 # ---------------------------------------------------------------------------
 # Rationale: every skin ships its own <screen name="Satfinder"> and most of them
@@ -208,7 +356,14 @@ _SAT_SKIN_METERS = """
 """ % {"bar": _BAR_PIXMAP}
 
 # ONID / TSID / POS row -- only present on SatfinderExtra (needs dvbreader)
+# The network name sits on the header sub-line, mirroring the date on the
+# right: full width for long names (up to 255 bytes are legal in the NIT)
+# instead of squeezing a fourth box into the ONID/TSID/POS row. It lives in
+# this block, not _SAT_SKIN_HEADER, because the "network" source only exists
+# on SatfinderExtra and a widget bound to a missing source is a skin error.
 _SAT_SKIN_DVBROW = """
+	<widget source="network" render="Label" position="30,78" size="1160,40" font="Regular;30" foregroundColor="#00ffc000" transparent="1" halign="left" valign="center" noWrap="1"/>
+
 	<eLabel text="ONID:" position="452,320" size="160,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center"/>
 	<eLabel position="618,317" size="230,46" backgroundColor="#25333333" zPosition="1"/>
 	<widget source="onid" render="Label" position="620,319" size="226,42" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="2"/>
@@ -1298,6 +1453,7 @@ class SatfinderExtra(Satfinder):
 		self["tsid"] = StaticText("")
 		self["onid"] = StaticText("")
 		self["pos"] = StaticText("")
+		self["network"] = StaticText("")  # NIT network_name, header sub-line
 
 		# Register our close handler — must be done explicitly because Python
 		# name-mangling (__onClose → _SatfinderExtra__onClose) means the parent's
@@ -1376,6 +1532,7 @@ class SatfinderExtra(Satfinder):
 			self["tsid"].setText("")
 			self["onid"].setText("")
 			self["pos"].setText("")
+			self["network"].setText("")
 			self["key_yellow"].setText("")
 			self["actions2"].setEnabled(False)
 			self.serviceList = []
@@ -1395,6 +1552,14 @@ class SatfinderExtra(Satfinder):
 
 		# Start tuner lock monitor in a separate thread
 		self.start_thread(self.monitorTunerLock, (currentProcess,), "lock_monitor")
+
+		# The network name only needs a locked tuner and the NIT -- not the
+		# SDT -- so read it in parallel with the SDT/service pass below and
+		# independently of getOrbPosFromNit (a NIT can carry a name without
+		# any delivery descriptor). ATSC has no DVB NIT (PSIP uses the VCT),
+		# so skip it there.
+		if self.DVB_type.value.startswith("DVB"):
+			self.start_thread(self.getNetworkNameFromNit, (currentProcess,), "nit_name_reader")
 
 		adapter = 0
 		demuxer_device = "/dev/dvb/adapter%d/demux%d" % (adapter, self.demux)
@@ -1530,6 +1695,98 @@ class SatfinderExtra(Satfinder):
 			result.append(svc)
 		dvbreader.set_timeouts(1000, 15000)
 		return result
+
+	def getNetworkNameFromNit(self, currentProcess):
+		"""Read the network_name_descriptor from NIT-actual and display it.
+
+		Runs in its own thread on its own demux section filter (see the
+		module-level reader notes); a NIT that carries a name but no
+		delivery descriptor -- common on occasional-use feeds -- still
+		identifies the network even when POS has nothing to show.
+		"""
+		if not dvbreader_available or self.frontend is None or self.demux < 0:
+			return
+
+		demuxer_device = "/dev/dvb/adapter0/demux%d" % self.demux
+
+		try:
+			fd = os.open(demuxer_device, os.O_RDWR | os.O_NONBLOCK)
+		except OSError as e:
+			print("[Satfinder][getNetworkNameFromNit] open %s failed: %s" % (demuxer_device, e))
+			return
+
+		# NIT-actual must repeat at least every 10s (EN 300 468 sec. 5.1.4);
+		# 30s tolerates a couple of missed/CRC-failed repetitions on a
+		# marginal signal without holding the thread for the full 60s the
+		# position reader allows itself.
+		deadline = time.monotonic() + 30
+		carry = b""
+		fallback = None      # multilingual name, used only if 0x40 never appears
+		sections_seen = set()
+		version = None
+
+		try:
+			fcntl.ioctl(fd, _DMX_SET_FILTER, _nitActualFilterParams())
+
+			poller = select.poll()
+			poller.register(fd, select.POLLIN | select.POLLPRI)
+
+			while self.should_continue("nit_name_reader"):
+				if time.monotonic() > deadline:
+					print("[Satfinder][getNetworkNameFromNit] timed out")
+					break
+				if self.currentProcess != currentProcess or not self.tunerLock():
+					return
+
+				if not poller.poll(500):
+					continue
+				try:
+					chunk = os.read(fd, 4096)
+				except OSError as e:
+					if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EOVERFLOW):
+						continue
+					print("[Satfinder][getNetworkNameFromNit] read failed: %s" % e)
+					break
+				if not chunk:
+					continue
+
+				sections, carry = _splitNitSections(carry + chunk)
+				for section in sections:
+					name, ml_name = _nitNetworkNames(section)
+					if name:
+						self._setNetworkName(name, currentProcess)
+						return
+					if ml_name and fallback is None:
+						fallback = ml_name
+
+					# Track completeness so we can stop as soon as every
+					# section of the current NIT version was inspected.
+					section_version = (section[5] >> 1) & 0x1F
+					if section_version != version:
+						version = section_version
+						sections_seen = set()
+					sections_seen.add(section[6])
+					if len(sections_seen) >= section[7] + 1:
+						if fallback:
+							self._setNetworkName(fallback, currentProcess)
+						else:
+							print("[Satfinder][getNetworkNameFromNit] NIT carries no network name")
+						return
+		finally:
+			os.close(fd)
+
+		# Timed out before seeing every section; better a multilingual name
+		# than none at all.
+		if fallback:
+			self._setNetworkName(fallback, currentProcess)
+
+	def _setNetworkName(self, name, currentProcess):
+		name = name.strip()
+		if not name or self.currentProcess != currentProcess:
+			return
+		print("[Satfinder][getNetworkNameFromNit] network name: %s" % name)
+		with self.threadLock:
+			self["network"].setText(_("Network: %s") % name)
 
 	def getOrbPosFromNit(self, currentProcess):
 		"""Get orbital position information from NIT"""

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import json
 from Screens.Screen import Screen
 from Components.Pixmap import Pixmap
 from Components.config import config, ConfigInteger
@@ -104,12 +105,7 @@ class Dish(Screen):
 		self.__state = self.STATE_SHOWN
 		prev_rotor_pos = self.rotor_pos
 		if self.tuner is not None:
-			for x in nimmanager.nim_slots:
-				if x.slot == self.tuner:
-					rotorposition = hasattr(x.config, 'lastsatrotorposition') and x.config.lastsatrotorposition.value or ""
-					if rotorposition.isdigit():
-						prev_rotor_pos = int(rotorposition)
-					break
+			prev_rotor_pos = self.getMotorPrevRotorPos(self.tuner, self.cur_orbpos, prev_rotor_pos)
 		self.rotor_pos = self.cur_orbpos
 		self.total_time = self.getTurnTime(prev_rotor_pos, self.rotor_pos, self.cur_polar)
 		self.turn_time = self.total_time
@@ -189,6 +185,23 @@ class Dish(Screen):
 			mrt = round((mrt * 1000 / self.getTurningSpeed(pol)) / 10000) + 3
 		return mrt
 
+	def getMotorPrevRotorPos(self, tuner, orbpos, fallback):
+		for x in nimmanager.nim_slots:
+			if x.slot == tuner:
+				motor = nimmanager.getRotorMotorNumber(tuner, orbpos)
+				if motor is not None and hasattr(x.config, 'lastsatrotorpositions'):
+					try:
+						positions = json.loads(x.config.lastsatrotorpositions.value)
+					except ValueError:
+						positions = {}
+					if str(motor) in positions:
+						return int(positions[str(motor)])
+				rotorposition = hasattr(x.config, 'lastsatrotorposition') and x.config.lastsatrotorposition.value or ""
+				if rotorposition.isdigit():
+					return int(rotorposition)
+				break
+		return fallback
+
 	def isSatRotorMode(self):
 		satRotorMode = False
 		self.tuner = self.getCurrentTuner()
@@ -235,7 +248,11 @@ class Dish(Screen):
 	def getTunerName(self):
 		nr = self.getCurrentTuner()
 		if nr is not None:
-			return _("Tuner") + " " + chr(nr + 65)
+			name = _("Tuner") + " " + chr(nr + 65)
+			motor = nimmanager.getRotorMotorNumber(nr, self.cur_orbpos)
+			if motor is not None:
+				name += " (%s %d)" % (_("Motor"), motor)
+			return name
 		return ""
 
 	def OrbToStr(self, orbpos):
@@ -352,12 +369,7 @@ class Dishpip(Dish, Screen):
 		prev_rotor_pos = self.rotor_pos
 		tuner = self.getCurrentTuner()
 		if tuner is not None:
-			for x in nimmanager.nim_slots:
-				if x.slot == tuner:
-					rotorposition = hasattr(x.config, 'lastsatrotorposition') and x.config.lastsatrotorposition.value or ""
-					if rotorposition.isdigit():
-						prev_rotor_pos = int(rotorposition)
-					break
+			prev_rotor_pos = self.getMotorPrevRotorPos(tuner, self.cur_orbpos, prev_rotor_pos)
 		self.rotor_pos = self.cur_orbpos
 		self.total_time = self.getTurnTime(prev_rotor_pos, self.rotor_pos, self.cur_polar)
 		self.turn_time = self.total_time

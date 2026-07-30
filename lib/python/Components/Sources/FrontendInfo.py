@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import json
 from enigma import iPlayableService, eDVBResourceManager, eDVBSatelliteEquipmentControl
 from Components.Sources.Source import Source
 from Components.PerServiceDisplay import PerServiceBase
@@ -74,6 +75,15 @@ class FrontendInfo(Source, PerServiceBase):
 				config.misc.lastrotorposition.value = orbital_position
 				nim.config.lastsatrotorposition.save()
 				config.misc.lastrotorposition.save()
+				motor = nimmanager.getRotorMotorNumber(slot, orbital_position)
+				if motor is not None:
+					try:
+						positions = json.loads(nim.config.lastsatrotorpositions.value)
+					except ValueError:
+						positions = {}
+					positions[str(motor)] = str(orbital_position)
+					nim.config.lastsatrotorpositions.value = json.dumps(positions)
+					nim.config.lastsatrotorpositions.save()
 				self.changed((self.CHANGED_ALL, ))
 				break
 

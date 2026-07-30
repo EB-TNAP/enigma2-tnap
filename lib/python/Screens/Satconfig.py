@@ -527,6 +527,7 @@ class NimSetup(Setup, ServiceStopScreen):
 						self.list.append((" ", currLnb.latitudeOrientation, _("Enter if you are north or south of the equator.")))
 					else:
 						self.list.append((self.indent % _("Stored position"), Sat.rotorposition, _("Enter the number stored in the positioner that corresponds to this satellite.")))
+					self.list.append((self.indent % _("Positioner number"), currLnb.motorNumber, _("Identifies which motor this LNB's dish is driven by. LNBs on the same motorized dish must share a number. 'Auto' uses the LNB number, which is correct when each motorized dish has its own LNB.")))
 					if not hasattr(self, 'additionalMotorOptions'):
 						self.additionalMotorOptions = ConfigBoolean(default=any([x.value != x.default for x in (currLnb.turningspeedH, currLnb.turningspeedV, currLnb.tuningstepsize, currLnb.rotorPositions)]), descriptions={False: _("Show sub-menu"), True: _("Hide sub-menu")})
 					self.showAdditionalMotorOptions = (self.indent % _("Extra motor options"), self.additionalMotorOptions, _("Additional motor options allow you to enter details from your motor's spec sheet so enigma can work out how long it will take to move to another satellite."))

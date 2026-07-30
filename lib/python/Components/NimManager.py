@@ -548,6 +548,9 @@ class SecConfigure:
 					else:
 						sec.setUseInputpower(False)
 
+					motor = int(currLnb.motorNumber.value) if hasattr(currLnb, "motorNumber") else 0
+					sec.setLNBMotorNumber(motor if motor > 0 else x)
+
 				sec.setLNBSlotMask(tunermask)
 
 				sec.setLNBPrio(int(currLnb.prio.value))
@@ -1286,6 +1289,17 @@ class NimManager:
 			return number and 9999 or _("not valid frontend")
 		return number and 9998 or _("rotor is not used")
 
+	def getRotorMotorNumber(self, slotid, orbital_position):
+		nim = config.Nims[slotid]
+		if nim.configMode.value == "advanced" and orbital_position in nim.advanced.sat.keys():
+			currSat = nim.advanced.sat[orbital_position]
+			lnbnum = int(currSat.lnb.value)
+			currLnb = lnbnum and nim.advanced.lnb[lnbnum]
+			if currLnb and currLnb.diseqcMode.value == "1_2":
+				motor = int(currLnb.motorNumber.value) if hasattr(currLnb, "motorNumber") else 0
+				return motor if motor > 0 else lnbnum
+		return None
+
 	def getRotorSatListForNim(self, slotid, only_first=False):
 		rlist = []
 		if self.nim_slots[slotid].isCompatible("DVB-S"):
@@ -1584,6 +1598,7 @@ def InitNimManager(nimmgr, update_slots=[]):
 			section.turningSpeed = ConfigSelection(turning_speed_choices, "fast")
 			section.fastTurningBegin = ConfigDateTime(default=advanced_lnb_fast_turning_btime, formatstring=_("%H:%M"), increment=600)
 			section.fastTurningEnd = ConfigDateTime(default=advanced_lnb_fast_turning_etime, formatstring=_("%H:%M"), increment=600)
+			section.motorNumber = ConfigSelection([("0", _("Auto (LNB number)"))] + [(str(x), str(x)) for x in range(1, 65)], "0")
 
 	def configLNBChanged(configElement):
 		x = configElement.slot_id
@@ -1679,6 +1694,7 @@ def InitNimManager(nimmgr, update_slots=[]):
 		nim.tuningstepsize = ConfigFloat(default=[0, 360], limits=[(0, 9), (0, 999)])
 		nim.rotorPositions = ConfigInteger(default=99, limits=[1, 999])
 		nim.lastsatrotorposition = ConfigText()
+		nim.lastsatrotorpositions = ConfigText(default="{}")
 		nim.turningspeedH = ConfigFloat(default=[2, 3], limits=[(0, 9), (0, 9)])
 		nim.turningspeedV = ConfigFloat(default=[1, 7], limits=[(0, 9), (0, 9)])
 		nim.powerMeasurement = ConfigYesNo(True)

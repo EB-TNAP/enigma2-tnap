@@ -78,6 +78,7 @@ public:
 		CUR_TONE,                    // current continuous tone
 		SATCR,                       // current SatCR
 		DICTION,                     // current "diction" (0 = normal, 1 = Unicable, 2 = JESS)
+		ROTOR_MOTOR,                 // motor/positioner number the current ROTOR_CMD/ROTOR_POS belong to (-1 = unknown)
 		NUM_DATA_ENTRIES
 	};
 	sigc::signal<void(iDVBFrontend*)> m_stateChanged;
@@ -116,6 +117,7 @@ private:
 	eSecCommandList m_sec_sequence;
 
 	long m_data[NUM_DATA_ENTRIES];
+	std::map<long, std::pair<long, long> > m_rotorMemory; // motor number -> (rotor_cmd, rotor_pos)
 
 	int m_idleInputpower[2];  // 13V .. 18V
 	int m_runningInputpower;
@@ -155,6 +157,9 @@ public:
 	RESULT setSecSequence(eSecCommandList &list);
 	RESULT getData(int num, long &data);
 	RESULT setData(int num, long val);
+	void saveRotorMemory();
+	void recallRotorMemory(long motor);
+	void clearRotorMemory();
 
 	int readFrontendData(int type); // iFrontendInformation_ENUMS
 	void getFrontendStatus(ePtr<iDVBFrontendStatus> &dest);

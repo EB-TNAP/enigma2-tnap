@@ -276,6 +276,7 @@ class eDVBSatelliteLNBParameters
 
 	int m_prio; // to override automatic tuner management ... -1 is Auto
 	int LNBNum;
+	int m_motorNum; // positioner/motor identity; LNBs sharing this number share rotor position memory; <=0 means "auto" (use LNBNum)
 	int m_advanced_satposdepends;
 #endif
 public:
@@ -369,6 +370,7 @@ public:
 	RESULT setLNBIncreasedVoltage(bool onoff);
 	RESULT setLNBPrio(int prio);
 	RESULT setLNBNum(int lnbnum);
+	RESULT setLNBMotorNumber(int motornum);
 	RESULT setLNBsatposdepends(int advanced_satposdepends);
 	RESULT getMaxFixedLnbPositions() {return MAX_FIXED_LNB_POSITIONS;}
 	RESULT getMaxLnbNum() {return MAX_LNBNUM;}

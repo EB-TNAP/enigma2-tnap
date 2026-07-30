@@ -501,6 +501,12 @@ RESULT eDVBSatelliteEquipmentControl::prepare(iDVBFrontend &frontend, const eDVB
 			if (lnb_param.m_advanced_satposdepends != -1 && setAdvancedsatposdependsRoot(lnb_param.m_advanced_satposdepends))
 				frontend.setData(eDVBFrontend::ADVANCED_SATPOSDEPENDS_LINK, lnb_param.m_advanced_satposdepends);
 
+			if (diseqc_mode == eDVBSatelliteDiseqcParameters::V1_2)
+			{
+				long motor = lnb_param.m_motorNum > 0 ? lnb_param.m_motorNum : lnb_param.LNBNum;
+				((eDVBFrontend*)sec_fe)->recallRotorMemory(motor);
+			}
+
 			sec_fe->getData(eDVBFrontend::CSW, lastcsw);
 			sec_fe->getData(eDVBFrontend::UCSW, lastucsw);
 			sec_fe->getData(eDVBFrontend::TONEBURST, lastToneburst);
@@ -998,7 +1004,11 @@ RESULT eDVBSatelliteEquipmentControl::prepare(iDVBFrontend &frontend, const eDVB
 				frontend.setData(eDVBFrontend::DICTION, SatCR_format_none);
 			}
 
-			eDebugNoSimulate("[eDVBSatelliteEquipmentControl] RotorCmd %02x, lastRotorCmd %02lx", RotorCmd, lastRotorCmd);
+			{
+				long curRotorMotor;
+				sec_fe->getData(eDVBFrontend::ROTOR_MOTOR, curRotorMotor);
+				eDebugNoSimulate("[eDVBSatelliteEquipmentControl] RotorCmd %02x, lastRotorCmd %02lx (motor %ld)", RotorCmd, lastRotorCmd, curRotorMotor);
+			}
 			if ( RotorCmd != -1 && RotorCmd != lastRotorCmd )
 			{
 				int mrt = m_params[MOTOR_RUNNING_TIMEOUT]; // in seconds!
@@ -1357,6 +1367,7 @@ RESULT eDVBSatelliteEquipmentControl::clear()
 		it->m_frontend->setData(eDVBFrontend::ADVANCED_SATPOSDEPENDS_LINK, -1);
 		it->m_frontend->setData(eDVBFrontend::SAT_POSITION, -1);
 		it->m_frontend->setData(eDVBFrontend::ADVANCED_LINKED_ROOT, -1);
+		it->m_frontend->clearRotorMemory();
 
 		if (it->m_frontend->is_FBCTuner() && ((fbcmng = eFBCTunerManager::getInstance())))
 			fbcmng->SetDefaultFBCID(*it);
@@ -1374,6 +1385,7 @@ RESULT eDVBSatelliteEquipmentControl::clear()
 		it->m_frontend->setData(eDVBFrontend::ADVANCED_SATPOSDEPENDS_LINK, -1);
 		it->m_frontend->setData(eDVBFrontend::SAT_POSITION, -1);
 		it->m_frontend->setData(eDVBFrontend::ADVANCED_LINKED_ROOT, -1);
+		it->m_frontend->clearRotorMemory();
 	}
 
 	return 0;
@@ -1385,6 +1397,7 @@ RESULT eDVBSatelliteEquipmentControl::addLNB()
 	static eDVBSatelliteLNBParameters lnb;
 	lnb.m_slot_mask = 0;
 	lnb.m_prio = -1; // auto
+	lnb.m_motorNum = -1; // auto
 	lnb.m_advanced_satposdepends = -1;
 	m_lnbidx++;
 	m_lnbs.push_back(lnb);
@@ -1461,6 +1474,16 @@ RESULT eDVBSatelliteEquipmentControl::setLNBNum(int LNBNum)
 		return -EPERM;
 	if ( currentLNBValid() )
 		m_lnbs[m_lnbidx].LNBNum = LNBNum;
+	else
+		return -ENOENT;
+	return 0;
+}
+
+RESULT eDVBSatelliteEquipmentControl::setLNBMotorNumber(int motornum)
+{
+	eSecDebug("[eDVBSatelliteEquipmentControl::setLNBMotorNumber] motornum=%d", motornum);
+	if ( currentLNBValid() )
+		m_lnbs[m_lnbidx].m_motorNum = motornum;
 	else
 		return -ENOENT;
 	return 0;

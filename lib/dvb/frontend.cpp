@@ -892,7 +892,11 @@ int eDVBFrontend::closeFrontend(bool force, bool no_delayed)
 				return 0;
 			}
 			else
+			{
 				m_data[ROTOR_CMD] = -1;
+				if (m_data[ROTOR_MOTOR] != -1)
+					m_rotorMemory.erase(m_data[ROTOR_MOTOR]);
+			}
 		}
 
 		setTone(iDVBFrontend::toneOff);
@@ -2270,11 +2274,14 @@ int eDVBFrontend::tuneLoopInt()  // called by m_tuneTimer
 			case eSecCommand::INVALIDATE_CURRENT_ROTORPARMS:
 				eDebugNoSimulate("[eDVBFrontend%d] invalidate current rotorparams", m_dvbid);
 				sec_fe_data[ROTOR_CMD] = sec_fe_data[ROTOR_POS] = sec_fe_data[SAT_POSITION] = -1;
+				if (sec_fe_data[ROTOR_MOTOR] != -1)
+					sec_fe->m_rotorMemory.erase(sec_fe_data[ROTOR_MOTOR]);
 				++m_sec_sequence.current();
 				break;
 			case eSecCommand::UPDATE_CURRENT_ROTORPARAMS:
 				sec_fe_data[ROTOR_CMD] = sec_fe_data[NEW_ROTOR_CMD];
 				sec_fe_data[ROTOR_POS] = sec_fe_data[SAT_POSITION] = sec_fe_data[NEW_ROTOR_POS];
+				sec_fe->saveRotorMemory();
 				if (!m_simulate)
 					m_sec->forceUpdateRotorPos(m_slotid, sec_fe_data[ROTOR_POS]);
 				eDebugNoSimulate("[eDVBFrontend%d] update current rotorparams %d %04lx %ld", m_dvbid, m_timeoutCount, sec_fe_data[ROTOR_CMD], sec_fe_data[ROTOR_POS]);
@@ -2854,6 +2861,8 @@ RESULT eDVBFrontend::tune(const iDVBFrontendParameters &where, bool blindscan)
 			}
 			eDebug("[eDVBFrontend%d] reset diseqc after leave rotor mode!", m_dvbid);
 			sec_fe->m_data[CSW] = sec_fe->m_data[UCSW] = sec_fe->m_data[TONEBURST] = sec_fe->m_data[ROTOR_CMD] = sec_fe->m_data[ROTOR_POS] = -1; // reset diseqc
+			if (sec_fe->m_data[ROTOR_MOTOR] != -1)
+				sec_fe->m_rotorMemory.erase(sec_fe->m_data[ROTOR_MOTOR]);
 		}
 		m_rotor_mode = feparm.no_rotor_command_on_tune;
 		if (!m_simulate)
@@ -3123,6 +3132,38 @@ RESULT eDVBFrontend::setData(int num, long val)
 		return 0;
 	}
 	return -EINVAL;
+}
+
+void eDVBFrontend::saveRotorMemory()
+{
+	if (m_data[ROTOR_MOTOR] != -1)
+		m_rotorMemory[m_data[ROTOR_MOTOR]] = std::make_pair(m_data[ROTOR_CMD], m_data[ROTOR_POS]);
+}
+
+void eDVBFrontend::recallRotorMemory(long motor)
+{
+	if (motor == m_data[ROTOR_MOTOR])
+		return;
+	saveRotorMemory();
+	std::map<long, std::pair<long, long> >::iterator it = m_rotorMemory.find(motor);
+	if (it != m_rotorMemory.end())
+	{
+		m_data[ROTOR_CMD] = it->second.first;
+		m_data[ROTOR_POS] = it->second.second;
+	}
+	else
+	{
+		m_data[ROTOR_CMD] = -1;
+		m_data[ROTOR_POS] = -1;
+	}
+	m_data[ROTOR_MOTOR] = motor;
+	eDebugNoSimulate("[eDVBFrontend%d] recall rotor memory for motor %ld: cmd %04lx pos %ld", m_dvbid, motor, m_data[ROTOR_CMD], m_data[ROTOR_POS]);
+}
+
+void eDVBFrontend::clearRotorMemory()
+{
+	m_rotorMemory.clear();
+	m_data[ROTOR_MOTOR] = -1;
 }
 
 int eDVBFrontend::isCompatibleWith(ePtr<iDVBFrontendParameters> &feparm, bool is_configured_sat)

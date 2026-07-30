@@ -355,26 +355,50 @@ _SAT_SKIN_METERS = """
 	<widget name="config" valueFont="Regular;28" position="450,360" size="1440,643" itemHeight="49" font="Regular;40" transparent="1" enableWrapAround="1" scrollbarMode="showOnDemand"/>
 """ % {"bar": _BAR_PIXMAP}
 
-# ONID / TSID / POS row -- only present on SatfinderExtra (needs dvbreader)
-# The network name sits on the header sub-line, mirroring the date on the
-# right: full width for long names (up to 255 bytes are legal in the NIT)
-# instead of squeezing a fourth box into the ONID/TSID/POS row. It lives in
-# this block, not _SAT_SKIN_HEADER, because the "network" source only exists
-# on SatfinderExtra and a widget bound to a missing source is a skin error.
+# Services / ONID / TSID / POS row -- only present on SatfinderExtra (needs
+# dvbreader). The network name sits on the header sub-line, mirroring the date
+# on the right: full width for long names (up to 255 bytes are legal in the
+# NIT) instead of squeezing a fourth box into this row. It lives in this
+# block, not _SAT_SKIN_HEADER, because the "network" source only exists on
+# SatfinderExtra and a widget bound to a missing source is a skin error.
+#
+# Every caption/value pair is bound to its StaticText source through
+# ConditionalShowHide (same pattern as the blue/yellow keys), so a field that
+# has nothing to show disappears entirely instead of painting an empty box.
+# Captions are FixedLabels rather than eLabels precisely so they can follow
+# their value's visibility -- an eLabel has no source and can never hide. The
+# value Label paints its own background, replacing the old separate box
+# eLabel for the same reason.
 _SAT_SKIN_DVBROW = """
 	<widget source="network" render="Label" position="30,78" size="1160,40" font="Regular;30" foregroundColor="#00ffc000" transparent="1" halign="left" valign="center" noWrap="1"/>
 
-	<eLabel text="ONID:" position="452,320" size="160,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center"/>
-	<eLabel position="618,317" size="230,46" backgroundColor="#25333333" zPosition="1"/>
-	<widget source="onid" render="Label" position="620,319" size="226,42" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="2"/>
+	<widget source="services" render="FixedLabel" text="Services:" position="30,320" size="160,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center" zPosition="1">
+		<convert type="ConditionalShowHide"/>
+	</widget>
+	<widget source="services" render="Label" position="196,317" size="230,46" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="1">
+		<convert type="ConditionalShowHide"/>
+	</widget>
 
-	<eLabel text="TSID:" position="870,320" size="160,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center"/>
-	<eLabel position="1036,317" size="230,46" backgroundColor="#25333333" zPosition="1"/>
-	<widget source="tsid" render="Label" position="1038,319" size="226,42" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="2"/>
+	<widget source="onid" render="FixedLabel" text="ONID:" position="452,320" size="160,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center" zPosition="1">
+		<convert type="ConditionalShowHide"/>
+	</widget>
+	<widget source="onid" render="Label" position="618,317" size="230,46" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="1">
+		<convert type="ConditionalShowHide"/>
+	</widget>
 
-	<eLabel text="POS:" position="1290,320" size="130,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center"/>
-	<eLabel position="1426,317" size="434,46" backgroundColor="#25333333" zPosition="1"/>
-	<widget source="pos" render="Label" position="1428,319" size="430,42" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="2"/>
+	<widget source="tsid" render="FixedLabel" text="TSID:" position="870,320" size="160,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center" zPosition="1">
+		<convert type="ConditionalShowHide"/>
+	</widget>
+	<widget source="tsid" render="Label" position="1036,317" size="230,46" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="1">
+		<convert type="ConditionalShowHide"/>
+	</widget>
+
+	<widget source="pos" render="FixedLabel" text="POS:" position="1290,320" size="130,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center" zPosition="1">
+		<convert type="ConditionalShowHide"/>
+	</widget>
+	<widget source="pos" render="Label" position="1426,317" size="434,46" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="1">
+		<convert type="ConditionalShowHide"/>
+	</widget>
 """
 
 # Bottom colour-key bar. Red/Green/Blue chips are always present. The Yellow
@@ -510,7 +534,7 @@ class Satfinder(ScanSetup, ServiceScan):
 		self["actions"] = ActionMap(["SetupActions", "ColorActions"],
 		{
 			"save": self.keyGoScan,
-			"ok": self.keyGoScan,
+			"ok": self.keyOK,
 			"cancel": self.keyCancel,
 			"blue": self.keyBlue,
 		}, -3)
@@ -1013,6 +1037,69 @@ class Satfinder(ScanSetup, ServiceScan):
 		else:
 			self["config"].handleKey(ACTIONKEY_RIGHT, self.entryChanged)
 
+	def keyOK(self):
+		"""OK on the Satellite or Transponder rows opens a deferred-tune picker.
+
+		Left/right on these rows retunes on every step (newConfig fires per
+		keypress), so on a motorised dish the rotor starts driving toward
+		every satellite the cursor merely passes on the way to the one the
+		user actually wants. The ChoiceBox lets the whole list be browsed
+		with zero tuner/rotor side effects; the single tune (and rotor move)
+		happens only when a choice is confirmed. On every other row OK keeps
+		its original meaning and starts the scan, same as the green key.
+		"""
+		cur = self["config"].getCurrent()
+		if cur is not None and cur in (
+					getattr(self, "satEntry", None),
+					getattr(self, "preDefTransponderEntry", None),
+					getattr(self, "preDefTransponderCableEntry", None),
+					getattr(self, "preDefTransponderTerrEntry", None),
+					getattr(self, "preDefTransponderAtscEntry", None),
+				):
+			self._openDeferredPicker(cur)
+		else:
+			self.keyGoScan()
+
+	def _openDeferredPicker(self, entry):
+		"""Open a ChoiceBox over a ConfigSelection's choices without touching
+		the config element (and therefore without tuning) until confirmed."""
+		label, cfg = entry[0], entry[1]
+		choices = cfg.choices.choices
+		if isinstance(choices, dict):
+			pairs = list(choices.items())
+		else:
+			# ConfigSelection/ConfigSatlist choices: (value, description)
+			# tuples, or bare strings acting as both.
+			pairs = [c if isinstance(c, tuple) else (c, c) for c in choices]
+		menu = [(str(desc), value) for value, desc in pairs]
+		if not menu:
+			return
+		try:
+			selection = cfg.index  # preselect the current value
+		except (ValueError, AttributeError):
+			selection = 0
+		self._picker_config = cfg
+		self.session.openWithCallback(self._deferredPickerChosen, ChoiceBox,
+			title=_("Select %s — tuning starts after OK") % label.strip(),
+			list=menu, selection=selection)
+
+	def _deferredPickerChosen(self, answer):
+		cfg = getattr(self, "_picker_config", None)
+		self._picker_config = None
+		if answer is None or cfg is None:
+			return  # cancelled — nothing was tuned, dish never moved
+		value = answer[1]
+		if cfg.value == value:
+			return  # same choice reconfirmed — don't kick off a redundant retune
+		# tuning_sat and the predefined-transponder ConfigSelections have no
+		# retune notifiers (see createConfig); newConfig() owns their retune.
+		# The cursor is still on the picked row, so newConfig() takes the
+		# right branch: satellite -> blindscan sync + createSetup + retune,
+		# transponder -> retune only. Exactly one tune / rotor command.
+		cfg.value = value
+		self["config"].invalidateCurrent()
+		self.newConfig()
+
 	def _blindscanFileChosen(self, answer):
 		if answer is None:
 			return
@@ -1450,6 +1537,7 @@ class SatfinderExtra(Satfinder):
 
 		# DVB stream info
 		self.serviceList = []
+		self["services"] = StaticText("")
 		self["tsid"] = StaticText("")
 		self["onid"] = StaticText("")
 		self["pos"] = StaticText("")
@@ -1529,6 +1617,7 @@ class SatfinderExtra(Satfinder):
 		
 		with self.threadLock:
 			# Reset UI elements
+			self["services"].setText("")
 			self["tsid"].setText("")
 			self["onid"].setText("")
 			self["pos"].setText("")
@@ -1662,6 +1751,12 @@ class SatfinderExtra(Satfinder):
 			if self.serviceList:
 				self["key_yellow"].setText(_("Service list"))
 				self["actions2"].setEnabled(True)
+				# Service readout: listing SIDs is pointless on a busy mux
+				# ("716 +11" tells you nothing), so show a plain count of the
+				# distinct services found instead. The full list -- names,
+				# SIDs, types, CA status -- stays one press away on the
+				# yellow key.
+				self["services"].setText("%d" % len(set(s["service_id"] for s in self.serviceList)))
 
 		# Get orbital position for satellite
 		if self.tsid is not None and self.onid is not None:
@@ -2050,7 +2145,9 @@ class SatfinderExtra(Satfinder):
 				color = fta_color
 			else:
 				color = encrypted_color
-			out.append("- {}{}{}".format(color, service["service_name"], default_color))
+			# SID shown per service (dim, after the name) so the "+N" hint in
+			# the info row expands to the full SID list on the yellow key.
+			out.append("- {}{}{}  (SID {})".format(color, service["service_name"], default_color, service["service_id"]))
 
 		self.session.openWithCallback(self._servicesFoundCallback, ServicesFound, "\n".join(out), legend)
 

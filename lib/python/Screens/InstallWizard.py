@@ -57,25 +57,24 @@ class InstallWizard(ConfigListScreen, Screen):
 			self.createMenu()
 
 	def checkNetwork(self):
-		if self.adapters:
-			self.adapter = self.adapters.pop(0)
-			if iNetwork.getAdapterAttribute(self.adapter, 'up'):
+		while self.adapters:
+			adapter = self.adapters.pop(0)
+			try:
+				import netifaces as ni
+				ip = ni.ifaddresses(adapter).get(ni.AF_INET, [{}])[0].get("addr")
+			except Exception:
+				ip = ".".join([str(x) for x in iNetwork.getAdapterAttribute(adapter, "ip") or [0, 0, 0, 0]])
+			if ip and ip != "0.0.0.0":
+				self.adapter = adapter
+				self.ip = ip
 				iNetwork.checkNetworkState(self.checkNetworkStateCallback)
-			else:
-				iNetwork.restartNetwork(self.restartNetworkCallback)
-		else:
-			self.createMenu()
+				return
+		self.createMenu()
 
 	def checkNetworkStateCallback(self, data):
 		if data < 3:
 			config.misc.installwizard.hasnetwork.value = True
 			self.createMenu()
-		else:
-			self.checkNetwork()
-
-	def restartNetworkCallback(self, retval):
-		if retval:
-			iNetwork.checkNetworkState(self.checkNetworkStateCallback)
 		else:
 			self.checkNetwork()
 
@@ -87,12 +86,7 @@ class InstallWizard(ConfigListScreen, Screen):
 		self.list = []
 		if self.index == self.STATE_UPDATE:
 			if config.misc.installwizard.hasnetwork.value:
-				try:
-					import netifaces as ni
-					ip = ni.ifaddresses(self.adapter).get(ni.AF_INET, [{}])[0].get("addr", "0.0.0.0")
-				except Exception:
-					ip = ".".join([str(x) for x in iNetwork.getAdapterAttribute(self.adapter, "ip") or [0, 0, 0, 0]])
-				self.list.append((_("Your internet connection is working (IP address: %s)") % ip, self.enabled))
+				self.list.append((_("Your internet connection is working (IP address: %s)") % self.ip, self.enabled))
 			else:
 				self.list.append((_("Your receiver does not have an internet connection"), self.enabled))
 		elif self.index == self.STATE_CHOISE_CHANNELLIST:

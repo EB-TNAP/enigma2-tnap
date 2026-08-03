@@ -42,6 +42,7 @@ eDVBScan::eDVBScan(iDVBChannel *channel, bool usePAT, bool debug)
 	,m_ready_all(usePAT ? (readySDT|readyPAT) : readySDT)
 	,m_pmt_running(false)
 	,m_abort_current_pmt(false)
+	,m_vct_succeeded(false)
 	,m_flags(0)
 	,m_usePAT(usePAT)
 	,m_scan_debug(debug)
@@ -260,6 +261,7 @@ RESULT eDVBScan::nextChannel()
 	m_pat_programs.clear();
 	m_pmt_running = false;
 	m_abort_current_pmt = false;
+	m_vct_succeeded = false;
 
 	m_pat_tsid = eTransportStreamID();
 
@@ -534,7 +536,10 @@ void eDVBScan::VCTready(int err)
 	if (!m_SDT || !err)
 		m_ready |= readySDT;
 	if (!err)
+	{
 		m_ready |= validVCT;
+		m_vct_succeeded = true;
+	}
 	channelDone();
 }
 
@@ -836,9 +841,10 @@ int eDVBScan::sameChannel(iDVBFrontendParameters *ch1, iDVBFrontendParameters *c
 void eDVBScan::channelDone()
 {
 	/* On DVB-S/C transponders that carry ATSC PSIP, VCT and SDT can both
-	 * succeed.  VCT takes priority: discard SDT results so services are not
-	 * added twice with conflicting names. */
-	if ((m_ready & validVCT) && (m_ready & validSDT))
+	 * succeed. VCT takes priority. Keep the success state for the lifetime
+	 * of the transponder because validVCT is cleared after VCT processing;
+	 * SDT may complete in a later callback and must still be discarded. */
+	if (m_vct_succeeded && (m_ready & validSDT))
 	{
 		int ch_system_check;
 		m_ch_current->getSystem(ch_system_check);

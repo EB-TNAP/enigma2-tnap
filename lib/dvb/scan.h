@@ -67,6 +67,7 @@ class eDVBScan: public sigc::trackable, public iObject
 	std::set<unsigned short> m_pat_programs; /* all program_numbers from PAT; persists after m_pmts_to_read is drained */
 	bool m_pmt_running;
 	bool m_abort_current_pmt;
+	bool m_vct_succeeded;
 
 	std::list<ePtr<iDVBFrontendParameters> > m_ch_toScan, m_ch_scanned, m_ch_unavailable, m_ch_blindscan;
 	ePtr<iDVBFrontendParameters> m_ch_current, m_ch_blindscan_result;

@@ -68,6 +68,14 @@ class eDVBScan: public sigc::trackable, public iObject
 	bool m_pmt_running;
 	bool m_abort_current_pmt;
 	bool m_vct_succeeded;
+	bool m_vct_resolved;      /* true once VCTready() has fired for the current transponder, success or not */
+	bool m_vct_grace_pending; /* a short grace timer is running, waiting for the first VCT section to appear */
+	ePtr<eTimer> m_vct_grace_timer;
+
+		/* orbital positions where VCT has previously succeeded; once a satellite is known to
+		 * carry ATSC PSIP, later transponders on it always get the full VCT wait instead of
+		 * just a short grace period. Persists for the life of the process, not just one scan. */
+	static std::set<int> m_vct_known_positions;
 
 	std::list<ePtr<iDVBFrontendParameters> > m_ch_toScan, m_ch_scanned, m_ch_unavailable, m_ch_blindscan;
 	ePtr<iDVBFrontendParameters> m_ch_current, m_ch_blindscan_result;
@@ -87,6 +95,7 @@ class eDVBScan: public sigc::trackable, public iObject
 	void PATready(int err);
 	void PMTready(int err);
 	void VCTready(int err);
+	void vctGraceTimeout();
 
 	void addKnownGoodChannel(const eDVBChannelID &chid, iDVBFrontendParameters *feparm);
 	void addChannelToScan(iDVBFrontendParameters *feparm);

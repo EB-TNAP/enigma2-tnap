@@ -35,6 +35,8 @@
 
 DEFINE_REF(eDVBScan);
 
+std::set<int> eDVBScan::m_vct_known_positions;
+
 eDVBScan::eDVBScan(iDVBChannel *channel, bool usePAT, bool debug)
 	:m_channel(channel)
 	,m_channel_state(iDVBChannel::state_idle)
@@ -43,6 +45,8 @@ eDVBScan::eDVBScan(iDVBChannel *channel, bool usePAT, bool debug)
 	,m_pmt_running(false)
 	,m_abort_current_pmt(false)
 	,m_vct_succeeded(false)
+	,m_vct_resolved(false)
+	,m_vct_grace_pending(false)
 	,m_flags(0)
 	,m_usePAT(usePAT)
 	,m_scan_debug(debug)
@@ -262,6 +266,10 @@ RESULT eDVBScan::nextChannel()
 	m_pmt_running = false;
 	m_abort_current_pmt = false;
 	m_vct_succeeded = false;
+	m_vct_resolved = false;
+	m_vct_grace_pending = false;
+	if (m_vct_grace_timer)
+		m_vct_grace_timer->stop();
 
 	m_pat_tsid = eTransportStreamID();
 
@@ -529,6 +537,13 @@ void eDVBScan::PATready(int err)
 void eDVBScan::VCTready(int err)
 {
 	SCAN_eDebug("[scan.cpp-#424] got vct %d", err);
+	m_vct_resolved = true;
+	if (m_vct_grace_pending)
+	{
+		m_vct_grace_pending = false;
+		if (m_vct_grace_timer)
+			m_vct_grace_timer->stop();
+	}
 	/* In feATSC mode m_SDT is null, so VCT always satisfies readySDT.
 	 * When running alongside SDT (DVB-S/C), only set readySDT on success
 	 * so a successful VCT short-circuits the SDT timeout without blocking
@@ -539,7 +554,26 @@ void eDVBScan::VCTready(int err)
 	{
 		m_ready |= validVCT;
 		m_vct_succeeded = true;
+
+		/* Remember this satellite as VCT-carrying so later transponders on
+		 * it skip the short grace period and always wait for VCT properly. */
+		int system;
+		m_ch_current->getSystem(system);
+		if (system == iDVBFrontend::feSatellite)
+		{
+			eDVBFrontendParametersSatellite sat;
+			if (!m_ch_current->getDVBS(sat))
+				m_vct_known_positions.insert(sat.orbital_position);
+		}
 	}
+	channelDone();
+}
+
+void eDVBScan::vctGraceTimeout()
+{
+	SCAN_eDebug("[eDVBScan] VCT grace period elapsed with no data seen; proceeding without it");
+	m_vct_grace_pending = false;
+	m_vct_resolved = true;
 	channelDone();
 }
 
@@ -1232,6 +1266,52 @@ void eDVBScan::channelDone()
 		{
 			m_abort_current_pmt = false;
 			PMTready(-1);
+		}
+		return;
+	}
+
+	/* SDT/PAT are satisfied, but a VCT filter started opportunistically in
+	 * startFilter() (every DVB-S/C transponder gets one) may still be
+	 * in flight. Do not let it be silently abandoned by an early retune:
+	 * if it has already produced any section, or this satellite is known
+	 * from a previous transponder to carry ATSC PSIP, wait for it properly.
+	 * Otherwise grant a short, one-time grace period on the chance a
+	 * section is about to arrive, rather than assuming this transponder
+	 * has no PSIP after zero effort. Transponders with no VCT at all
+	 * still finish quickly, after just that one short grace period. */
+	if (m_VCT && !m_vct_resolved)
+	{
+		bool must_wait = !m_VCT->getSections().empty();
+
+		if (!must_wait)
+		{
+			int system;
+			m_ch_current->getSystem(system);
+			if (system == iDVBFrontend::feSatellite)
+			{
+				eDVBFrontendParametersSatellite sat;
+				if (!m_ch_current->getDVBS(sat) &&
+					m_vct_known_positions.find(sat.orbital_position) != m_vct_known_positions.end())
+					must_wait = true;
+			}
+		}
+
+		if (must_wait)
+		{
+			SCAN_eDebug("[eDVBScan] VCT pending (data seen, or known PSIP satellite); deferring transponder completion");
+			return;
+		}
+
+		if (!m_vct_grace_pending)
+		{
+			SCAN_eDebug("[eDVBScan] No VCT activity yet; granting a short grace period before finishing transponder");
+			m_vct_grace_pending = true;
+			if (!m_vct_grace_timer)
+			{
+				m_vct_grace_timer = eTimer::create(eApp);
+				CONNECT(m_vct_grace_timer->timeout, eDVBScan::vctGraceTimeout);
+			}
+			m_vct_grace_timer->start(750, true);
 		}
 		return;
 	}

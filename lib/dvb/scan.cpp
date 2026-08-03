@@ -874,6 +874,54 @@ int eDVBScan::sameChannel(iDVBFrontendParameters *ch1, iDVBFrontendParameters *c
 
 void eDVBScan::channelDone()
 {
+	/* SDT's spec-mandated <=2s repetition means it usually completes before
+	 * VCT's slower PSIP cycle. If SDT were processed immediately here on a
+	 * transponder that also carries VCT, its services would already be
+	 * committed below (and validSDT cleared) before the discard check a
+	 * few lines down ever gets a chance to run against a VCT that resolves
+	 * a moment later - VCT would then add its own copies on top, producing
+	 * the exact duplicate-service bug this file was already patched for.
+	 * So: hold everything below (discard check, SDT/VCT/NIT processing,
+	 * transponder-complete) until VCT is resolved one way or the other -
+	 * unless it has shown no activity at all, in which case a short grace
+	 * period is enough. See vctGraceTimeout() and m_vct_known_positions. */
+	if (m_VCT && !m_vct_resolved)
+	{
+		bool must_wait = !m_VCT->getSections().empty();
+
+		if (!must_wait)
+		{
+			int system;
+			m_ch_current->getSystem(system);
+			if (system == iDVBFrontend::feSatellite)
+			{
+				eDVBFrontendParametersSatellite sat;
+				if (!m_ch_current->getDVBS(sat) &&
+					m_vct_known_positions.find(sat.orbital_position) != m_vct_known_positions.end())
+					must_wait = true;
+			}
+		}
+
+		if (must_wait)
+		{
+			SCAN_eDebug("[eDVBScan] VCT pending (data seen, or known PSIP satellite); deferring SDT processing");
+			return;
+		}
+
+		if (!m_vct_grace_pending)
+		{
+			SCAN_eDebug("[eDVBScan] No VCT activity yet; granting a short grace period before processing SDT");
+			m_vct_grace_pending = true;
+			if (!m_vct_grace_timer)
+			{
+				m_vct_grace_timer = eTimer::create(eApp);
+				CONNECT(m_vct_grace_timer->timeout, eDVBScan::vctGraceTimeout);
+			}
+			m_vct_grace_timer->start(750, true);
+		}
+		return;
+	}
+
 	/* On DVB-S/C transponders that carry ATSC PSIP, VCT and SDT can both
 	 * succeed. VCT takes priority. Keep the success state for the lifetime
 	 * of the transponder because validVCT is cleared after VCT processing;
@@ -1266,52 +1314,6 @@ void eDVBScan::channelDone()
 		{
 			m_abort_current_pmt = false;
 			PMTready(-1);
-		}
-		return;
-	}
-
-	/* SDT/PAT are satisfied, but a VCT filter started opportunistically in
-	 * startFilter() (every DVB-S/C transponder gets one) may still be
-	 * in flight. Do not let it be silently abandoned by an early retune:
-	 * if it has already produced any section, or this satellite is known
-	 * from a previous transponder to carry ATSC PSIP, wait for it properly.
-	 * Otherwise grant a short, one-time grace period on the chance a
-	 * section is about to arrive, rather than assuming this transponder
-	 * has no PSIP after zero effort. Transponders with no VCT at all
-	 * still finish quickly, after just that one short grace period. */
-	if (m_VCT && !m_vct_resolved)
-	{
-		bool must_wait = !m_VCT->getSections().empty();
-
-		if (!must_wait)
-		{
-			int system;
-			m_ch_current->getSystem(system);
-			if (system == iDVBFrontend::feSatellite)
-			{
-				eDVBFrontendParametersSatellite sat;
-				if (!m_ch_current->getDVBS(sat) &&
-					m_vct_known_positions.find(sat.orbital_position) != m_vct_known_positions.end())
-					must_wait = true;
-			}
-		}
-
-		if (must_wait)
-		{
-			SCAN_eDebug("[eDVBScan] VCT pending (data seen, or known PSIP satellite); deferring transponder completion");
-			return;
-		}
-
-		if (!m_vct_grace_pending)
-		{
-			SCAN_eDebug("[eDVBScan] No VCT activity yet; granting a short grace period before finishing transponder");
-			m_vct_grace_pending = true;
-			if (!m_vct_grace_timer)
-			{
-				m_vct_grace_timer = eTimer::create(eApp);
-				CONNECT(m_vct_grace_timer->timeout, eDVBScan::vctGraceTimeout);
-			}
-			m_vct_grace_timer->start(750, true);
 		}
 		return;
 	}

@@ -361,5 +361,11 @@ def getTNAPBuildTimestamp():
 	return _("Unknown")
 
 
+def getTnapReceiverId():
+	from Tools.TnapId import receiverId
+	rid = receiverId()
+	return rid if rid else _("Not available")
+
+
 # For modules that do "from About import about"
 about = modules[__name__]

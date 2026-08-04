@@ -52,10 +52,9 @@ def connected_to_internet():
         try:
             _ = requests.get('https://github.com', timeout=5)
             return True
-        except requests.ConnectionError:
+        except requests.exceptions.RequestException:
             cprintoff("No internet connection available.")
             return False
-        print(connected_to_internet())
 
 
 def logdata(label_name='', data=None):

@@ -49,12 +49,20 @@ def cprinton(text):
 
 def connected_to_internet():
         import requests
-        try:
-            _ = requests.get('https://github.com', timeout=5)
-            return True
-        except requests.exceptions.RequestException:
-            cprintoff("No internet connection available.")
-            return False
+        from Tools.TnapId import feedUserAgent
+        headers = {}
+        userAgent = feedUserAgent()
+        if userAgent:
+            headers["User-Agent"] = userAgent
+        for url in ('https://tnapimages.com/online', 'https://github.com'):
+            try:
+                requests.get(url, timeout=5, headers=headers if 'tnapimages' in url else None)
+                cprinton('[CheckInternet] we are Online')
+                return True
+            except Exception as err:
+                cprintoff('[CheckInternet] %s unreachable (%s)' % (url, err))
+        cprintoff('No internet connection available.')
+        return False
 
 
 def logdata(label_name='', data=None):

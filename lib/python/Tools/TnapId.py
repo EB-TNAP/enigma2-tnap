@@ -9,6 +9,7 @@
 #
 # See TNAP_Receiver_ID_Implementation.md
 
+import os
 import re
 from hashlib import sha256
 
@@ -21,6 +22,7 @@ RID_PREFIX = "1-"
 UA_FORMAT_VERSION = "TNAP-Feed/1.0"
 
 MAC_PATH = "/sys/class/net/eth0/address"
+OPT_OUT_PATH = "/etc/enigma2/no-feed-id"
 _SAFE = re.compile(r"[^A-Za-z0-9._-]")
 
 
@@ -45,6 +47,8 @@ def _readMac():
 
 def receiverId():
 	"""Return the receiver identifier, or None if it cannot be derived."""
+	if os.path.exists(OPT_OUT_PATH):
+		return None
 	mac = _readMac()
 	if not mac:
 		return None

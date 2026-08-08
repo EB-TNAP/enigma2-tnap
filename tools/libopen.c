@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <dlfcn.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 
 #undef DEBUG
@@ -13,6 +14,18 @@ int open64(const char *pathname, int flags, ...)
 	typedef int (*FUNC_PTR) (const char* pathname, int flags, ...);
 	static FUNC_PTR libc_open64;
 	int fd=-1;
+	mode_t mode = 0;
+	int has_mode = flags & O_CREAT;
+#ifdef O_TMPFILE
+	has_mode |= (flags & O_TMPFILE) == O_TMPFILE;
+#endif
+	if (has_mode)
+	{
+		va_list args;
+		va_start(args, flags);
+		mode = va_arg(args, mode_t);
+		va_end(args);
+	}
 	if (!libc_open64)
 	{
 		void *handle;
@@ -29,7 +42,7 @@ int open64(const char *pathname, int flags, ...)
 			exit(1);
 		}
 	}
-	fd = libc_open64(pathname, flags);
+	fd = has_mode ? libc_open64(pathname, flags, mode) : libc_open64(pathname, flags);
 	if (fd >= 0)
 	{
 		int fd_flags = fcntl(fd, F_GETFD, 0);
@@ -51,6 +64,18 @@ int open(const char *pathname, int flags, ...)
 	typedef int (*FUNC_PTR) (const char* pathname, int flags, ...);
 	static FUNC_PTR libc_open;
 	int fd=-1;
+	mode_t mode = 0;
+	int has_mode = flags & O_CREAT;
+#ifdef O_TMPFILE
+	has_mode |= (flags & O_TMPFILE) == O_TMPFILE;
+#endif
+	if (has_mode)
+	{
+		va_list args;
+		va_start(args, flags);
+		mode = va_arg(args, mode_t);
+		va_end(args);
+	}
 	if (!libc_open)
 	{
 		void *handle;
@@ -67,7 +92,7 @@ int open(const char *pathname, int flags, ...)
 			exit(1);
 		}
 	}
-	fd = libc_open(pathname, flags);
+	fd = has_mode ? libc_open(pathname, flags, mode) : libc_open(pathname, flags);
 	if (fd >= 0)
 	{
 		int fd_flags = fcntl(fd, F_GETFD, 0);
@@ -322,4 +347,3 @@ int pipe(int modus[2])
 	}
 	return ret;
 }
-

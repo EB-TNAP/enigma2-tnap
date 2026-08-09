@@ -1,4 +1,4 @@
-from enigma import eDVBResourceManager, eDVBFrontendParametersSatellite, eDVBFrontendParametersTerrestrial, eTimer
+from enigma import eDVBResourceManager, eDVBFrontendParametersSatellite, eDVBFrontendParametersTerrestrial, eTimer, ePoint
 from Screens.ScanSetup import ScanSetup, buildTerTransponder
 from Screens.ServiceScan import ServiceScan
 from Screens.MessageBox import MessageBox
@@ -8,7 +8,7 @@ from Plugins.Plugin import PluginDescriptor
 from Components.Sources.FrontendStatus import FrontendStatus
 from Components.ActionMap import ActionMap
 from Components.NimManager import nimmanager, getConfigSatlist
-from Components.config import config, ConfigSelection, ACTIONKEY_RIGHT
+from Components.config import config, ConfigSelection, ConfigSubsection, configfile, ACTIONKEY_RIGHT
 from Components.TuneTest import Tuner
 from Tools.Transponder import getChannelNumber, channel2frequency
 from Tools.BoundFunction import boundFunction
@@ -23,6 +23,7 @@ import fcntl   # AGCReader ioctl calls
 import select  # NIT network-name reader demux polling
 import errno   # NIT network-name reader demux read errors
 import threading  # Use threading instead of _thread
+import traceback  # worker-thread failure reporting (see _runGuarded)
 import time
 import datetime
 
@@ -43,6 +44,57 @@ if dvbreader_available:
 	from Components.ScrollLabel import ScrollLabel
 	from Components.Label import Label
 	from Tools.Hex2strColor import Hex2strColor
+
+# Audible signal tone. Optional in every sense: the module is imported
+# defensively, it reports its own backend availability, and it defaults to off.
+try:
+	from Tools.SignalTone import SignalTone, toneAvailable
+	SIGNALTONE_AVAILABLE = toneAvailable()
+	if not SIGNALTONE_AVAILABLE:
+		print("[Satfinder] no ALSA player on this box -- signal tone disabled")
+except Exception as e:
+	print("[Satfinder] signaltone unavailable: %s" % e)
+	SignalTone = None
+	SIGNALTONE_AVAILABLE = False
+
+# Sound level cycles on one key rather than living in a dialog: on a roof with
+# one hand on the mount you want a single press, not a menu. "0" is off. The
+# levels are amplitudes in percent, fed straight to SignalTone.
+_TONE_LEVELS = ("0", "20", "35", "60")
+
+
+def _toneLevelName(value):
+	return {"0": _("Off"), "20": _("Low"), "35": _("Medium"), "60": _("High")}.get(value, value)
+
+
+# What the tone does with no lock. Not a volume setting -- a character
+# setting. "search" is the low buzzing pulse whose rate tracks AGC (useful for
+# finding an unknown bird); "off" gives silence after the unlock chirp, for
+# anyone who only wants to hear a signal they can actually use.
+_NOLOCK_MODES = ("search", "off")
+
+
+def _noLockName(value):
+	return {"search": _("Search pulse"), "off": _("Silent")}.get(value, value)
+
+
+config.plugins.tnap_satfinder = ConfigSubsection()
+config.plugins.tnap_satfinder.tone = ConfigSelection(
+	default="0", choices=[(v, _toneLevelName(v)) for v in _TONE_LEVELS])
+config.plugins.tnap_satfinder.tone_nolock = ConfigSelection(
+	default="search", choices=[(v, _noLockName(v)) for v in _NOLOCK_MODES])
+
+# Canvas is used for the live signal-trend graph at the bottom right. It ships
+# with enigma2 (Components/Renderer/Canvas.py) but is optional here: if the
+# import fails the trend block is dropped from the skin and the tuning list
+# grows to fill the column instead, so the screen degrades cleanly on a build
+# that does not have it.
+try:
+	from Components.Sources.CanvasSource import CanvasSource
+	TREND_AVAILABLE = True
+except ImportError:
+	print("[Satfinder] CanvasSource not available -- signal trend disabled")
+	TREND_AVAILABLE = False
 
 # Box model detection
 BOX_MODEL = ""
@@ -294,13 +346,23 @@ def _nitNetworkNames(section):
 #
 # The skin is fully self-contained: no <panel> includes, no skin-defined color
 # names, no skin-private pixmaps. Colours are inlined as #AARRGGBB (enigma2:
-# 0x00 alpha byte = opaque, 0xFF = transparent). The only external pixmap is
-# infobar/bar_big.png, which lives in skin_default and therefore resolves on
-# every skin via the standard GUI-skin search path. Designed at 1920x1080;
+# 0x00 alpha byte = opaque, 0xFF = transparent) and every one of them comes from
+# the _CLR palette below, so the whole look can be retuned in one place. The
+# only external pixmap is our own signalbar.png. Designed at 1920x1080;
 # resolution="1920,1080" lets forks that support it auto-scale on other panels.
 #
-# Layout coordinates match the PLi-FullNightHD Satfinder so the on-screen
-# result is the one shown in the reference screenshot.
+# Layout is a two-column instrument panel:
+#
+#   header band          title + accent rule / clock + date / NIT network name
+#   meter block          SNR and AGC as caption cell | gradient track | value cell
+#   stream row           Services / ONID / TSID / POS chips (SatfinderExtra only)
+#   left column          SNR dB, AGC, BER stat cards + LOCK pill + peak hold
+#   right column         tuning config list + 60 s signal trend graph
+#   footer band          colour-key legend
+#
+# Everything is aligned to a 30px outer margin and a shared 1016px content
+# baseline so the two columns bottom out together. Widget NAMES are unchanged
+# from the previous layout -- this is a restyle, not a rewrite of the bindings.
 
 # Shared building blocks ----------------------------------------------------
 
@@ -312,48 +374,170 @@ def _nitNetworkNames(section):
 PLUGIN_PATH = os.path.dirname(os.path.realpath(__file__))
 _BAR_PIXMAP = os.path.join(PLUGIN_PATH, "signalbar.png")
 
+# Palette. Single source of truth for the whole screen -- change a value here
+# and every widget that uses it follows.
+_CLR = {
+	"bar":      _BAR_PIXMAP,
+	"screen":   "#00080809",  # page background
+	"chrome":   "#000d0e12",  # header / footer bands
+	"panel":    "#0012141a",  # card surface, meter trough, chip background
+	"panel2":   "#001a1d26",  # raised cell (meter caption / meter value)
+	"line":     "#001d2029",  # hairlines, separators, graph grid
+	"text":     "#00f0f0f0",
+	"dim":      "#008c93a1",  # captions and secondary text
+	"accent":   "#00ffc000",  # TNAP amber -- decoded stream values
+	"green":    "#0043c95a",
+	"greenink": "#00061006",  # text drawn on top of a green fill
+	"red":      "#008c1f22",
+	"amber":    "#00ffb020",
+	"peak":     "#00d8dde6",  # peak-hold needle
+}
+
+# Geometry the Python side also needs: the meter tracks (peak-hold needles are
+# moved along them at runtime) and the trend canvas. Keep these in step with
+# the XML below -- they are the same numbers, named once.
+_BAR_X = 196
+_BAR_W = 1320
+_BAR_H = 66
+_SNR_BAR_Y = 152
+_AGC_BAR_Y = 238
+_PEAK_W = 4
+
+_TREND_W = 1430
+_TREND_H = 144
+_TREND_TOP = 34          # caption band kept clear of the plot
+_TREND_COL = 10          # px per sample -> 143 samples across
+_TREND_SAMPLES = _TREND_W // _TREND_COL
+
+_CFG_TOP = 384
+_CONTENT_BOTTOM = 1016
+
 _SAT_SKIN_HEADER = """
-	<eLabel position="0,0" size="1920,1080" backgroundColor="#00000000" zPosition="-2"/>
-	<widget source="Title" render="Label" position="30,22" size="1500,66" font="Regular;46" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left" noWrap="1"/>
-	<widget source="global.CurrentTime" render="Label" position="1430,18" size="460,56" font="Regular;46" foregroundColor="#00f0f0f0" transparent="1" halign="right" valign="center">
-		<convert type="ClockToText">Format:%H:%M</convert>
+	<eLabel position="0,0" size="1920,1080" backgroundColor="%(screen)s" zPosition="-3"/>
+	<eLabel position="0,0" size="1920,124" backgroundColor="%(chrome)s" zPosition="-2"/>
+	<eLabel position="0,124" size="1920,2" backgroundColor="%(line)s" zPosition="-1"/>
+	<eLabel position="30,28" size="6,64" backgroundColor="%(accent)s" zPosition="1"/>
+	<widget source="Title" render="Label" position="54,24" size="1140,46" font="Regular;40" foregroundColor="%(text)s" transparent="1" valign="center" halign="left" noWrap="1"/>
+	<widget source="global.CurrentTime" render="Label" position="1430,20" size="460,52" font="Regular;44" foregroundColor="%(text)s" transparent="1" halign="right" valign="center">
+		<convert type="ClockToText">Format:%%H:%%M</convert>
 	</widget>
-	<widget source="global.CurrentTime" render="Label" position="1230,78" size="660,40" font="Regular;30" foregroundColor="#00b6b6b6" transparent="1" halign="right" valign="center">
+	<widget source="global.CurrentTime" render="Label" position="1230,74" size="660,34" font="Regular;26" foregroundColor="%(dim)s" transparent="1" halign="right" valign="center">
 		<convert type="ClockToText">Date</convert>
 	</widget>
-	<eLabel position="0,124" size="1920,2" backgroundColor="#00303030" zPosition="-1"/>
-"""
+""" % _CLR
 
+# Meter block. Each row is caption cell | gradient track | value cell instead of
+# text floating on top of the gradient: white-on-red at the left end of the bar
+# was the worst contrast on the old screen, and the percentage used to sit half
+# on the fill and half on the background depending on the reading. The value now
+# has a fixed cell of its own, so it never moves and never fights the gradient.
+#
+# snr_peak / agc_peak are 4px needles parked at the highest reading seen since
+# the last retune (see _updateInstruments). They are Labels with font size 1 and
+# no text, so all they ever paint is their own background -- the same trick the
+# conditional colour-key chips below use, and no extra pixmap.
 _SAT_SKIN_METERS = """
-	<widget source="Frontend" render="Progress" pixmap="%(bar)s" position="30,150" size="1860,75" borderWidth="1" borderColor="#00808888" foregroundColor="#0056c856">
+	<eLabel position="30,146" size="160,78" backgroundColor="%(panel2)s"/>
+	<eLabel text="SNR" position="30,146" size="160,78" font="Regular;38" halign="center" valign="center" transparent="1" foregroundColor="%(text)s" zPosition="2"/>
+	<widget source="Frontend" render="Progress" pixmap="%(bar)s" position="196,152" size="1320,66" backgroundColor="%(panel)s" foregroundColor="%(green)s">
 		<convert type="FrontendInfo">SNR</convert>
 	</widget>
-	<eLabel text="SNR:" position="37,150" size="150,75" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
-	<widget source="Frontend" render="Label" position="1552,150" size="330,75" halign="right" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2">
+	<widget name="snr_peak" position="196,152" size="4,66" backgroundColor="%(peak)s" font="Regular;1" zPosition="3"/>
+	<eLabel position="1524,146" size="366,78" backgroundColor="%(panel2)s"/>
+	<widget source="Frontend" render="Label" position="1524,146" size="342,78" halign="right" valign="center" transparent="1" foregroundColor="%(text)s" font="Regular;46" zPosition="2">
 		<convert type="FrontendInfo">SNR</convert>
 	</widget>
 
-	<widget name="agc_bar" pixmap="%(bar)s" position="30,240" size="1860,75" borderWidth="1" borderColor="#00808888" foregroundColor="#0056c856"/>
-	<eLabel text="AGC:" position="37,240" size="150,75" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
-	<widget name="agc_value" position="1552,240" size="330,75" halign="right" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
+	<eLabel position="30,232" size="160,78" backgroundColor="%(panel2)s"/>
+	<eLabel text="AGC" position="30,232" size="160,78" font="Regular;38" halign="center" valign="center" transparent="1" foregroundColor="%(text)s" zPosition="2"/>
+	<widget name="agc_bar" pixmap="%(bar)s" position="196,238" size="1320,66" backgroundColor="%(panel)s" foregroundColor="%(green)s"/>
+	<widget name="agc_peak" position="196,238" size="4,66" backgroundColor="%(peak)s" font="Regular;1" zPosition="3"/>
+	<eLabel position="1524,232" size="366,78" backgroundColor="%(panel2)s"/>
+	<widget name="agc_value" position="1524,232" size="342,78" halign="right" valign="center" transparent="1" foregroundColor="%(text)s" font="Regular;46" zPosition="2"/>
+""" % _CLR
 
-	<eLabel text="SNR:" position="30,360" size="180,30" transparent="1" zPosition="5" font="Regular;27"/>
-	<widget source="Frontend" render="Label" position="30,390" size="450,112" font="Regular;108" halign="left" transparent="1">
+# Left column: three stat cards, a LOCK pill and the peak-hold strip. Cards are
+# a flat panel with a 5px coloured edge and a small dim caption above the value,
+# which gives the readouts a visible hierarchy the old bare "SNR:" / big number
+# stack did not have. Font drops from 108 to 80 -- still legible from the dish,
+# but it stops the numbers from crowding the card and lets BER share the column.
+_SAT_SKIN_READOUTS = """
+	<eLabel position="30,384" size="400,150" backgroundColor="%(panel)s"/>
+	<eLabel position="30,384" size="5,150" backgroundColor="%(green)s"/>
+	<eLabel text="SNR" position="52,398" size="240,28" font="Regular;24" transparent="1" foregroundColor="%(dim)s" zPosition="2"/>
+	<widget source="Frontend" render="Label" position="52,428" size="360,94" font="Regular;80" halign="left" valign="center" transparent="1" foregroundColor="%(text)s" zPosition="2">
 		<convert type="FrontendInfo">SNRdB</convert>
 	</widget>
-	<eLabel text="AGC:" position="30,540" size="180,30" transparent="1" zPosition="5" font="Regular;27"/>
-	<widget name="agc_big" position="30,570" size="450,112" font="Regular;108" halign="left" transparent="1"/>
-	<eLabel text="BER:" position="30,720" size="180,30" transparent="1" zPosition="5" font="Regular;27"/>
-	<widget source="Frontend" render="Label" position="30,750" size="450,112" font="Regular;108" halign="left" transparent="1">
+
+	<eLabel position="30,546" size="400,150" backgroundColor="%(panel)s"/>
+	<eLabel position="30,546" size="5,150" backgroundColor="%(amber)s"/>
+	<eLabel text="AGC" position="52,560" size="240,28" font="Regular;24" transparent="1" foregroundColor="%(dim)s" zPosition="2"/>
+	<widget name="agc_big" position="52,590" size="360,94" font="Regular;80" halign="left" valign="center" transparent="1" foregroundColor="%(text)s" zPosition="2"/>
+
+	<eLabel position="30,708" size="400,150" backgroundColor="%(panel)s"/>
+	<eLabel position="30,708" size="5,150" backgroundColor="%(dim)s"/>
+	<eLabel text="BER" position="52,722" size="240,28" font="Regular;24" transparent="1" foregroundColor="%(dim)s" zPosition="2"/>
+	<widget source="Frontend" render="Label" position="52,752" size="360,94" font="Regular;80" halign="left" valign="center" transparent="1" foregroundColor="%(text)s" zPosition="2">
 		<convert type="FrontendInfo">BER</convert>
 	</widget>
-	<widget text="LOCK" source="Frontend" render="FixedLabel" position="30,895" size="465,120" font="Regular;108" halign="left" foregroundColor="#0056c856" transparent="1">
+
+	<widget text="LOCK" source="Frontend" render="FixedLabel" position="30,870" size="400,76" font="Regular;52" halign="center" valign="center" foregroundColor="%(greenink)s" backgroundColor="%(green)s" zPosition="3">
 		<convert type="FrontendInfo">LOCK</convert>
 		<convert type="ConditionalShowHide"/>
 	</widget>
+	<widget text="NO LOCK" source="Frontend" render="FixedLabel" position="30,870" size="400,76" font="Regular;52" halign="center" valign="center" foregroundColor="%(text)s" backgroundColor="%(red)s" zPosition="2">
+		<convert type="FrontendInfo">LOCK</convert>
+		<convert type="ConditionalShowHide">Invert</convert>
+	</widget>
 
-	<widget name="config" valueFont="Regular;28" position="450,360" size="1440,643" itemHeight="49" font="Regular;40" transparent="1" enableWrapAround="1" scrollbarMode="showOnDemand"/>
-""" % {"bar": _BAR_PIXMAP}
+	<eLabel position="30,958" size="400,58" backgroundColor="%(panel)s"/>
+	<widget name="peak_text" position="48,958" size="368,58" font="Regular;28" halign="left" valign="center" transparent="1" foregroundColor="%(accent)s" zPosition="2"/>
+""" % _CLR
+
+
+def _satSkinConfig(height):
+	"""Tuning list on a panel of its own, inset 16px so the selection
+	highlight never touches the panel edge. Height varies: the trend graph
+	takes the bottom of the column when Canvas rendering is available.
+
+	NOTE the zPosition on the list. GUISkin.createGUIScreen() instantiates
+	every named/source component first and only then attaches the skin's
+	additionalWidgets (the raw eLabels), so at equal zPosition an OPAQUE
+	eLabel is always painted OVER a widget, whatever the document order says.
+	Any widget that sits on one of the panels in this skin therefore needs an
+	explicit zPosition above 0 -- the readouts, meters and trend canvas all
+	carry one for the same reason."""
+	values = dict(_CLR)
+	values["panel_h"] = height
+	values["list_h"] = height - 28
+	return """
+	<eLabel position="460,384" size="1430,%(panel_h)d" backgroundColor="%(panel)s"/>
+	<widget name="config" position="476,398" size="1398,%(list_h)d" itemHeight="49" font="Regular;36" valueFont="Regular;30" transparent="1" enableWrapAround="1" scrollbarMode="showOnDemand" zPosition="2"/>
+""" % values
+
+
+# Rolling 60-70s trend of AGC (filled, amber) and SNR (line, green). This is the
+# part of the screen that actually helps you peak a dish: a single live number
+# tells you nothing about whether the last nudge helped, and AGC is readable
+# below lock, so the amber trace is useful before the green one exists. Drawn
+# with CanvasSource fills only -- no drawLine, no writeText -- so it works on
+# any build that ships Components/Renderer/Canvas.py, and the block is omitted
+# entirely (config list grows to fill the column) when it does not.
+_SAT_SKIN_TREND = """
+	<eLabel position="460,872" size="1430,144" backgroundColor="%(panel)s"/>
+	<widget source="trend" render="Canvas" position="460,872" size="1430,144" zPosition="2"/>
+	<eLabel text="SIGNAL TREND" position="476,878" size="300,26" font="Regular;22" transparent="1" foregroundColor="%(dim)s" zPosition="4"/>
+	<widget name="tone_status" position="800,876" size="780,30" font="Regular;22" transparent="1" foregroundColor="%(accent)s" halign="left" valign="center" zPosition="4"/>
+	<eLabel position="1610,888" size="20,6" backgroundColor="%(amber)s" zPosition="4"/>
+	<eLabel text="AGC" position="1638,876" size="80,30" font="Regular;22" transparent="1" foregroundColor="%(amber)s" zPosition="4"/>
+	<eLabel position="1734,888" size="20,6" backgroundColor="%(green)s" zPosition="4"/>
+	<eLabel text="SNR" position="1762,876" size="80,30" font="Regular;22" transparent="1" foregroundColor="%(green)s" zPosition="4"/>
+""" % _CLR
+
+if TREND_AVAILABLE:
+	_SAT_SKIN_MAIN = _satSkinConfig(476) + _SAT_SKIN_TREND
+else:
+	_SAT_SKIN_MAIN = _satSkinConfig(632)
 
 # Services / ONID / TSID / POS row -- only present on SatfinderExtra (needs
 # dvbreader). The network name sits on the header sub-line, mirroring the date
@@ -370,68 +554,76 @@ _SAT_SKIN_METERS = """
 # value Label paints its own background, replacing the old separate box
 # eLabel for the same reason.
 _SAT_SKIN_DVBROW = """
-	<widget source="network" render="Label" position="30,78" size="1160,40" font="Regular;30" foregroundColor="#00ffc000" transparent="1" halign="left" valign="center" noWrap="1"/>
+	<widget source="network" render="Label" position="54,72" size="1140,38" font="Regular;28" foregroundColor="%(accent)s" transparent="1" halign="left" valign="center" noWrap="1"/>
 
-	<widget source="services" render="FixedLabel" text="Services:" position="30,320" size="160,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center" zPosition="1">
+	<widget source="services" render="FixedLabel" text="Services" position="30,322" size="150,46" font="Regular;26" transparent="1" foregroundColor="%(dim)s" halign="right" valign="center" zPosition="1">
 		<convert type="ConditionalShowHide"/>
 	</widget>
-	<widget source="services" render="Label" position="196,317" size="230,46" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="1">
-		<convert type="ConditionalShowHide"/>
-	</widget>
-
-	<widget source="onid" render="FixedLabel" text="ONID:" position="452,320" size="160,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center" zPosition="1">
-		<convert type="ConditionalShowHide"/>
-	</widget>
-	<widget source="onid" render="Label" position="618,317" size="230,46" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="1">
+	<widget source="services" render="Label" position="190,322" size="140,46" font="Regular;30" foregroundColor="%(accent)s" backgroundColor="%(panel)s" halign="center" valign="center" zPosition="1">
 		<convert type="ConditionalShowHide"/>
 	</widget>
 
-	<widget source="tsid" render="FixedLabel" text="TSID:" position="870,320" size="160,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center" zPosition="1">
+	<widget source="onid" render="FixedLabel" text="ONID" position="350,322" size="130,46" font="Regular;26" transparent="1" foregroundColor="%(dim)s" halign="right" valign="center" zPosition="1">
 		<convert type="ConditionalShowHide"/>
 	</widget>
-	<widget source="tsid" render="Label" position="1036,317" size="230,46" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="1">
+	<widget source="onid" render="Label" position="490,322" size="140,46" font="Regular;30" foregroundColor="%(accent)s" backgroundColor="%(panel)s" halign="center" valign="center" zPosition="1">
 		<convert type="ConditionalShowHide"/>
 	</widget>
 
-	<widget source="pos" render="FixedLabel" text="POS:" position="1290,320" size="130,40" font="Regular;32" transparent="1" foregroundColor="#00b6b6b6" halign="right" valign="center" zPosition="1">
+	<widget source="tsid" render="FixedLabel" text="TSID" position="650,322" size="130,46" font="Regular;26" transparent="1" foregroundColor="%(dim)s" halign="right" valign="center" zPosition="1">
 		<convert type="ConditionalShowHide"/>
 	</widget>
-	<widget source="pos" render="Label" position="1426,317" size="434,46" font="Regular;32" foregroundColor="#00ffc000" backgroundColor="#25333333" halign="center" valign="center" zPosition="1">
+	<widget source="tsid" render="Label" position="790,322" size="140,46" font="Regular;30" foregroundColor="%(accent)s" backgroundColor="%(panel)s" halign="center" valign="center" zPosition="1">
 		<convert type="ConditionalShowHide"/>
 	</widget>
-"""
 
-# Bottom colour-key bar. Red/Green/Blue chips are always present. The Yellow
-# key only exists on SatfinderExtra, so it lives in its own block and is
-# rendered as conditional coloured text -- visible only when the plugin sets
-# key_yellow ("Service list") and hidden otherwise.
+	<widget source="pos" render="FixedLabel" text="POS" position="950,322" size="110,46" font="Regular;26" transparent="1" foregroundColor="%(dim)s" halign="right" valign="center" zPosition="1">
+		<convert type="ConditionalShowHide"/>
+	</widget>
+	<widget source="pos" render="Label" position="1070,322" size="820,46" font="Regular;30" foregroundColor="%(accent)s" backgroundColor="%(panel)s" halign="center" valign="center" zPosition="1">
+		<convert type="ConditionalShowHide"/>
+	</widget>
+""" % _CLR
+
+# Base Satfinder has no stream row, so a hairline stands in for it and keeps the
+# meters visually separated from the content columns below.
+_SAT_SKIN_PLAINROW = """
+	<eLabel position="30,344" size="1860,2" backgroundColor="%(line)s"/>
+""" % _CLR
+
+# Bottom colour-key bar on its own chrome band. Red/Green chips are always
+# present. Yellow and Blue only exist in some states, so each is drawn as a
+# key-bound Label whose fore/background match (its text is hidden by the colour
+# match, leaving a solid square) plus a ConditionalShowHide on both chip and
+# caption -- so an unavailable key leaves no orphan chip behind. No extra asset.
 _SAT_SKIN_BUTTONS_RGB = """
-	<eLabel position="190,1035" size="30,30" backgroundColor="#00ff4a3c" zPosition="2"/>
-	<widget source="key_red" render="Label" position="235,1030" size="320,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
+	<eLabel position="0,1022" size="1920,2" backgroundColor="%(line)s" zPosition="-1"/>
+	<eLabel position="0,1024" size="1920,56" backgroundColor="%(chrome)s" zPosition="-2"/>
 
-	<eLabel position="620,1035" size="30,30" backgroundColor="#0056c856" zPosition="2"/>
-	<widget source="key_green" render="Label" position="665,1030" size="320,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
-"""
+	<eLabel position="30,1038" size="26,26" backgroundColor="#00ff4a3c" zPosition="2"/>
+	<widget source="key_red" render="Label" position="68,1032" size="380,38" font="Regular;30" foregroundColor="%(text)s" transparent="1" valign="center" halign="left"/>
 
-# Blue "Load/Clear Blindscan" key, shown only when key_blue has text (i.e. a
-# blindscan file exists or one is loaded). The chip is a key_blue-bound Label
-# with matching fore/background so it paints as a solid blue square (its text is
-# hidden by the colour match); ConditionalShowHide then hides the chip and the
-# adjacent text label together when key_blue is empty -- no extra asset needed.
-_SAT_SKIN_BUTTON_BLUE = """
-	<widget source="key_blue" render="Label" position="1480,1035" size="30,30" font="Regular;1" backgroundColor="#00879ce1" foregroundColor="#00879ce1" zPosition="2">
-		<convert type="ConditionalShowHide"/>
-	</widget>
-	<widget source="key_blue" render="Label" position="1525,1030" size="365,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left">
-		<convert type="ConditionalShowHide"/>
-	</widget>
-"""
+	<eLabel position="490,1038" size="26,26" backgroundColor="%(green)s" zPosition="2"/>
+	<widget source="key_green" render="Label" position="528,1032" size="380,38" font="Regular;30" foregroundColor="%(text)s" transparent="1" valign="center" halign="left"/>
+""" % _CLR
 
 _SAT_SKIN_BUTTON_YELLOW = """
-	<widget source="key_yellow" render="Label" position="1010,1030" size="430,40" font="Regular;34" foregroundColor="#00F9C731" transparent="1" valign="center" halign="left">
+	<widget source="key_yellow" render="Label" position="950,1038" size="26,26" font="Regular;1" backgroundColor="%(accent)s" foregroundColor="%(accent)s" zPosition="2">
 		<convert type="ConditionalShowHide"/>
 	</widget>
-"""
+	<widget source="key_yellow" render="Label" position="988,1032" size="380,38" font="Regular;30" foregroundColor="%(text)s" transparent="1" valign="center" halign="left">
+		<convert type="ConditionalShowHide"/>
+	</widget>
+""" % _CLR
+
+_SAT_SKIN_BUTTON_BLUE = """
+	<widget source="key_blue" render="Label" position="1410,1038" size="26,26" font="Regular;1" backgroundColor="#00879ce1" foregroundColor="#00879ce1" zPosition="2">
+		<convert type="ConditionalShowHide"/>
+	</widget>
+	<widget source="key_blue" render="Label" position="1448,1032" size="442,38" font="Regular;30" foregroundColor="%(text)s" transparent="1" valign="center" halign="left">
+		<convert type="ConditionalShowHide"/>
+	</widget>
+""" % _CLR
 
 # Full screens --------------------------------------------------------------
 
@@ -442,6 +634,9 @@ SATFINDER_SKIN_BASE = (
 	'resolution="1920,1080">'
 	+ _SAT_SKIN_HEADER
 	+ _SAT_SKIN_METERS
+	+ _SAT_SKIN_PLAINROW
+	+ _SAT_SKIN_READOUTS
+	+ _SAT_SKIN_MAIN
 	+ _SAT_SKIN_BUTTONS_RGB
 	+ _SAT_SKIN_BUTTON_BLUE
 	+ '</screen>'
@@ -455,6 +650,8 @@ SATFINDER_SKIN_EXTRA = (
 	+ _SAT_SKIN_HEADER
 	+ _SAT_SKIN_DVBROW
 	+ _SAT_SKIN_METERS
+	+ _SAT_SKIN_READOUTS
+	+ _SAT_SKIN_MAIN
 	+ _SAT_SKIN_BUTTONS_RGB
 	+ _SAT_SKIN_BUTTON_YELLOW
 	+ _SAT_SKIN_BUTTON_BLUE
@@ -528,8 +725,26 @@ class Satfinder(ScanSetup, ServiceScan):
 		self["agc_big"] = Label("")
 		self._agc_reader = None
 		self.agc_timer = eTimer()
-		self.agc_timer.callback.append(self._updateAGC)
+		self.agc_timer.callback.append(self._updateMeters)
 		self.agc_timer.start(250)
+
+		# Peak hold + signal trend. Both are fed from the same 250ms tick as
+		# the AGC bar (see _updateInstruments) and both reset on every retune,
+		# so a peak always refers to the transponder currently on screen.
+		self["snr_peak"] = Label("")
+		self["agc_peak"] = Label("")
+		self["peak_text"] = Label("")
+		self["tone_status"] = Label("")
+		if TREND_AVAILABLE:
+			self["trend"] = CanvasSource()
+		self._peak_snr_pct = 0
+		self._peak_agc_pct = 0
+		self._peak_snr_db = None
+		self._needle_x = {"snr_peak": None, "agc_peak": None}
+		self._trend = []
+		self._trend_tick = 0
+		self._tone_locked = False
+		self._instr_sig = None
 
 		self["actions"] = ActionMap(["SetupActions", "ColorActions"],
 		{
@@ -539,11 +754,38 @@ class Satfinder(ScanSetup, ServiceScan):
 			"blue": self.keyBlue,
 		}, -3)
 
+		# MENU cycles the sound level. Its own ActionMap because "menu" is not
+		# in SetupActions/ColorActions, and MenuActions is present in every
+		# keymap.xml. Deliberately NOT a number key: the config list needs
+		# those for direct frequency entry.
+		self["tone_actions"] = ActionMap(["MenuActions"],
+		{
+			"menu": self.keyToneCycle,
+		}, -2)
+
+		# AUDIO toggles what you hear with no lock. Its own key rather than a
+		# second axis on MENU, because both need to be one blind press while
+		# you are at the dish.
+		self["tone_actions2"] = ActionMap(["InfobarAudioSelectionActions"],
+		{
+			"audioSelection": self.keyNoLockCycle,
+		}, -2)
+		self._tone = None
+		self._tone_error = None
+		self._tone_shown = None
+
 		self.initcomplete = True
 		self.session.postScanService = self.session.nav.getCurrentlyPlayingServiceOrGroup()
 		self.session.nav.stopService()
 		self.onClose.append(self.__onClose)
+		self.onLayoutFinish.append(self._initInstruments)
 		self.onShow.append(self.prepareFrontend)
+		# Mute whenever the screen loses focus -- a ChoiceBox or MessageBox
+		# opening over the top would otherwise leave the tone whining
+		# underneath it. pause/resume rather than stop/start, so a dialog does
+		# not cost a process restart.
+		self.onShow.append(self._toneApply)
+		self.onHide.append(self._tonePause)
 		# Hide the blue "Load Blindscan" key unless a blindscan file is present.
 		self._updateBlueButton()
 
@@ -614,6 +856,11 @@ class Satfinder(ScanSetup, ServiceScan):
 			print(f"Error updating frontend status: {e}")
 			self.timer.start(1000, True)  # Retry after a longer delay
 
+	def _updateMeters(self):
+		"""Single 250ms tick: AGC bar/labels, then peak hold and trend."""
+		agc_pct = self._updateAGC()
+		self._updateInstruments(agc_pct)
+
 	def _updateAGC(self):
 		"""Poll raw signal strength and paint the AGC bar/labels.
 
@@ -621,11 +868,13 @@ class Satfinder(ScanSetup, ServiceScan):
 		is safe. Independent of lock state and of the retune cycle: the side
 		fd keeps reading the AGC register even while updateFrontendStatus()
 		is busy re-tuning after FAILED/LOSTLOCK.
+
+		Returns the percentage shown, or None when no value is available.
 		"""
 		feid = getattr(self, "feid", None)
 		if feid is None:
 			self._setAGC(None)
-			return
+			return None
 		# (Re)open the reader on first use or after a tuner switch.
 		if self._agc_reader is None or self._agc_reader.feid != feid:
 			if self._agc_reader is not None:
@@ -634,9 +883,11 @@ class Satfinder(ScanSetup, ServiceScan):
 		strength = self._agc_reader.read()
 		if strength is None:
 			self._setAGC(None)  # no value present (ioctl/open failure only)
-		else:
-			# 0 is a valid reading (deep null) -- show it, don't blank it.
-			self._setAGC(strength * 100 // 65535)
+			return None
+		# 0 is a valid reading (deep null) -- show it, don't blank it.
+		pct = strength * 100 // 65535
+		self._setAGC(pct)
+		return pct
 
 	def _setAGC(self, pct):
 		if pct is None:
@@ -649,8 +900,295 @@ class Satfinder(ScanSetup, ServiceScan):
 			self["agc_value"].setText(text)
 			self["agc_big"].setText(text)
 
+	# -----------------------------------------------------------------------
+	# Peak hold and signal trend
+	# -----------------------------------------------------------------------
+	# Why these exist: a live number tells you the signal right now, but not
+	# whether the last nudge of the dish made it better or worse -- which is
+	# the only question that matters while you are on the roof. Peak hold
+	# remembers the best reading since the current transponder was tuned, and
+	# the trend graph keeps roughly the last minute on screen. AGC is drawn as
+	# well as SNR because AGC is readable below lock (see AGCReader), so the
+	# amber trace is the useful one while you are still hunting for the bird.
+	#
+	# Both are driven from the existing 250ms AGC tick. The graph is redrawn at
+	# 1Hz from samples taken at 2Hz: the drivers only refresh their registers
+	# at roughly 1Hz anyway, and this keeps the canvas to about 300 fills per
+	# second on a box that also has a tuner and a demux to service.
+
+	# -----------------------------------------------------------------------
+	# Audible tone
+	# -----------------------------------------------------------------------
+
+	def keyToneCycle(self):
+		"""MENU: step Off -> Low -> Medium -> High -> Off and persist it."""
+		cfg = config.plugins.tnap_satfinder.tone
+		try:
+			nxt = _TONE_LEVELS[(_TONE_LEVELS.index(cfg.value) + 1) % len(_TONE_LEVELS)]
+		except ValueError:
+			nxt = _TONE_LEVELS[0]
+		cfg.value = nxt
+		cfg.save()
+		configfile.save()
+		self._tone_error = None
+		self._toneApply()
+
+	def keyNoLockCycle(self):
+		"""AUDIO: switch the no-lock sound between the search pulse and silence."""
+		cfg = config.plugins.tnap_satfinder.tone_nolock
+		try:
+			nxt = _NOLOCK_MODES[(_NOLOCK_MODES.index(cfg.value) + 1) % len(_NOLOCK_MODES)]
+		except ValueError:
+			nxt = _NOLOCK_MODES[0]
+		cfg.value = nxt
+		cfg.save()
+		configfile.save()
+		if self._tone is not None:
+			self._tone.setSearchEnabled(nxt == "search")
+		self._updateToneStatus()
+
+	def _toneApply(self):
+		"""Bring the tone into line with the config value."""
+		level = 0
+		try:
+			level = int(config.plugins.tnap_satfinder.tone.value)
+		except (TypeError, ValueError):
+			level = 0
+		if level <= 0 or not SIGNALTONE_AVAILABLE:
+			self._toneStop()
+		elif self._tone is None:
+			tone = SignalTone(volume=level / 100.0)
+			tone.setSearchEnabled(config.plugins.tnap_satfinder.tone_nolock.value == "search")
+			if tone.start():
+				self._tone = tone
+			else:
+				self._tone_error = tone.error
+				print("[Satfinder] signal tone failed to start: %s" % tone.error)
+		else:
+			self._tone.setVolume(level / 100.0)
+			self._tone.setSearchEnabled(config.plugins.tnap_satfinder.tone_nolock.value == "search")
+			self._tone.resume()
+		self._updateToneStatus()
+
+	def _tonePause(self):
+		if self._tone is not None:
+			self._tone.pause()
+
+	def _toneStop(self):
+		tone, self._tone = self._tone, None
+		if tone is not None:
+			tone.stop()
+
+	def _updateToneStatus(self):
+		"""One short line in the trend panel caption band. Also the only
+		discoverability hint for the MENU key, so it says something when the
+		tone is off rather than nothing at all."""
+		level = config.plugins.tnap_satfinder.tone.value
+		if not SIGNALTONE_AVAILABLE:
+			text = _("Sound: not available on this box")
+		elif self._tone_error:
+			text = _("Sound: failed (%s)") % self._tone_error
+		elif level == "0" or self._tone is None:
+			text = _("MENU: sound off")
+		else:
+			nolock = config.plugins.tnap_satfinder.tone_nolock.value
+			if self._tone_locked:
+				now = _("SNR tone")
+			elif nolock == "search":
+				now = _("AGC search pulse")
+			else:
+				now = _("silent, no lock")
+			text = "%s: %s   |   %s: %s   |   %s" % (
+				_("Sound"), _toneLevelName(level),
+				_("No lock"), _noLockName(nolock), now)
+		if text != self._tone_shown:
+			self._tone_shown = text
+			self["tone_status"].setText(text)
+
+	def _initInstruments(self):
+		"""Park the peak needles out of sight and clear the graph (post-layout)."""
+		for name in ("snr_peak", "agc_peak"):
+			inst = getattr(self[name], "instance", None)
+			if inst is not None:
+				inst.hide()
+		self._updatePeakText()
+		self._drawTrend()
+
+	def _checkInstrumentReset(self):
+		"""Reset peaks/history only when the tuned transponder or tuner changed.
+
+		Peak hold describes a TRANSPONDER, not a tune attempt. This used to
+		reset on every retune() -- but updateFrontendStatus() calls retune() on
+		every FAILED/LOSTLOCK, which on a motorised dish means every single
+		time the rotor moves. A 16dB peak would quietly become 12dB as you
+		stepped the dish, which is exactly backwards: peak hold earns its keep
+		when you have swung PAST the best position and want to know what the
+		best was. Momentary loss of lock now keeps the peak; changing satellite,
+		transponder or tuner clears it.
+		"""
+		if not hasattr(self, "_trend"):
+			return  # retune() can fire before __init__ finished
+		try:
+			signature = (getattr(self, "feid", None), repr(self.transponder))
+		except Exception:
+			return
+		if signature != self._instr_sig:
+			self._instr_sig = signature
+			self._resetInstruments()
+
+	def _resetInstruments(self):
+		"""Drop peaks and history. Only reached via _checkInstrumentReset."""
+		if not hasattr(self, "_trend"):
+			return  # retune() can fire before __init__ finished
+		self._peak_snr_pct = 0
+		self._peak_agc_pct = 0
+		self._peak_snr_db = None
+		del self._trend[:]
+		self._trend_tick = 0
+		for name in ("snr_peak", "agc_peak"):
+			self._needle_x[name] = None
+			inst = getattr(self[name], "instance", None)
+			if inst is not None:
+				inst.hide()
+		self._updatePeakText()
+		self._drawTrend()
+
+	def _readSnr(self):
+		"""Return (snr_pct, snr_db or None, locked) straight from the frontend.
+
+		Same normalisation the FrontendInfo converter uses (0-65535 -> percent,
+		hundredths of a dB -> dB) so the graph and the readouts never disagree.
+		Values outside a sane dB range are treated as 'not reported' -- some
+		drivers park a sentinel there when they have no dB estimate.
+
+		Both values are reported as zero/None unless the tuner is LOCKED. SNR
+		is meaningless without lock, and the AVL62X1 returns a full-scale
+		0xFFFF for a tick or two while it is still acquiring -- which used to
+		be enough to strand the peak needle at 99 %% for the whole session.
+		AGC is deliberately NOT gated this way (see AGCReader): a pre-lock AGC
+		reading is the whole point of this screen.
+		"""
+		frontend = getattr(self, "frontend", None)
+		if frontend is None:
+			return 0, None, False
+		status = {}
+		try:
+			frontend.getFrontendStatus(status)
+		except Exception:
+			return 0, None, False
+		if status.get("tuner_state") != "LOCKED":
+			return 0, None, False
+		raw = status.get("tuner_signal_quality") or 0
+		snr_pct = min(100, int(raw) * 100 // 65536)
+		raw_db = status.get("tuner_signal_quality_db")
+		snr_db = None
+		if raw_db is not None and 0 < raw_db <= 10000:
+			snr_db = raw_db / 100.0
+		return snr_pct, snr_db, True
+
+	def _updateInstruments(self, agc_pct):
+		snr_pct, snr_db, locked = self._readSnr()
+		self._tone_locked = locked
+		if self._tone is not None:
+			self._tone.update(agc_pct, snr_pct, locked)
+		self._trend_tick += 1
+		# One second of settling before anything can set a peak: a retune or a
+		# tuner switch throws transients on both readings.
+		settled = self._trend_tick > 4
+
+		if settled:
+			if agc_pct is not None and agc_pct > self._peak_agc_pct:
+				self._peak_agc_pct = agc_pct
+			if snr_pct > self._peak_snr_pct:
+				self._peak_snr_pct = snr_pct
+			if snr_db is not None and (self._peak_snr_db is None or snr_db > self._peak_snr_db):
+				self._peak_snr_db = snr_db
+
+		self._moveNeedle("snr_peak", _SNR_BAR_Y, self._peak_snr_pct)
+		self._moveNeedle("agc_peak", _AGC_BAR_Y, self._peak_agc_pct)
+		self._updatePeakText()
+
+		if self._trend_tick % 2 == 0:
+			self._trend.append((agc_pct or 0, snr_pct))
+			if len(self._trend) > _TREND_SAMPLES:
+				del self._trend[0:len(self._trend) - _TREND_SAMPLES]
+		if self._trend_tick % 4 == 0:
+			self._drawTrend()
+			self._updateToneStatus()
+
+	def _moveNeedle(self, name, y, pct):
+		"""Slide a peak-hold needle along its track; hide it until there is a
+		peak to show. Only moves when the pixel position actually changed, so
+		a steady signal costs no repaints."""
+		inst = getattr(self[name], "instance", None)
+		if inst is None:
+			return
+		if pct <= 0:
+			if self._needle_x[name] is not None:
+				self._needle_x[name] = None
+				inst.hide()
+			return
+		x = _BAR_X + int((_BAR_W - _PEAK_W) * min(pct, 100) / 100.0)
+		if x == self._needle_x[name]:
+			return
+		self._needle_x[name] = x
+		inst.move(ePoint(x, y))
+		inst.show()
+
+	def _updatePeakText(self):
+		if self._peak_snr_db is not None:
+			text = _("Peak") + "   %.1f dB" % self._peak_snr_db
+		elif self._peak_agc_pct:
+			text = _("Peak") + "   %d %% AGC" % self._peak_agc_pct
+		else:
+			text = _("Peak") + "   ---"
+		self["peak_text"].setText(text)
+
+	def _drawTrend(self):
+		"""Repaint the trend graph, newest sample flush to the right edge.
+
+		Fills only: one column for the AGC area, a 2px cap on top of it, and a
+		3px mark for SNR. drawLine/writeText are deliberately avoided so this
+		works on any build that has the Canvas renderer at all.
+		"""
+		if not TREND_AVAILABLE or "trend" not in self:
+			return
+		canvas = self["trend"]
+		plot_h = _TREND_H - _TREND_TOP
+		try:
+			canvas.fill(0, 0, _TREND_W, _TREND_H, 0x0012141a)
+			for frac in (0.25, 0.5, 0.75):
+				canvas.fill(0, _TREND_H - int(frac * plot_h), _TREND_W, 1, 0x001d2029)
+			canvas.fill(0, _TREND_H - 1, _TREND_W, 1, 0x001d2029)
+			count = len(self._trend)
+			for i in range(count):
+				agc, snr = self._trend[count - 1 - i]
+				x = _TREND_W - (i + 1) * _TREND_COL
+				if x < 0:
+					break
+				# Full-width segments (no 1px gap) so the traces read as
+				# continuous lines rather than a hatched block, and the wash
+				# under AGC stays barely above the panel colour -- AGC pins at
+				# 100 %% on a good dish, and a bright fill there just turns the
+				# whole graph into a slab.
+				if agc > 0:
+					height = max(3, int(agc * plot_h / 100))
+					canvas.fill(x, _TREND_H - height, _TREND_COL, height, 0x00161206)
+					canvas.fill(x, _TREND_H - height, _TREND_COL, 3, 0x00ffb020)
+				if snr > 0:
+					top = _TREND_H - max(3, int(snr * plot_h / 100))
+					canvas.fill(x, top, _TREND_COL, 3, 0x0043c95a)
+			canvas.flush()
+		except Exception as e:
+			print("[Satfinder][trend] draw failed: %s" % e)
+
 	def __onClose(self):
 		try:
+			# Kill the tone first. SignalTone is referenced by its own writer
+			# thread, so it survives Screen.doClose() clearing this object's
+			# __dict__ -- without this it would keep playing to an empty room
+			# and holding a pipe fd.
+			self._toneStop()
 			if hasattr(self, 'timer') and self.timer:
 				self.timer.stop()
 			if hasattr(self, 'agc_timer') and self.agc_timer:
@@ -1384,7 +1922,7 @@ class Satfinder(ScanSetup, ServiceScan):
 		if not hasattr(self, 'DVB_type'):
 			print("Warning: DVB_type not properly initialized")
 			return
-			
+
 		try:
 			if self.DVB_type.value == "DVB-S":
 				self.retuneSat()
@@ -1397,7 +1935,12 @@ class Satfinder(ScanSetup, ServiceScan):
 			else:
 				print(f"Unknown DVB type: {self.DVB_type.value}")
 				return
-				
+
+			# Clear peaks/history only if the tuning actually CHANGED. This has
+			# to run after the retune*() call, once self.transponder has been
+			# rebuilt. See _checkInstrumentReset for why it is not simply done
+			# on every retune.
+			self._checkInstrumentReset()
 			self.timer.start(500, True)
 		except Exception as e:
 			print(f"Error during retune: {e}")
@@ -1526,6 +2069,10 @@ class SatfinderExtra(Satfinder):
 		self.threadLock = threading.Lock()
 		self.threadEvents = {}
 		self.threadpool = []
+		# Shared closed-flag. A LIST, not a bool, so a worker thread can be
+		# handed the object itself and keep reading it after this screen's
+		# __dict__ has been cleared out from under it -- see _runGuarded.
+		self._closed = [False]
 
 		self["key_yellow"] = StaticText("")
 
@@ -1546,7 +2093,11 @@ class SatfinderExtra(Satfinder):
 		# Register our close handler — must be done explicitly because Python
 		# name-mangling (__onClose → _SatfinderExtra__onClose) means the parent's
 		# self.onClose.append(self.__onClose) only registered _Satfinder__onClose.
-		self.onClose.append(self._extraOnClose)
+		# insert(0), not append: handlers run in list order and the parent's is
+		# already registered, so appending would have released the frontend
+		# BEFORE the reader threads were told to stop -- the opposite of what
+		# _extraOnClose is for.
+		self.onClose.insert(0, self._extraOnClose)
 	def start_thread(self, target, args=(), name=None):
 		"""Safely start and track a new thread"""
 		if name not in self.threadEvents:
@@ -1557,12 +2108,43 @@ class SatfinderExtra(Satfinder):
 		# Prune finished threads before adding a new one
 		self.threadpool = [t for t in self.threadpool if t.is_alive()]
 
-		thread = threading.Thread(target=target, args=args)
+		# Enter through _runGuarded, and hand it the closed-flag object rather
+		# than a route back through self -- see _runGuarded for why.
+		thread = threading.Thread(target=self._runGuarded, args=(target, args, name, self._closed))
 		thread.daemon = True  # Set thread as daemon so it exits when main thread exits
 		thread.name = name if name else f"Thread-{len(self.threadpool)}"
 		self.threadpool.append(thread)
 		thread.start()
 		return thread
+
+	def _runGuarded(self, target, args, name, closed):
+		"""Thread entry point that survives the screen closing underneath it.
+
+		Screen.doClose() calls self.__dict__.clear() to break reference cycles,
+		so every attribute on this object disappears the instant the screen is
+		gone. stop_all_threads() only join()s for one second, and a reader can
+		be parked far longer than that inside dvbreader.read_sdt/read_nit or an
+		os.read() on a demux fd. It then wakes up, correctly leaves its loop on
+		the THREAD_RUNNING check -- that one is a module global, so it is still
+		readable -- and dies on the first self.<anything> that follows the loop.
+		That is the AttributeError on self.threadLock in getOrbPosFromNit: the
+		"No NIT data" write sits immediately after the read loop.
+
+		Rather than sprinkle guards over every late UI write in four different
+		readers, catch it once here. The closed flag arrives as an argument, so
+		this frame holds its own reference and can still be read after the
+		clear; a genuine bug raised while the screen is alive still gets its
+		full traceback.
+		"""
+		try:
+			target(*args)
+		except Exception as e:
+			if closed[0] or not THREAD_RUNNING:
+				print("[Satfinder][%s] abandoned after screen close: %s: %s" % (
+					name or "thread", e.__class__.__name__, e))
+			else:
+				print("[Satfinder][%s] thread failed:" % (name or "thread"))
+				traceback.print_exc()
 
 	def stop_all_threads(self):
 		"""Signal all threads to stop and wait for them"""
@@ -1591,6 +2173,7 @@ class SatfinderExtra(Satfinder):
 
 	def _extraOnClose(self):
 		"""Stop all threads before the parent close handler releases the frontend."""
+		self._closed[0] = True
 		self.stop_all_threads()
 
 	def retune(self, configElement=None):

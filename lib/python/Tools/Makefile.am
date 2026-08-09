@@ -8,4 +8,4 @@ install_PYTHON = \
 	Downloader.py Trashcan.py GetEcmInfo.py Alternatives.py TextBoundary.py \
 	camcontrol.py CountryCodes.py MultiBoot.py FallbackTimer.py Hex2strColor.py \
 	Geolocation.py CopyFiles.py Conversions.py ServiceReference.py ServiceHelper.py Migration.py WeatherID.py \
-	TnapId.py
+	TnapId.py SignalTone.py

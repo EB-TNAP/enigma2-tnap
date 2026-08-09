@@ -1,4 +1,4 @@
-from enigma import eTimer, eDVBSatelliteEquipmentControl, eDVBResourceManager, eDVBDiseqcCommand, eDVBFrontendParametersSatellite, iDVBFrontend
+from enigma import eTimer, eDVBSatelliteEquipmentControl, eDVBResourceManager, eDVBDiseqcCommand, eDVBFrontendParametersSatellite, iDVBFrontend, ePoint
 
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
@@ -15,7 +15,7 @@ from Components.ActionMap import NumberActionMap, ActionMap
 from Components.NimManager import nimmanager
 from Components.MenuList import MenuList
 from Components.ScrollLabel import ScrollLabel
-from Components.config import config, ConfigSatlist, ConfigNothing, ConfigSelection, ConfigSubsection, ConfigInteger, ConfigFloat, KEY_LEFT, KEY_RIGHT, KEY_0, getConfigListEntry, NoSave
+from Components.config import config, ConfigSatlist, ConfigNothing, ConfigSelection, ConfigSubsection, ConfigInteger, ConfigFloat, configfile, KEY_LEFT, KEY_RIGHT, KEY_0, getConfigListEntry, NoSave
 from Components.TuneTest import Tuner
 from Components.Pixmap import Pixmap
 from Tools.Transponder import ConvertToHumanReadable
@@ -30,6 +30,45 @@ from threading import Event as Event
 import os  # Extra Import
 from . import log
 from . import rotor_calc
+
+# Live signal-trend graph. Optional -- if this build has no Canvas renderer the
+# trend block is dropped from the skin and the panel is simply not drawn.
+try:
+	from Components.Sources.CanvasSource import CanvasSource
+	POS_TREND_AVAILABLE = True
+except ImportError:
+	print("[PositionerSetup] CanvasSource not available -- signal trend disabled")
+	POS_TREND_AVAILABLE = False
+
+# Audible signal tone, shared with the Signal finder so the pitch/dB
+# association you learn on one screen holds on the other. Preferred location is
+# the shared Tools copy; falls back to the copy inside the Satfinder plugin,
+# then to a local one, so it works whichever way the image ships it.
+SignalTone = None
+POS_TONE_AVAILABLE = False
+toneConfig = None
+# Level/mode naming and cycling live in the shared module too, so the two
+# screens can never drift out of step on the labels or the cycle order.
+_tone_level_name = _tone_nolock_name = lambda v: v
+_tone_cycle_level = _tone_cycle_nolock = lambda v: v
+for _mod in ("Tools.SignalTone",
+             "Plugins.SystemPlugins.Satfinder.signaltone",
+             "Plugins.SystemPlugins.PositionerSetup.signaltone"):
+	try:
+		_m = __import__(_mod, fromlist=["SignalTone"])
+		SignalTone = _m.SignalTone
+		toneConfig = _m.toneConfig
+		_tone_level_name = _m.levelName
+		_tone_nolock_name = _m.noLockName
+		_tone_cycle_level = _m.cycleLevel
+		_tone_cycle_nolock = _m.cycleNoLock
+		POS_TONE_AVAILABLE = _m.toneAvailable()
+		print("[PositionerSetup] signal tone from %s (available=%s)" % (_mod, POS_TONE_AVAILABLE))
+		break
+	except Exception:
+		continue
+else:
+	print("[PositionerSetup] no signaltone module found -- sound disabled")
 
 BOX_MODEL = ""
 BOX_NAME = ""
@@ -65,71 +104,175 @@ if fileExists("/proc/stb/info/boxtype") and not fileExists("/proc/stb/info/hwmod
 # skin defines, so enigma2's readSkin() falls back to the embedded self.skin
 # below and our layout always wins -- including the gradient signal bars.
 #
-# Fully self-contained: no <panel> includes, no skin-private colours. The only
-# external pixmap is signalbar.png (ship it next to this file). The TunerInfo
-# snr_bar/agc_bar eSliders accept a fill pixmap exactly like stock skins do;
-# the bar is full width (1860) so the slider's native-width, value-clipped blit
-# yields the correct fill length. foregroundColor is a green fallback if the
-# PNG is ever missing (clean green bar instead of an unreadable white block).
+# Fully self-contained: no <panel> includes, no skin-private colours, no fonts
+# beyond "Regular". The only external pixmap is signalbar.png (ship it next to
+# this file). The TunerInfo snr_bar/agc_bar/ber_bar eSliders accept a fill
+# pixmap exactly like stock skins do; foregroundColor is a green fallback if
+# the PNG is ever missing (clean green bar instead of an unreadable white one).
+#
+# DELIBERATELY NOT the same look as the Signal finder, so nobody drives the
+# wrong screen. Three differences, all structural rather than decorative:
+#
+#   * CYAN accent instead of the Signal finder's amber, on the header rule,
+#     card edges, decoded values and the move markers.
+#   * THREE thin bars (SNR / AGC / BER) instead of two fat ones, with the
+#     captions and values sitting OUTSIDE the track as plain text rather than
+#     in boxed cells. Reads as a lab instrument next to Satfinder's panel look.
+#   * A POSITIONER badge in the header.
+#
+# One caveat worth knowing before editing: GUISkin.createGUIScreen() builds
+# every named/source component first and only then attaches the skin's
+# additionalWidgets (the raw eLabels), so at equal zPosition an OPAQUE eLabel
+# paints OVER a widget whatever the document order says. Anything sitting on a
+# panel here therefore carries an explicit zPosition above 0.
 _POS_PLUGIN_PATH = os.path.dirname(os.path.realpath(__file__))
 _POS_BAR_PIXMAP = os.path.join(_POS_PLUGIN_PATH, "signalbar.png")
 
-POSITIONER_SKIN = ("""
-	<screen name="TNAP_PositionerSetup" position="0,0" size="1920,1080" title="TNAP Positioner Setup" flags="wfNoBorder" backgroundColor="#00000000" resolution="1920,1080">
-		<eLabel position="0,0" size="1920,1080" backgroundColor="#00000000" zPosition="-2"/>
+# Palette. Cooler and bluer than the Signal finder's neutral greys, which is
+# half of the "do not confuse the two screens" job on its own.
+_PCLR = {
+	"bar":      _POS_BAR_PIXMAP,
+	"screen":   "#00070a0c",
+	"chrome":   "#000c1114",
+	"panel":    "#00101a1e",
+	"panel2":   "#0017242a",
+	"line":     "#001d2c33",
+	"text":     "#00f0f0f0",
+	"dim":      "#00889aa0",
+	"accent":   "#0000c8d4",   # cyan -- the positioner's signature colour
+	"green":    "#0043c95a",
+	"greenink": "#00061006",
+	"red":      "#008c1f22",
+	"amber":    "#00ffb020",
+	"peak":     "#00d8dde6",
+	"msg":      "#00f9c731",   # status/blinking messages, unchanged
+}
 
-		<!-- header: title + clock + date -->
-		<widget source="Title" render="Label" position="30,22" size="1500,66" font="Regular;46" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left" noWrap="1"/>
-		<widget source="global.CurrentTime" render="Label" position="1430,18" size="460,56" font="Regular;46" foregroundColor="#00f0f0f0" transparent="1" halign="right" valign="center">
-			<convert type="ClockToText">Format:%H:%M</convert>
-		</widget>
-		<widget source="global.CurrentTime" render="Label" position="1230,78" size="660,40" font="Regular;30" foregroundColor="#00b6b6b6" transparent="1" halign="right" valign="center">
-			<convert type="ClockToText">Date</convert>
-		</widget>
-		<eLabel position="0,124" size="1920,2" backgroundColor="#00303030" zPosition="-1"/>
+# Geometry shared with the Python side (peak needles, trend canvas).
+_POS_BAR_X = 166
+_POS_BAR_W = 1440
+_POS_BAR_H = 42
+_POS_SNR_BAR_Y = 146
+_POS_AGC_BAR_Y = 208
+_POS_PEAK_W = 3
 
-		<!-- SNR gradient bar -->
-		<widget name="snr_bar" position="30,150" size="1860,75" pixmap="__BAR__" borderWidth="1" borderColor="#00808888" foregroundColor="#0056c856"/>
-		<eLabel text="SNR:" position="37,150" size="150,75" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
-		<widget name="snr_percentage" position="1552,150" size="330,75" halign="right" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
+_POS_TREND_W = 1420
+_POS_TREND_H = 150
+_POS_TREND_TOP = 40          # caption/legend band kept clear of the plot
+_POS_TREND_COL = 10
+_POS_TREND_SAMPLES = _POS_TREND_W // _POS_TREND_COL
 
-		<!-- BER gradient bar -->
-		<widget name="ber_bar" position="30,240" size="1860,75" pixmap="__BAR__" borderWidth="1" borderColor="#00808888" foregroundColor="#0056c856"/>
-		<eLabel text="BER:" position="37,240" size="150,75" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
-		<widget name="ber_value" position="1552,240" size="330,75" halign="right" valign="center" transparent="1" foregroundColor="#00f0f0f0" font="Regular;52" zPosition="2"/>
+_POS_SKIN_BODY = """
+	<eLabel position="0,0" size="1920,1080" backgroundColor="%(screen)s" zPosition="-3"/>
+	<eLabel position="0,0" size="1920,124" backgroundColor="%(chrome)s" zPosition="-2"/>
+	<eLabel position="0,124" size="1920,2" backgroundColor="%(line)s" zPosition="-1"/>
+	<eLabel position="30,28" size="6,64" backgroundColor="%(accent)s" zPosition="1"/>
+	<widget source="Title" render="Label" position="54,22" size="1000,46" font="Regular;40" foregroundColor="%(text)s" transparent="1" valign="center" halign="left" noWrap="1"/>
+	<eLabel text="POSITIONER" position="54,74" size="220,32" backgroundColor="%(accent)s" foregroundColor="%(greenink)s" font="Regular;22" halign="center" valign="center" zPosition="1"/>
+	<widget source="global.CurrentTime" render="Label" position="1430,20" size="460,52" font="Regular;44" foregroundColor="%(text)s" transparent="1" halign="right" valign="center">
+		<convert type="ClockToText">Format:%%H:%%M</convert>
+	</widget>
+	<widget source="global.CurrentTime" render="Label" position="1230,74" size="660,34" font="Regular;26" foregroundColor="%(dim)s" transparent="1" halign="right" valign="center">
+		<convert type="ClockToText">Date</convert>
+	</widget>
 
-		<!-- left column readouts -->
-		<eLabel text="SNR:" position="30,355" size="200,30" transparent="1" zPosition="5" font="Regular;27"/>
-		<widget name="snr_db" position="30,385" size="410,95" font="Regular;78" halign="left" transparent="1"/>
-		<widget name="lock_state" position="30,510" size="410,70" font="Regular;56" halign="left" foregroundColor="#0056c856" transparent="1"/>
+	<eLabel text="SNR" position="30,140" size="120,54" font="Regular;32" halign="right" valign="center" transparent="1" foregroundColor="%(dim)s" zPosition="2"/>
+	<widget name="snr_bar" position="166,146" size="1440,42" pixmap="%(bar)s" backgroundColor="%(panel2)s" foregroundColor="%(green)s"/>
+	<widget name="snr_peak" position="166,146" size="3,42" backgroundColor="%(peak)s" font="Regular;1" zPosition="3"/>
+	<widget name="snr_percentage" position="1626,140" size="264,54" font="Regular;36" halign="right" valign="center" transparent="1" foregroundColor="%(text)s" zPosition="2"/>
 
-		<!-- status / message line: prominent, horizontally centered on screen -->
-		<widget name="status_bar" position="480,705" size="960,100" font="Regular;46" halign="center" valign="center" transparent="1" foregroundColor="#00F9C731" zPosition="10"/>
+	<eLabel text="AGC" position="30,202" size="120,54" font="Regular;32" halign="right" valign="center" transparent="1" foregroundColor="%(dim)s" zPosition="2"/>
+	<widget name="agc_bar" position="166,208" size="1440,42" pixmap="%(bar)s" backgroundColor="%(panel2)s" foregroundColor="%(green)s"/>
+	<widget name="agc_peak" position="166,208" size="3,42" backgroundColor="%(peak)s" font="Regular;1" zPosition="3"/>
+	<widget name="agc_percentage" position="1626,202" size="264,54" font="Regular;36" halign="right" valign="center" transparent="1" foregroundColor="%(text)s" zPosition="2"/>
 
-		<eLabel text="Frequency:" position="30,800" size="205,34" transparent="1" font="Regular;28" foregroundColor="#00b6b6b6"/>
-		<widget name="frequency_value" position="245,800" size="195,34" font="Regular;28" halign="left" transparent="1"/>
-		<eLabel text="Symbol rate:" position="30,840" size="205,34" transparent="1" font="Regular;28" foregroundColor="#00b6b6b6"/>
-		<widget name="symbolrate_value" position="245,840" size="195,34" font="Regular;28" halign="left" transparent="1"/>
-		<eLabel text="FEC:" position="30,880" size="205,34" transparent="1" font="Regular;28" foregroundColor="#00b6b6b6"/>
-		<widget name="fec_value" position="245,880" size="195,34" font="Regular;28" halign="left" transparent="1"/>
-		<widget name="rotorstatus" position="30,930" size="435,80" font="Regular;26" halign="left" transparent="1"/>
+	<eLabel text="BER" position="30,264" size="120,54" font="Regular;32" halign="right" valign="center" transparent="1" foregroundColor="%(dim)s" zPosition="2"/>
+	<widget name="ber_bar" position="166,270" size="1440,42" pixmap="%(bar)s" backgroundColor="%(panel2)s" foregroundColor="%(green)s"/>
+	<widget name="ber_value" position="1626,264" size="264,54" font="Regular;36" halign="right" valign="center" transparent="1" foregroundColor="%(text)s" zPosition="2"/>
 
-		<!-- menu -->
-		<widget name="list" position="470,360" size="1420,560" itemHeight="49" font="Regular;40" valueFont="Regular;36" transparent="1" enableWrapAround="1" scrollbarMode="showOnDemand"/>
+	<eLabel position="30,334" size="420,150" backgroundColor="%(panel)s"/>
+	<eLabel position="30,334" size="5,150" backgroundColor="%(green)s"/>
+	<eLabel text="SNR" position="52,348" size="240,28" font="Regular;24" transparent="1" foregroundColor="%(dim)s" zPosition="2"/>
+	<widget name="snr_db" position="52,378" size="380,94" font="Regular;76" halign="left" valign="center" transparent="1" foregroundColor="%(text)s" zPosition="2"/>
 
-		<!-- bottom keys -->
-		<eLabel text="MENU" position="40,1038" size="90,28" backgroundColor="#00303030" foregroundColor="#00b6b6b6" font="Regular;20" halign="center" valign="center"/>
-		<eLabel text="INFO" position="138,1038" size="80,28" backgroundColor="#00303030" foregroundColor="#00b6b6b6" font="Regular;20" halign="center" valign="center"/>
+	<widget name="lock_yes" text="LOCK" position="30,494" size="420,76" font="Regular;52" halign="center" valign="center" foregroundColor="%(greenink)s" backgroundColor="%(green)s" zPosition="3"/>
+	<widget name="lock_no" text="NO LOCK" position="30,494" size="420,76" font="Regular;52" halign="center" valign="center" foregroundColor="%(text)s" backgroundColor="%(red)s" zPosition="2"/>
 
-		<eLabel position="240,1035" size="30,30" backgroundColor="#00ff4a3c" zPosition="2"/>
-		<widget name="key_red" position="285,1030" size="300,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
-		<eLabel position="620,1035" size="30,30" backgroundColor="#0056c856" zPosition="2"/>
-		<widget name="key_green" position="665,1030" size="340,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
-		<eLabel position="1040,1035" size="30,30" backgroundColor="#00F9C731" zPosition="2"/>
-		<widget name="key_yellow" position="1085,1030" size="340,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
-		<eLabel position="1480,1035" size="30,30" backgroundColor="#00879ce1" zPosition="2"/>
-		<widget name="key_blue" position="1525,1030" size="365,40" font="Regular;34" foregroundColor="#00f0f0f0" transparent="1" valign="center" halign="left"/>
-	</screen>""".replace("__BAR__", _POS_BAR_PIXMAP))
+	<eLabel position="30,580" size="420,56" backgroundColor="%(panel)s"/>
+	<widget name="peak_text" position="48,580" size="388,56" font="Regular;28" halign="left" valign="center" transparent="1" foregroundColor="%(accent)s" zPosition="2"/>
+
+	<eLabel position="30,646" size="420,180" backgroundColor="%(panel)s"/>
+	<eLabel text="TRANSPONDER" position="48,658" size="300,26" font="Regular;22" transparent="1" foregroundColor="%(dim)s" zPosition="2"/>
+	<eLabel text="Frequency" position="48,694" size="180,34" font="Regular;26" transparent="1" foregroundColor="%(dim)s" halign="left" zPosition="2"/>
+	<widget name="frequency_value" position="234,694" size="200,34" font="Regular;26" halign="right" valign="center" transparent="1" foregroundColor="%(accent)s" zPosition="2"/>
+	<eLabel text="Symbol rate" position="48,734" size="180,34" font="Regular;26" transparent="1" foregroundColor="%(dim)s" halign="left" zPosition="2"/>
+	<widget name="symbolrate_value" position="234,734" size="200,34" font="Regular;26" halign="right" valign="center" transparent="1" foregroundColor="%(accent)s" zPosition="2"/>
+	<eLabel text="FEC" position="48,774" size="180,34" font="Regular;26" transparent="1" foregroundColor="%(dim)s" halign="left" zPosition="2"/>
+	<widget name="fec_value" position="234,774" size="200,34" font="Regular;26" halign="right" valign="center" transparent="1" foregroundColor="%(accent)s" zPosition="2"/>
+
+	<eLabel position="30,836" size="420,180" backgroundColor="%(panel)s"/>
+	<eLabel position="30,836" size="5,180" backgroundColor="%(accent)s"/>
+	<eLabel text="ROTOR" position="52,848" size="300,26" font="Regular;22" transparent="1" foregroundColor="%(dim)s" zPosition="2"/>
+	<widget name="rotorstatus" position="52,880" size="386,124" font="Regular;26" halign="left" valign="top" transparent="1" foregroundColor="%(text)s" zPosition="2"/>
+
+	<eLabel position="470,334" size="1420,372" backgroundColor="%(panel)s"/>
+	<widget name="list" position="486,348" size="1388,344" itemHeight="49" font="Regular;38" valueFont="Regular;32" transparent="1" enableWrapAround="1" scrollbarMode="showOnDemand" zPosition="2"/>
+
+	<eLabel position="470,722" size="1420,150" backgroundColor="%(panel)s"/>
+	<widget source="trend" render="Canvas" position="470,722" size="1420,150" zPosition="2"/>
+	<eLabel text="SIGNAL TREND" position="486,728" size="280,26" font="Regular;22" transparent="1" foregroundColor="%(dim)s" zPosition="4"/>
+	<eLabel position="790,738" size="20,6" backgroundColor="%(amber)s" zPosition="4"/>
+	<eLabel text="AGC" position="818,726" size="70,30" font="Regular;22" transparent="1" foregroundColor="%(amber)s" zPosition="4"/>
+	<eLabel position="910,738" size="20,6" backgroundColor="%(green)s" zPosition="4"/>
+	<eLabel text="SNR" position="938,726" size="70,30" font="Regular;22" transparent="1" foregroundColor="%(green)s" zPosition="4"/>
+	<eLabel position="1030,738" size="20,6" backgroundColor="%(accent)s" zPosition="4"/>
+	<eLabel text="MOVE" position="1058,726" size="90,30" font="Regular;22" transparent="1" foregroundColor="%(accent)s" zPosition="4"/>
+	<widget name="tone_status" position="1160,726" size="714,30" font="Regular;22" transparent="1" foregroundColor="%(accent)s" halign="right" valign="center" zPosition="4"/>
+
+	<eLabel position="470,888" size="1420,128" backgroundColor="%(panel)s"/>
+	<widget name="status_bar" position="486,888" size="1388,128" font="Regular;44" halign="center" valign="center" transparent="1" foregroundColor="%(msg)s" zPosition="10"/>
+
+	<eLabel position="0,1022" size="1920,2" backgroundColor="%(line)s" zPosition="-1"/>
+	<eLabel position="0,1024" size="1920,56" backgroundColor="%(chrome)s" zPosition="-2"/>
+	<eLabel text="MENU" position="30,1038" size="90,28" backgroundColor="%(panel2)s" foregroundColor="%(dim)s" font="Regular;20" halign="center" valign="center"/>
+	<eLabel text="INFO" position="130,1038" size="84,28" backgroundColor="%(panel2)s" foregroundColor="%(dim)s" font="Regular;20" halign="center" valign="center"/>
+	<eLabel position="240,1038" size="26,26" backgroundColor="#00ff4a3c" zPosition="2"/>
+	<widget name="key_red" position="276,1032" size="290,38" font="Regular;30" foregroundColor="%(text)s" transparent="1" valign="center" halign="left"/>
+	<eLabel position="580,1038" size="26,26" backgroundColor="%(green)s" zPosition="2"/>
+	<widget name="key_green" position="616,1032" size="330,38" font="Regular;30" foregroundColor="%(text)s" transparent="1" valign="center" halign="left"/>
+	<eLabel position="960,1038" size="26,26" backgroundColor="%(msg)s" zPosition="2"/>
+	<widget name="key_yellow" position="996,1032" size="330,38" font="Regular;30" foregroundColor="%(text)s" transparent="1" valign="center" halign="left"/>
+	<eLabel position="1340,1038" size="26,26" backgroundColor="#00879ce1" zPosition="2"/>
+	<widget name="key_blue" position="1376,1032" size="514,38" font="Regular;30" foregroundColor="%(text)s" transparent="1" valign="center" halign="left"/>
+""" % _PCLR
+
+# The trend canvas only exists if the Canvas renderer does. A widget bound to a
+# missing source is a skin error, so it is dropped and the config panel grows.
+if POS_TREND_AVAILABLE:
+	POSITIONER_SKIN = ('<screen name="TNAP_PositionerSetup" position="0,0" size="1920,1080" '
+		'title="TNAP Positioner Setup" flags="wfNoBorder" backgroundColor="#00000000" '
+		'resolution="1920,1080">' + _POS_SKIN_BODY + '</screen>')
+else:
+	_no_trend = _POS_SKIN_BODY
+	for _frag in (
+		'\t<widget source="trend" render="Canvas" position="470,722" size="1420,150" zPosition="2"/>\n',
+		'\t<eLabel position="470,722" size="1420,150" backgroundColor="%s"/>\n' % _PCLR["panel"],
+		'\t<eLabel text="SIGNAL TREND" position="486,728" size="280,26" font="Regular;22" transparent="1" foregroundColor="%s" zPosition="4"/>\n' % _PCLR["dim"],
+		'\t<eLabel position="790,738" size="20,6" backgroundColor="%s" zPosition="4"/>\n' % _PCLR["amber"],
+		'\t<eLabel text="AGC" position="818,726" size="70,30" font="Regular;22" transparent="1" foregroundColor="%s" zPosition="4"/>\n' % _PCLR["amber"],
+		'\t<eLabel position="910,738" size="20,6" backgroundColor="%s" zPosition="4"/>\n' % _PCLR["green"],
+		'\t<eLabel text="SNR" position="938,726" size="70,30" font="Regular;22" transparent="1" foregroundColor="%s" zPosition="4"/>\n' % _PCLR["green"],
+		'\t<eLabel position="1030,738" size="20,6" backgroundColor="%s" zPosition="4"/>\n' % _PCLR["accent"],
+		'\t<eLabel text="MOVE" position="1058,726" size="90,30" font="Regular;22" transparent="1" foregroundColor="%s" zPosition="4"/>\n' % _PCLR["accent"],
+	):
+		_no_trend = _no_trend.replace(_frag, "")
+	# tone_status moves into the freed band so the sound hint stays visible.
+	_no_trend = _no_trend.replace(
+		'<widget name="tone_status" position="1160,726" size="714,30"',
+		'<widget name="tone_status" position="1160,730" size="714,30"')
+	POSITIONER_SKIN = ('<screen name="TNAP_PositionerSetup" position="0,0" size="1920,1080" '
+		'title="TNAP Positioner Setup" flags="wfNoBorder" backgroundColor="#00000000" '
+		'resolution="1920,1080">' + _no_trend + '</screen>')
 
 
 class PositionerSetup(Screen):
@@ -320,6 +463,31 @@ class PositionerSetup(Screen):
 		self["ber_bar"] = TunerInfo(TunerInfo.BER_BAR, statusDict=self.frontendStatus)
 		self["lock_state"] = TunerInfo(TunerInfo.LOCK_STATE, statusDict=self.frontendStatus)
 
+		# Peak hold, trend and tone. lock_yes/lock_no are a pair of opaque
+		# Labels shown one at a time rather than the TunerInfo LOCK_STATE text,
+		# so the state reads as a filled pill and "no lock" is stated outright
+		# instead of being an empty space you have to interpret.
+		self["snr_peak"] = Label("")
+		self["agc_peak"] = Label("")
+		self["peak_text"] = Label("")
+		self["tone_status"] = Label("")
+		self["lock_yes"] = Label(_("LOCK"))
+		self["lock_no"] = Label(_("NO LOCK"))
+		if POS_TREND_AVAILABLE:
+			self["trend"] = CanvasSource()
+		self._peak_snr_pct = 0
+		self._peak_agc_pct = 0
+		self._peak_snr_db = None
+		self._needle_x = {"snr_peak": None, "agc_peak": None}
+		self._trend = []
+		self._instr_tick = 0
+		self._move_flag = False
+		self._tone = None
+		self._tone_error = None
+		self._tone_locked = False
+		self._tone_shown = None
+		self._lock_shown = None
+
 		self["rotorstatus"] = Label("")
 		self["frequency_value"] = Label("")
 		self["symbolrate_value"] = Label("")
@@ -384,6 +552,16 @@ class PositionerSetup(Screen):
 			"0": self.keyNumberGlobal
 		}, -1)
 
+		# Sound keys. MENU is furtherOptions and INFO is showLog on this screen,
+		# and every colour and number key is spoken for, so sound lives on AUDIO
+		# and TEXT -- which the Signal finder also accepts, so the two screens
+		# share one set of sound keys.
+		self["tone_actions"] = ActionMap(["InfobarAudioSelectionActions", "InfobarTeletextActions"],
+		{
+			"audioSelection": self.keyToneCycle,
+			"startTeletext": self.keyNoLockCycle,
+		}, -2)
+
 		self.updateColors("tune")
 		self.statusTimer = eTimer()
 		self.rotorStatusTimer = eTimer()
@@ -394,10 +572,17 @@ class PositionerSetup(Screen):
 		self.statusTimer.start(self.FIRST_UPDATE_INTERVAL, True)
 		self.dataAvailable = Event()
 		self.onClose.append(self.__onClose)
+		self.onLayoutFinish.append(self._initInstruments)
+		self.onShow.append(self._toneApply)
+		self.onHide.append(self._tonePause)
 		self.createConfig()
 		self.createSetup()
 
 	def __onClose(self):
+		# Tone first: SignalTone is referenced by its own writer thread, so it
+		# outlives Screen.doClose() clearing this object -- without stopping it
+		# here it would keep playing and holding a pipe fd.
+		self._toneStop()
 		self.statusTimer.stop()
 		log.close()
 		if self.frontend:
@@ -919,6 +1104,11 @@ class PositionerSetup(Screen):
 		self.session.open(PositionerSetupLog)
 
 	def diseqccommand(self, cmd, param=0):
+		# Every rotor command funnels through here, which makes it the one place
+		# to mark the trend. The markers are what turn a rolling line into
+		# something useful on a positioner: you can see whether the signal rose
+		# or fell after each nudge, instead of guessing where a move landed.
+		self._move_flag = True
 		print("Diseqc(%s, %X)" % (cmd, param), file=log)
 		self["rotorstatus"].setText("")
 		self.diseqc.command(cmd, param)
@@ -1010,6 +1200,255 @@ class PositionerSetup(Screen):
 	def isLocked(self):
 		return self.frontendStatus.get("tuner_locked", 0) == 1
 
+	# -----------------------------------------------------------------------
+	# Peak hold, signal trend, audible tone
+	# -----------------------------------------------------------------------
+	# Everything below reads self.frontendStatus, which updateStatus() has
+	# already refreshed from the frontend, so nothing here talks to hardware.
+	#
+	# updateStatus runs every UPDATE_INTERVAL (25ms = 40Hz), far faster than any
+	# of this needs, so each job is throttled: tone ~8Hz, trend sampled at 2Hz
+	# and redrawn at 1Hz, text only when it actually changes. The drivers only
+	# refresh their own registers around 1Hz anyway.
+
+	def _initInstruments(self):
+		"""Post-layout: park the peak needles and paint an empty graph."""
+		for name in ("snr_peak", "agc_peak"):
+			inst = getattr(self[name], "instance", None)
+			if inst is not None:
+				inst.hide()
+		self._updateLockPill()
+		self._updatePeakText()
+		self._drawTrend()
+
+	def _resetInstruments(self):
+		"""Drop peaks and history. Called when the tuning changes -- peak hold
+		describes a transponder, so it must not carry across a retune to a
+		different one, and equally must NOT be cleared just because the rotor
+		broke lock while moving."""
+		if not hasattr(self, "_trend"):
+			return
+		self._peak_snr_pct = 0
+		self._peak_agc_pct = 0
+		self._peak_snr_db = None
+		del self._trend[:]
+		self._instr_tick = 0
+		for name in ("snr_peak", "agc_peak"):
+			self._needle_x[name] = None
+			inst = getattr(self[name], "instance", None)
+			if inst is not None:
+				inst.hide()
+		self._updatePeakText()
+		self._drawTrend()
+
+	def _readSignal(self):
+		"""(snr_pct, snr_db or None, agc_pct, locked) from the cached status.
+
+		Same normalisation TunerInfo uses, so the graph never disagrees with the
+		bars. SNR is reported as zero unless locked: it is meaningless below
+		lock, and a demod can throw a full-scale reading for a tick or two while
+		acquiring, which is enough to strand the peak needle at 99%.
+		"""
+		status = self.frontendStatus
+		agc_raw = status.get("tuner_signal_power") or 0
+		agc_pct = min(100, int(agc_raw) * 100 // 65536)
+		if not self.isLocked():
+			return 0, None, agc_pct, False
+		snr_raw = status.get("tuner_signal_quality") or 0
+		snr_pct = min(100, int(snr_raw) * 100 // 65536)
+		raw_db = status.get("tuner_signal_quality_db")
+		snr_db = None
+		if raw_db is not None and 0 < raw_db <= 10000:
+			snr_db = raw_db / 100.0
+		return snr_pct, snr_db, agc_pct, True
+
+	def _updateInstruments(self):
+		snr_pct, snr_db, agc_pct, locked = self._readSignal()
+		self._tone_locked = locked
+		self._instr_tick += 1
+
+		# One second of settling before anything can set a peak: a retune or a
+		# rotor move throws transients on both readings.
+		if self._instr_tick > 40:
+			if agc_pct > self._peak_agc_pct:
+				self._peak_agc_pct = agc_pct
+			if snr_pct > self._peak_snr_pct:
+				self._peak_snr_pct = snr_pct
+			if snr_db is not None and (self._peak_snr_db is None or snr_db > self._peak_snr_db):
+				self._peak_snr_db = snr_db
+
+		self._moveNeedle("snr_peak", _POS_SNR_BAR_Y, self._peak_snr_pct)
+		self._moveNeedle("agc_peak", _POS_AGC_BAR_Y, self._peak_agc_pct)
+		self._updateLockPill()
+
+		if self._tone is not None and self._instr_tick % 5 == 0:
+			self._tone.update(agc_pct, snr_pct, locked)
+
+		if self._instr_tick % 20 == 0:
+			moved = self._move_flag
+			self._move_flag = False
+			self._trend.append((agc_pct, snr_pct, moved))
+			if len(self._trend) > _POS_TREND_SAMPLES:
+				del self._trend[0:len(self._trend) - _POS_TREND_SAMPLES]
+		if self._instr_tick % 40 == 0:
+			self._drawTrend()
+			self._updatePeakText()
+			self._updateToneStatus()
+
+	def _updateLockPill(self):
+		locked = self._tone_locked
+		if locked == self._lock_shown:
+			return
+		self._lock_shown = locked
+		for name, want in (("lock_yes", locked), ("lock_no", not locked)):
+			inst = getattr(self[name], "instance", None)
+			if inst is None:
+				continue
+			if want:
+				inst.show()
+			else:
+				inst.hide()
+
+	def _moveNeedle(self, name, y, pct):
+		"""Slide a peak-hold needle along its track. Only moves when the pixel
+		position actually changed, so a steady signal costs no repaints."""
+		inst = getattr(self[name], "instance", None)
+		if inst is None:
+			return
+		if pct <= 0:
+			if self._needle_x[name] is not None:
+				self._needle_x[name] = None
+				inst.hide()
+			return
+		x = _POS_BAR_X + int((_POS_BAR_W - _POS_PEAK_W) * min(pct, 100) / 100.0)
+		if x == self._needle_x[name]:
+			return
+		self._needle_x[name] = x
+		inst.move(ePoint(x, y))
+		inst.show()
+
+	def _updatePeakText(self):
+		if self._peak_snr_db is not None:
+			text = _("Peak") + "   %.1f dB" % self._peak_snr_db
+		elif self._peak_agc_pct:
+			text = _("Peak") + "   %d %% AGC" % self._peak_agc_pct
+		else:
+			text = _("Peak") + "   ---"
+		self["peak_text"].setText(text)
+
+	def _drawTrend(self):
+		"""Repaint the trend, newest sample flush right, with a cyan tick on any
+		sample during which a rotor command was issued."""
+		if not POS_TREND_AVAILABLE or "trend" not in self:
+			return
+		canvas = self["trend"]
+		plot_h = _POS_TREND_H - _POS_TREND_TOP
+		try:
+			canvas.fill(0, 0, _POS_TREND_W, _POS_TREND_H, 0x00101a1e)
+			for frac in (0.25, 0.5, 0.75):
+				canvas.fill(0, _POS_TREND_H - int(frac * plot_h), _POS_TREND_W, 1, 0x001d2c33)
+			canvas.fill(0, _POS_TREND_H - 1, _POS_TREND_W, 1, 0x001d2c33)
+			count = len(self._trend)
+			for i in range(count):
+				agc, snr, moved = self._trend[count - 1 - i]
+				x = _POS_TREND_W - (i + 1) * _POS_TREND_COL
+				if x < 0:
+					break
+				if moved:
+					canvas.fill(x, _POS_TREND_TOP, 2, plot_h, 0x0000c8d4)
+				if agc > 0:
+					height = max(3, int(agc * plot_h / 100))
+					canvas.fill(x, _POS_TREND_H - height, _POS_TREND_COL, height, 0x00161206)
+					canvas.fill(x, _POS_TREND_H - height, _POS_TREND_COL, 3, 0x00ffb020)
+				if snr > 0:
+					top = _POS_TREND_H - max(3, int(snr * plot_h / 100))
+					canvas.fill(x, top, _POS_TREND_COL, 3, 0x0043c95a)
+			canvas.flush()
+		except Exception as e:
+			print("[PositionerSetup][trend] draw failed: %s" % e)
+
+	def keyToneCycle(self):
+		"""AUDIO: step the sound level Off -> Low -> Medium -> High -> Off."""
+		if toneConfig is None:
+			return
+		cfg = toneConfig()
+		cfg.level.value = _tone_cycle_level(cfg.level.value)
+		cfg.level.save()
+		configfile.save()
+		self._tone_error = None
+		self._toneApply()
+
+	def keyNoLockCycle(self):
+		"""TEXT: switch the no-lock sound between the search pulse and silence."""
+		if toneConfig is None:
+			return
+		cfg = toneConfig()
+		cfg.nolock.value = _tone_cycle_nolock(cfg.nolock.value)
+		cfg.nolock.save()
+		configfile.save()
+		if self._tone is not None:
+			self._tone.setSearchEnabled(cfg.nolock.value == "search")
+		self._updateToneStatus()
+
+	def _toneApply(self):
+		if toneConfig is None:
+			self._updateToneStatus()
+			return
+		cfg = toneConfig()
+		try:
+			level = int(cfg.level.value)
+		except (TypeError, ValueError):
+			level = 0
+		if level <= 0 or not POS_TONE_AVAILABLE:
+			self._toneStop()
+		elif self._tone is None:
+			tone = SignalTone(volume=level / 100.0)
+			tone.setSearchEnabled(cfg.nolock.value == "search")
+			if tone.start():
+				self._tone = tone
+			else:
+				self._tone_error = tone.error
+				print("[PositionerSetup] signal tone failed to start: %s" % tone.error)
+		else:
+			self._tone.setVolume(level / 100.0)
+			self._tone.setSearchEnabled(cfg.nolock.value == "search")
+			self._tone.resume()
+		self._updateToneStatus()
+
+	def _tonePause(self):
+		if self._tone is not None:
+			self._tone.pause()
+
+	def _toneStop(self):
+		tone, self._tone = getattr(self, "_tone", None), None
+		if tone is not None:
+			tone.stop()
+
+	def _updateToneStatus(self):
+		"""One line in the trend caption band. Doubles as the only hint that the
+		AUDIO and TEXT keys do anything, so it says something when sound is off."""
+		if toneConfig is None or not POS_TONE_AVAILABLE:
+			text = _("Sound: not available on this box")
+		elif self._tone_error:
+			text = _("Sound: failed (%s)") % self._tone_error
+		else:
+			cfg = toneConfig()
+			if cfg.level.value == "0" or self._tone is None:
+				text = _("AUDIO: sound off")
+			else:
+				if self._tone_locked:
+					now = _("SNR tone")
+				elif cfg.nolock.value == "search":
+					now = _("AGC search pulse")
+				else:
+					now = _("silent, no lock")
+				text = "%s: %s   |   %s: %s   |   %s" % (
+					_("Sound"), _tone_level_name(cfg.level.value),
+					_("No lock"), _tone_nolock_name(cfg.nolock.value), now)
+		if text != self._tone_shown:
+			self._tone_shown = text
+			self["tone_status"].setText(text)
+
 	def statusMsg(self, msg, blinking=False, timeout=0):			# timeout in seconds
 		self.statusMsgBlinking = blinking
 		if not blinking:
@@ -1050,6 +1489,7 @@ class PositionerSetup(Screen):
 			self["agc_bar"].update()
 			self["ber_bar"].update()
 			self["lock_state"].update()
+			self._updateInstruments()
 			if self["lock_state"].getValue(TunerInfo.LOCK):
 				self["lock_on"].show()
 			else:
@@ -1083,6 +1523,8 @@ class PositionerSetup(Screen):
 					self.dataAvailable.set()
 
 	def tuningChangedTo(self, tp):
+		# New transponder: old peaks and history describe something else.
+		self._resetInstruments()
 
 		def setLowRateAdapterCount(symbolrate):
 			# change the measurement time and update interval in case of low symbol rate,

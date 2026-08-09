@@ -47,8 +47,13 @@ if dvbreader_available:
 
 # Audible signal tone. Optional in every sense: the module is imported
 # defensively, it reports its own backend availability, and it defaults to off.
+# Level/mode naming, cycling and config come from the shared module too, so
+# this screen and PositionerSetup read and write the SAME setting instead of
+# each keeping its own - set it once, both screens honour it.
 try:
-	from Tools.SignalTone import SignalTone, toneAvailable
+	from Tools.SignalTone import (SignalTone, toneAvailable, toneConfig,
+	                              levelName as _toneLevelName, noLockName as _noLockName,
+	                              cycleLevel as _cycleToneLevel, cycleNoLock as _cycleNoLock)
 	SIGNALTONE_AVAILABLE = toneAvailable()
 	if not SIGNALTONE_AVAILABLE:
 		print("[Satfinder] no ALSA player on this box -- signal tone disabled")
@@ -56,33 +61,7 @@ except Exception as e:
 	print("[Satfinder] signaltone unavailable: %s" % e)
 	SignalTone = None
 	SIGNALTONE_AVAILABLE = False
-
-# Sound level cycles on one key rather than living in a dialog: on a roof with
-# one hand on the mount you want a single press, not a menu. "0" is off. The
-# levels are amplitudes in percent, fed straight to SignalTone.
-_TONE_LEVELS = ("0", "20", "35", "60")
-
-
-def _toneLevelName(value):
-	return {"0": _("Off"), "20": _("Low"), "35": _("Medium"), "60": _("High")}.get(value, value)
-
-
-# What the tone does with no lock. Not a volume setting -- a character
-# setting. "search" is the low buzzing pulse whose rate tracks AGC (useful for
-# finding an unknown bird); "off" gives silence after the unlock chirp, for
-# anyone who only wants to hear a signal they can actually use.
-_NOLOCK_MODES = ("search", "off")
-
-
-def _noLockName(value):
-	return {"search": _("Search pulse"), "off": _("Silent")}.get(value, value)
-
-
-config.plugins.tnap_satfinder = ConfigSubsection()
-config.plugins.tnap_satfinder.tone = ConfigSelection(
-	default="0", choices=[(v, _toneLevelName(v)) for v in _TONE_LEVELS])
-config.plugins.tnap_satfinder.tone_nolock = ConfigSelection(
-	default="search", choices=[(v, _noLockName(v)) for v in _NOLOCK_MODES])
+	toneConfig = None
 
 # Canvas is used for the live signal-trend graph at the bottom right. It ships
 # with enigma2 (Components/Renderer/Canvas.py) but is optional here: if the
@@ -922,12 +901,10 @@ class Satfinder(ScanSetup, ServiceScan):
 
 	def keyToneCycle(self):
 		"""MENU: step Off -> Low -> Medium -> High -> Off and persist it."""
-		cfg = config.plugins.tnap_satfinder.tone
-		try:
-			nxt = _TONE_LEVELS[(_TONE_LEVELS.index(cfg.value) + 1) % len(_TONE_LEVELS)]
-		except ValueError:
-			nxt = _TONE_LEVELS[0]
-		cfg.value = nxt
+		if toneConfig is None:
+			return
+		cfg = toneConfig().level
+		cfg.value = _cycleToneLevel(cfg.value)
 		cfg.save()
 		configfile.save()
 		self._tone_error = None
@@ -935,30 +912,29 @@ class Satfinder(ScanSetup, ServiceScan):
 
 	def keyNoLockCycle(self):
 		"""AUDIO: switch the no-lock sound between the search pulse and silence."""
-		cfg = config.plugins.tnap_satfinder.tone_nolock
-		try:
-			nxt = _NOLOCK_MODES[(_NOLOCK_MODES.index(cfg.value) + 1) % len(_NOLOCK_MODES)]
-		except ValueError:
-			nxt = _NOLOCK_MODES[0]
-		cfg.value = nxt
+		if toneConfig is None:
+			return
+		cfg = toneConfig().nolock
+		cfg.value = _cycleNoLock(cfg.value)
 		cfg.save()
 		configfile.save()
 		if self._tone is not None:
-			self._tone.setSearchEnabled(nxt == "search")
+			self._tone.setSearchEnabled(cfg.value == "search")
 		self._updateToneStatus()
 
 	def _toneApply(self):
 		"""Bring the tone into line with the config value."""
 		level = 0
-		try:
-			level = int(config.plugins.tnap_satfinder.tone.value)
-		except (TypeError, ValueError):
-			level = 0
+		if toneConfig is not None:
+			try:
+				level = int(toneConfig().level.value)
+			except (TypeError, ValueError):
+				level = 0
 		if level <= 0 or not SIGNALTONE_AVAILABLE:
 			self._toneStop()
 		elif self._tone is None:
 			tone = SignalTone(volume=level / 100.0)
-			tone.setSearchEnabled(config.plugins.tnap_satfinder.tone_nolock.value == "search")
+			tone.setSearchEnabled(toneConfig().nolock.value == "search")
 			if tone.start():
 				self._tone = tone
 			else:
@@ -966,7 +942,7 @@ class Satfinder(ScanSetup, ServiceScan):
 				print("[Satfinder] signal tone failed to start: %s" % tone.error)
 		else:
 			self._tone.setVolume(level / 100.0)
-			self._tone.setSearchEnabled(config.plugins.tnap_satfinder.tone_nolock.value == "search")
+			self._tone.setSearchEnabled(toneConfig().nolock.value == "search")
 			self._tone.resume()
 		self._updateToneStatus()
 
@@ -983,7 +959,7 @@ class Satfinder(ScanSetup, ServiceScan):
 		"""One short line in the trend panel caption band. Also the only
 		discoverability hint for the MENU key, so it says something when the
 		tone is off rather than nothing at all."""
-		level = config.plugins.tnap_satfinder.tone.value
+		level = toneConfig().level.value if toneConfig is not None else "0"
 		if not SIGNALTONE_AVAILABLE:
 			text = _("Sound: not available on this box")
 		elif self._tone_error:
@@ -991,7 +967,7 @@ class Satfinder(ScanSetup, ServiceScan):
 		elif level == "0" or self._tone is None:
 			text = _("MENU: sound off")
 		else:
-			nolock = config.plugins.tnap_satfinder.tone_nolock.value
+			nolock = toneConfig().nolock.value
 			if self._tone_locked:
 				now = _("SNR tone")
 			elif nolock == "search":

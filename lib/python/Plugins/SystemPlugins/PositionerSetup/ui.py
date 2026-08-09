@@ -41,34 +41,23 @@ except ImportError:
 	POS_TREND_AVAILABLE = False
 
 # Audible signal tone, shared with the Signal finder so the pitch/dB
-# association you learn on one screen holds on the other. Preferred location is
-# the shared Tools copy; falls back to the copy inside the Satfinder plugin,
-# then to a local one, so it works whichever way the image ships it.
-SignalTone = None
-POS_TONE_AVAILABLE = False
-toneConfig = None
-# Level/mode naming and cycling live in the shared module too, so the two
-# screens can never drift out of step on the labels or the cycle order.
-_tone_level_name = _tone_nolock_name = lambda v: v
-_tone_cycle_level = _tone_cycle_nolock = lambda v: v
-for _mod in ("Tools.SignalTone",
-             "Plugins.SystemPlugins.Satfinder.signaltone",
-             "Plugins.SystemPlugins.PositionerSetup.signaltone"):
-	try:
-		_m = __import__(_mod, fromlist=["SignalTone"])
-		SignalTone = _m.SignalTone
-		toneConfig = _m.toneConfig
-		_tone_level_name = _m.levelName
-		_tone_nolock_name = _m.noLockName
-		_tone_cycle_level = _m.cycleLevel
-		_tone_cycle_nolock = _m.cycleNoLock
-		POS_TONE_AVAILABLE = _m.toneAvailable()
-		print("[PositionerSetup] signal tone from %s (available=%s)" % (_mod, POS_TONE_AVAILABLE))
-		break
-	except Exception:
-		continue
-else:
-	print("[PositionerSetup] no signaltone module found -- sound disabled")
+# association you learn on one screen holds on the other, and so both screens
+# read and write the same config.plugins.tnap_signaltone setting via
+# toneConfig() below. Optional in every sense: imported defensively, reports
+# its own backend availability, defaults to off.
+try:
+	from Tools.SignalTone import (SignalTone, toneAvailable, toneConfig,
+	                              levelName as _tone_level_name, noLockName as _tone_nolock_name,
+	                              cycleLevel as _tone_cycle_level, cycleNoLock as _tone_cycle_nolock)
+	POS_TONE_AVAILABLE = toneAvailable()
+	print("[PositionerSetup] signal tone available=%s" % POS_TONE_AVAILABLE)
+except Exception as e:
+	print("[PositionerSetup] signaltone unavailable: %s" % e)
+	SignalTone = None
+	POS_TONE_AVAILABLE = False
+	toneConfig = None
+	_tone_level_name = _tone_nolock_name = lambda v: v
+	_tone_cycle_level = _tone_cycle_nolock = lambda v: v
 
 BOX_MODEL = ""
 BOX_NAME = ""

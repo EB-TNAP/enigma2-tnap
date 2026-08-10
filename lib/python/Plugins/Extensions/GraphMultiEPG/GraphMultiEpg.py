@@ -718,6 +718,8 @@ class EPGList(GUIComponent):
 				if config.misc.graph_mepg.show_record_clocks.value and rec is not None:
 					for i in range(len(rec[1])):
 						clockpng = self.clocks[rec[1][len(rec[1]) - 1 - i]]
+						if clockpng is None:  # skin is missing this clock icon file
+							continue
 						pix_size = clockpng.size()
 						pix_width = pix_size.width()
 						pix_height = pix_size.height()

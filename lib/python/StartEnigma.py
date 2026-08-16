@@ -687,7 +687,6 @@ InitSkins()
 enigma.eProfileWrite("InputDevice")
 import Components.InputDevice
 Components.InputDevice.InitInputDevices()
-import Components.InputHotplug
 
 enigma.eProfileWrite("SetupDevices")
 import Components.SetupDevices

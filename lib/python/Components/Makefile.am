@@ -21,4 +21,4 @@ install_PYTHON = \
 	Keyboard.py Sensors.py FanControl.py HdmiCec.py RcModel.py \
 	ServiceScan.py \
 	ImportChannels.py StackTrace.py EpgLoadSave.py \
-	HdmiRecord.py PowerOffTimer.py NetworkTime.py FrontPanelLed.py International.py
+	HdmiRecord.py PowerOffTimer.py NetworkTime.py NetworkManager.py FrontPanelLed.py International.py

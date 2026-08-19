@@ -582,8 +582,6 @@ lib/python/Plugins/SystemPlugins/AmlFRQ/Makefile
 lib/python/Plugins/SystemPlugins/TempFanControl/Makefile
 lib/python/Plugins/SystemPlugins/TempFanControl/meta/Makefile
 lib/python/Plugins/SystemPlugins/LCNScanner/Makefile
-lib/python/Plugins/SystemPlugins/NetworkWizard/Makefile
-lib/python/Plugins/SystemPlugins/NetworkWizard/meta/Makefile
 lib/python/Plugins/SystemPlugins/PositionerSetup/Makefile
 lib/python/Plugins/SystemPlugins/PositionerSetup/meta/Makefile
 lib/python/Plugins/SystemPlugins/SatelliteEquipmentControl/Makefile
@@ -598,8 +596,6 @@ lib/python/Plugins/SystemPlugins/VideoTune/Makefile
 lib/python/Plugins/SystemPlugins/VideoTune/meta/Makefile
 lib/python/Plugins/SystemPlugins/Videomode/Makefile
 lib/python/Plugins/SystemPlugins/Videomode/meta/Makefile
-lib/python/Plugins/SystemPlugins/WirelessLan/Makefile
-lib/python/Plugins/SystemPlugins/WirelessLan/meta/Makefile
 lib/python/Tools/Makefile
 po/Makefile
 main/Makefile

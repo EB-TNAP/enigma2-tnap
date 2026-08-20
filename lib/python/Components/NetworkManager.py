@@ -33,8 +33,12 @@ wpaSupplicantDir = "/etc"
 sysfsNet = "/sys/class/net"
 procNetWireless = "/proc/net/wireless"
 ifconfigBin = "/sbin/ifconfig"
-ifupBin = "/sbin/ifup"
-ifdownBin = "/sbin/ifdown"
+# -f (force) makes BusyBox 1.37+ act even on a NO-CARRIER interface still
+# listed in /var/run/ifstate; without it, ifdown silently no-ops and the
+# following ifup then refuses with "already configured", leaving the
+# interface down. See commit b4429c555.
+ifupBin = "/sbin/ifup -f"
+ifdownBin = "/sbin/ifdown -f"
 wpaSupplicantBin = "/usr/sbin/wpa_supplicant"
 wpaCliBin = "/usr/sbin/wpa_cli"
 socketDaemonPath = "/var/run/daemon.socket"

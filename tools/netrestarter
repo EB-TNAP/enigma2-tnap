@@ -80,10 +80,14 @@ is_iface_up() {
 
 do_ifdown() {
   iface="$1"
+  # -f (force) makes BusyBox 1.37+ act even on a NO-CARRIER interface still
+  # listed in /var/run/ifstate; without it, ifdown silently no-ops and the
+  # following ifup then refuses with "already configured", leaving the
+  # interface down.
   if [ -x /sbin/ifdown ]; then
-    /sbin/ifdown "$iface" 2>/dev/null || true
+    /sbin/ifdown -f "$iface" 2>/dev/null || true
   elif command -v ifdown >/dev/null 2>&1; then
-    ifdown "$iface" 2>/dev/null || true
+    ifdown -f "$iface" 2>/dev/null || true
   elif command -v ip >/dev/null 2>&1; then
     ip link set dev "$iface" down 2>/dev/null || true
   fi
@@ -92,9 +96,9 @@ do_ifdown() {
 do_ifup() {
   iface="$1"
   if [ -x /sbin/ifup ]; then
-    /sbin/ifup "$iface" 2>/dev/null || true
+    /sbin/ifup -f "$iface" 2>/dev/null || true
   elif command -v ifup >/dev/null 2>&1; then
-    ifup "$iface" 2>/dev/null || true
+    ifup -f "$iface" 2>/dev/null || true
   elif command -v ip >/dev/null 2>&1; then
     ip link set dev "$iface" up 2>/dev/null || true
   fi

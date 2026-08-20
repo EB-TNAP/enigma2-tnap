@@ -1342,7 +1342,12 @@ class NetworkWiFiActivator(Screen):
 		# print(f"[{MODULE_NAME}] DEBUG checkIp: iface='{iface}' attempt={self.pollCount}/{self.pollMaxAttempts} link='{netInfo.link}' ip='{ip!r}'.")
 		if netInfo.link and ip:
 			self.pollTimer.stop()
-			self.setStatus(_("Connected.\nIP address is '%s'.") % ip)
+			lines = [_("Connected."), _("IP address") + ":\t" + ip]
+			if self.conn.wifi:
+				lines.append(_("Encryption") + ":\t" + encryptionLabels.get(self.conn.wifi.encryption, lambda: "?")())
+			if netInfo.bitrateBps:
+				lines.append(_("Bitrate") + ":\t" + f"{netInfo.bitrateBps // 1000000} Mbps")
+			self.setStatus("\n".join(lines))
 			self.scheduleClose(5000, ip)
 		elif self.pollCount >= self.pollMaxAttempts:
 			self.pollTimer.stop()

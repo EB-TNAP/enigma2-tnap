@@ -43,13 +43,17 @@ do_start() {
   esac
 
   # tear down any existing state
+  # -f (force) makes BusyBox 1.37+ act even on a NO-CARRIER interface still
+  # listed in /var/run/ifstate; without it, ifdown silently no-ops and the
+  # following ifup then refuses with "already configured", leaving the
+  # interface down.
   wpa_cli -i"${IFACE}" terminate 2>/dev/null || true
   if [ -f "$WPA_PID" ]; then
     pid="$(cat "$WPA_PID" 2>/dev/null || true)"
     case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null || true ;; esac
     rm -f "$WPA_PID"
   fi
-  ifdown "${IFACE}" 2>/dev/null || true
+  ifdown -f "${IFACE}" 2>/dev/null || true
   ip addr flush dev "${IFACE}" scope global 2>/dev/null || true
 
   # start wpa_supplicant only if a config file was written
@@ -88,7 +92,7 @@ do_start() {
     fi
   fi
 
-  ifup "${IFACE}"
+  ifup -f "${IFACE}"
 }
 
 do_stop() {
@@ -100,7 +104,7 @@ do_stop() {
     case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null || true ;; esac
     rm -f "$WPA_PID"
   fi
-  ifdown "${IFACE}" 2>/dev/null || true
+  ifdown -f "${IFACE}" 2>/dev/null || true
   ip addr flush dev "${IFACE}" scope global 2>/dev/null || true
 }
 

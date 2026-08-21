@@ -4,6 +4,7 @@ from Components.ConfigList import ConfigListScreen, ConfigList
 from Components.ActionMap import HelpableActionMap
 from Components.Sources.StaticText import StaticText
 from Components.config import config, ConfigSubsection, ConfigBoolean, ConfigSelection, ConfigYesNo, ConfigIP, ConfigNothing
+from Components.Network import iNetwork
 from Components.NetworkManager import networkManager
 from Tools.ServiceAction import ServiceAction
 from Components.Opkg import OpkgComponent

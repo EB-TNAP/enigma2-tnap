@@ -34,6 +34,16 @@ class NetworkCompat:
 	def getAdapterName(self, iface: str) -> str:
 		return networkManager.getFriendlyAdapterName(iface)
 
+	def isWirelessInterface(self, iface: str) -> bool:
+		adapter = networkManager.getAdapter(iface)
+		return bool(adapter and adapter.isWiFi)
+
+	def isBlacklisted(self, iface: str) -> bool:
+		for prefix in ("lo", "wifi", "wmaster", "sit", "tun", "sys", "p2p", "ip6_vti", "ip_vti", "ip6tn", "tap"):
+			if iface.startswith(prefix):
+				return True
+		return False
+
 	def getAdapterAttribute(self, iface: str, attr: str):
 		adapter = networkManager.getAdapter(iface)
 		if adapter is None:

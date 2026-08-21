@@ -194,6 +194,7 @@ class ActionMap:
 		self.bound = False
 		self.execActive = False
 		self.enabled = True
+		self.disabledActions = set()
 		self.legacyBound = False
 		self.parentScreen = parentScreen.__class__.__name__ if parentScreen else "N/A"  # and [x for x in parentScreen.__class__.__mro__ if x.__name__ == "Screen"] else "N/A"
 		undefinedAction = list(self.actions.keys())
@@ -230,6 +231,15 @@ class ActionMap:
 		self.enabled = enabled
 		self.checkBind()
 
+	def isEnabledAction(self, action):
+		return action not in self.disabledActions
+
+	def setEnabledAction(self, action, enabled):
+		if enabled:
+			self.disabledActions.discard(action)
+		else:
+			self.disabledActions.add(action)
+
 	def doBind(self):
 		if not self.legacyBound and self.legacyActions:
 			self.actionMapInstance.bindAction("NavigationActions", maxsize - 1, self.legacyAction)
@@ -264,6 +274,8 @@ class ActionMap:
 
 	def action(self, context, action):
 		if action in self.actions:
+			if action in self.disabledActions:
+				return 0
 			if config.crash.debugActionMaps.value:
 				print(f"[ActionMap] Map screen '{self.parentScreen}' context '{context}' -> Action '{action}'.")
 			response = self.actions[action]()

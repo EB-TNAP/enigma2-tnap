@@ -251,10 +251,8 @@ class NetworkOverview(Screen):
 
 	def layoutFinished(self):
 		self["adapterList"].enableAutoNavigation(False)
-		self["adapterList"].setLockFirstRow(True)
 		self.markHeaderNotSelectable("adapterList")
 		self["savedList"].enableAutoNavigation(False)
-		self["savedList"].setLockFirstRow(True)
 		self.markHeaderNotSelectable("savedList")
 		networkManager.onAdaptersChanged.append(self.refreshAdapters)
 		self.buildAdapters()
@@ -355,7 +353,7 @@ class NetworkOverview(Screen):
 
 	def overviewColors(self, sourceName: str) -> tuple:
 		defaultColors = (self.OVERVIEW_COLOR_CONNECTED, self.OVERVIEW_COLOR_NO_LINK, self.OVERVIEW_COLOR_IDLE, self.OVERVIEW_COLOR_CONNECTED_SELECTED, self.OVERVIEW_COLOR_NO_LINK_SELECTED, self.OVERVIEW_COLOR_IDLE_SELECTED)
-		colors = self[sourceName].additionalTemplateAttributes.get("colors")
+		colors = getattr(self[sourceName], "additionalTemplateAttributes", {}).get("colors")
 		if not colors:
 			return defaultColors
 		parts = [parseColor(part.strip()).argb() for part in colors.split(",")]

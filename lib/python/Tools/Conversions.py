@@ -55,7 +55,11 @@ def scaleNumber(number, style="Si", suffix="B", format="%.3f"):
 	# print("[Conversions] DEBUG: Number=%d, Digits=%d, Scale=%d, Factor=%d, Result=%f." % (number, digits, scale, 10 ** (scale * 3), result))
 	# if suffix:
 	return "%s %s%s%s" % (format_string(format, result), units[scale], ("i" if style == "Iec" and scale else ""), suffix)
-	# return format_string("%d", result, grouping=True) if isinstance(
+	# return format_string("%d", result, grouping=True) if isinstance
+
+
+def formatNetworkSpeed(speedMbps):
+	return f"{speedMbps} Mbps"
 
 
 class UnitMultipliers:

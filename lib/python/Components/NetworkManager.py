@@ -1892,7 +1892,7 @@ class NetworkCheck:
 			return
 		try:
 			if gethostbyname(gethostname()) != "127.0.0.1":
-				print("[{MODULE_NAME}] NetworkCheck: Done.")
+				print(f"[{MODULE_NAME}] NetworkCheck: Done.")
 				self.mountPendingShares()
 				return
 			self.retry -= 1

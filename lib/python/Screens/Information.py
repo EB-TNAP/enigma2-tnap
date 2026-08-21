@@ -1236,13 +1236,16 @@ class NetworkInformation(InformationBase):
 			if callable(callback):
 				callback()
 
-	def displayInformation(self):
+	def displayInformation(self, selectedAdapter=None):
 		info = []
 		info.append(formatLine("H", _("Network information for %s %s") % getBoxDisplayName()))
 		info.append("")
 		hostname = fileReadLine("/proc/sys/kernel/hostname", source=MODULE_NAME)
 		info.append(formatLine("S0S", _("Hostname"), hostname))
-		for interface in sorted(self.interfaceData.keys()):
+		interfaces = sorted(self.interfaceData.keys())
+		if selectedAdapter:
+			interfaces = [interface for interface in interfaces if interface == selectedAdapter]
+		for interface in interfaces:
 			info.append("")
 			info.append(formatLine("S", _("Interface '%s'") % interface, iNetwork.getFriendlyAdapterName(interface)))
 			if "up" in self.interfaceData[interface]:

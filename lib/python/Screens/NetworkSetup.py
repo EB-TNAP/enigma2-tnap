@@ -20,7 +20,7 @@ from Components.Sources.List import List
 from Components.Sources.StaticText import StaticText
 from Components.SystemInfo import BoxInfo
 from Screens.ChoiceBox import ChoiceBox
-from Screens.Information import InformationNetwork
+from Screens.Information import NetworkInformation as InformationNetwork
 from Screens.MessageBox import MessageBox
 from Screens.Processing import Processing
 from Screens.Screen import Screen

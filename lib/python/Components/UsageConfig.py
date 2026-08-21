@@ -1314,8 +1314,6 @@ def InitUsageConfig():
 	config.crash.bsodmax = ConfigSelection(default="3", choices=choiceList)
 
 	config.crash.enabledebug = ConfigYesNo(default=False)
-	# Consumed by Components.NetworkManager to toggle e2avahi debug output.
-	config.crash.debugNetwork = ConfigYesNo(default=False)
 	config.crash.debugLevel = ConfigSelection(default=0, choices=[
 		(0, _("Disabled")),
 		(4, _("Enabled")),

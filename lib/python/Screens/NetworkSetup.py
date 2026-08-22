@@ -988,7 +988,7 @@ class NetworkInformation(InformationNetwork):
 		self.conn = conn
 
 	def displayInformation(self):
-		InformationNetwork.displayInformation(self, selectedAdapter=self.adapter.name)
+		InformationNetwork.displayInformation(self, selectedAdapter=self.adapter)
 
 
 @dataclass

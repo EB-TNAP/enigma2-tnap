@@ -988,7 +988,7 @@ class NetworkInformation(InformationNetwork):
 		self.conn = conn
 
 	def displayInformation(self):
-		InformationNetwork.displayInformation(self, selectedAdapter=self.adapter)
+		InformationNetwork.displayInformation(self, selectedAdapter=self.adapter.name)
 
 
 @dataclass
@@ -1182,7 +1182,8 @@ class NetworkWiFiScan(Screen):
 		reCell = compile(r"Cell \d+ - Address:\s*([0-9A-Fa-f:]{17})")
 		reSsid = compile(r"ESSID:\"(.*?)\"")
 		reFreq = compile(r"Frequency:([\d.]+ \w+Hz).*?Channel:?\s*(\d+)?")
-		reQuality = compile(r"Quality=(\d+)/(\d+)\s+Signal level=(-?\d+) dBm")
+		reQuality = compile(r"Quality=(\d+)/(\d+)")
+		reSignalDbm = compile(r"Signal level[=:](-?\d+)\s*dBm")
 		reEncOn = compile(r"Encryption key:on")
 		reEncOff = compile(r"Encryption key:off")
 		reIeWpa1 = compile(r"IE:.*WPA Version 1", IGNORECASE)
@@ -1208,7 +1209,10 @@ class NetworkWiFiScan(Screen):
 			if match:
 				qVal, qMax = int(match.group(1)), int(match.group(2))
 				current.signalPct = int(qVal * 100 / qMax) if qMax else 0
-				current.signalDbm = int(match.group(3))
+				current.signalDbm = current.signalPct // 2 - 100
+			match = reSignalDbm.search(line)
+			if match:
+				current.signalDbm = int(match.group(1))
 			if reIeWpa2.search(line):
 				current.encryption = Encryption.WPA2
 				current.encDetails = line

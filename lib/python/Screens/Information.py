@@ -1103,7 +1103,7 @@ class NetworkInformation(InformationBase):
 
 	def fetchInformation(self):
 		self.informationTimer.stop()
-		for interface in sorted([x for x in listdir("/sys/class/net") if not self.isBlacklisted(x)]):
+		for interface in sorted([x for x in listdir("/sys/class/net") if not iNetwork.isBlacklisted(x)]):
 			self.interfaceData[interface] = {}
 			self.console.ePopen(("/sbin/ifconfig", "/sbin/ifconfig", interface), self.ifconfigInfoFinished, extra_args=interface)
 			if iNetwork.isWirelessInterface(interface):
@@ -1113,12 +1113,6 @@ class NetworkInformation(InformationBase):
 		for callback in self.onInformationUpdated:
 			if callable(callback):
 				callback()
-
-	def isBlacklisted(self, interface):
-		for type in ("lo", "wifi", "wmaster", "sit", "tun", "sys", "p2p", "ip6_vti", "ip_vti", "ip6tn", "tap"):
-			if interface.startswith(type):
-				return True
-		return False
 
 	def ifconfigInfoFinished(self, result, retVal, extraArgs):  # This temporary code borrowed and adapted from the new but unreleased Network.py!
 		if retVal == 0:

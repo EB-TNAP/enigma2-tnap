@@ -1182,7 +1182,7 @@ class NetworkWiFiScan(Screen):
 		reCell = compile(r"Cell \d+ - Address:\s*([0-9A-Fa-f:]{17})")
 		reSsid = compile(r"ESSID:\"(.*?)\"")
 		reFreq = compile(r"Frequency:([\d.]+ \w+Hz).*?Channel:?\s*(\d+)?")
-		reQuality = compile(r"Quality=(\d+)/(\d+)")
+		reQuality = compile(r"Quality[=:](\d+)(?:/(\d+))?")
 		reSignalDbm = compile(r"Signal level[=:](-?\d+)\s*dBm")
 		reEncOn = compile(r"Encryption key:on")
 		reEncOff = compile(r"Encryption key:off")
@@ -1207,12 +1207,15 @@ class NetworkWiFiScan(Screen):
 					current.channel = int(match.group(2))
 			match = reQuality.search(line)
 			if match:
-				qVal, qMax = int(match.group(1)), int(match.group(2))
+				qVal = int(match.group(1))
+				qMax = int(match.group(2)) if match.group(2) else 100
 				current.signalPct = int(qVal * 100 / qMax) if qMax else 0
 				current.signalDbm = current.signalPct // 2 - 100
 			match = reSignalDbm.search(line)
 			if match:
 				current.signalDbm = int(match.group(1))
+				if not current.signalPct:
+					current.signalPct = max(0, min(100, 2 * (current.signalDbm + 100)))
 			if reIeWpa2.search(line):
 				current.encryption = Encryption.WPA2
 				current.encDetails = line

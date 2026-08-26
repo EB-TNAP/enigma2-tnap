@@ -99,7 +99,7 @@ private:
 	bool m_need_rotor_workaround;
 	bool m_blindscan;
 	bool m_multitype;
-	int m_modcod; // MODCOD value for DVB-S2
+	int m_modcod = -1; // last known-good DVB-S2 MODCOD, -1 = never read successfully
 	std::map<fe_delivery_system_t, bool> m_delsys, m_delsys_whitelist;
 	std::string m_filename;
 	char m_description[128];

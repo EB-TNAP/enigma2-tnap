@@ -238,7 +238,7 @@ public:
 	int getGuardInterval() const;
 	int getHierarchyInformation() const;
 	int getPlpId() const;
-	virtual int getMODCOD() const { return 0; }
+	virtual int getMODCOD() const { return -1; }
 	virtual std::string getMODCODDescription() const { return ""; }
 	virtual int getRequiredSNR() const { return 0; }
 };
@@ -252,7 +252,7 @@ class eDVBSatelliteTransponderData : public eDVBTransponderData
 	int m_modcod;
 
 public:
-	eDVBSatelliteTransponderData(struct dtv_property *dtvproperties, unsigned int propertycount, eDVBFrontendParametersSatellite &transponderparms, int frequencyoffset, bool original, int modcod = 0);
+	eDVBSatelliteTransponderData(struct dtv_property *dtvproperties, unsigned int propertycount, eDVBFrontendParametersSatellite &transponderparms, int frequencyoffset, bool original, int modcod = -1);
 
 	std::string getTunerType() const;
 	int getInversion() const;

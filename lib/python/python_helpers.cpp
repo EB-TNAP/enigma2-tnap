@@ -129,6 +129,17 @@ void transponderDataToDict(ePyObject &dest, ePtr<iDVBTransponderData> data)
 		if (value >= 0) PutToDict(dest, "hierarchy_information", value);
 		value = data->getPlpId();
 		if (value >= 0) PutToDict(dest, "plp_id", value);
+
+		/* DVB-S2 MODCOD, measured by the demod. On a VCM/ACM multistream
+		   carrier this is the only field that identifies WHICH stream is
+		   actually being demodulated. */
+		value = data->getMODCOD();
+		if (value >= 0) PutToDict(dest, "modcod", value);
+		std::string modcod_description = data->getMODCODDescription();
+		if (!modcod_description.empty())
+			PutToDict(dest, "modcod_description", modcod_description.c_str());
+		value = data->getRequiredSNR();
+		if (value > 0) PutToDict(dest, "required_snr", value);
 	}
 }
 

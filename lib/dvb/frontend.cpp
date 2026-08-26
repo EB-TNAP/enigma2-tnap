@@ -1677,110 +1677,6 @@ int eDVBFrontend::readFrontendData(int type)
 			}
 			return type == feSatellite ? p.u.data + m_data[FREQ_OFFSET] : p.u.data;
 		}
-		// COMMENTED OUT: modcodValue not available in this API version
-		// This is a Dreambox-specific extension not present in standard Enigma2
-		/*
-		case iFrontendInformation_ENUMS::modcodValue:
-		{
-			if (m_state == stateLock)
-			{
-				int system = 0;
-				oparm.getSystem(system);
-				if (system == eDVBFrontendParametersSatellite::System_DVB_S2)
-				{
-					// Retrieve MODCOD information
-					int modcod = 0;
-#if DVB_API_VERSION > 5 || DVB_API_VERSION == 5 && DVB_API_VERSION_MINOR >= 10
-					if (m_dvbversion >= DVB_VERSION(5, 10))
-					{
-						// Try to use the newer DVB API to get MODCOD info
-						struct dtv_property p = {};
-						struct dtv_properties cmdseq = {};
-						cmdseq.props = &p;
-						cmdseq.num = 1;
-						p.cmd = DTV_STAT_MODCOD;
-						
-						if (ioctl(m_fd, FE_GET_PROPERTY, &cmdseq) >= 0)
-						{
-							modcod = p.u.data;
-							m_modcod = modcod; // Store for future reference
-							return modcod;
-						}
-						else
-						{
-							eDebug("[eDVBFrontend] DTV_STAT_MODCOD not supported by driver: %m");
-						}
-					}
-#endif
-					// Fall back to estimating MODCOD from modulation and FEC
-					// Note: This is just an estimate, not the actual MODCOD
-					eDVBFrontendParametersSatellite sat;
-					oparm.getDVBS(sat);
-					
-					// Create a synthetic MODCOD from modulation and FEC
-					int mod = sat.modulation;
-					int fec = sat.fec;
-					
-					if (mod == eDVBFrontendParametersSatellite::Modulation_QPSK)
-					{
-						switch (fec)
-						{
-							case eDVBFrontendParametersSatellite::FEC_1_2:  modcod = DVB_S2_MODCOD::QPSK_1_2; break;
-							case eDVBFrontendParametersSatellite::FEC_2_3:  modcod = DVB_S2_MODCOD::QPSK_2_3; break;
-							case eDVBFrontendParametersSatellite::FEC_3_4:  modcod = DVB_S2_MODCOD::QPSK_3_4; break;
-							case eDVBFrontendParametersSatellite::FEC_3_5:  modcod = DVB_S2_MODCOD::QPSK_3_5; break;
-							case eDVBFrontendParametersSatellite::FEC_4_5:  modcod = DVB_S2_MODCOD::QPSK_4_5; break;
-							case eDVBFrontendParametersSatellite::FEC_5_6:  modcod = DVB_S2_MODCOD::QPSK_5_6; break;
-							case eDVBFrontendParametersSatellite::FEC_8_9:  modcod = DVB_S2_MODCOD::QPSK_8_9; break;
-							case eDVBFrontendParametersSatellite::FEC_9_10: modcod = DVB_S2_MODCOD::QPSK_9_10; break;
-							default: modcod = 0;
-						}
-					}
-					else if (mod == eDVBFrontendParametersSatellite::Modulation_8PSK)
-					{
-						switch (fec)
-						{
-							case eDVBFrontendParametersSatellite::FEC_2_3:  modcod = DVB_S2_MODCOD::PSK8_2_3; break;
-							case eDVBFrontendParametersSatellite::FEC_3_4:  modcod = DVB_S2_MODCOD::PSK8_3_4; break;
-							case eDVBFrontendParametersSatellite::FEC_3_5:  modcod = DVB_S2_MODCOD::PSK8_3_5; break;
-							case eDVBFrontendParametersSatellite::FEC_5_6:  modcod = DVB_S2_MODCOD::PSK8_5_6; break;
-							case eDVBFrontendParametersSatellite::FEC_8_9:  modcod = DVB_S2_MODCOD::PSK8_8_9; break;
-							case eDVBFrontendParametersSatellite::FEC_9_10: modcod = DVB_S2_MODCOD::PSK8_9_10; break;
-							default: modcod = 0;
-						}
-					}
-					else if (mod == eDVBFrontendParametersSatellite::Modulation_16APSK)
-					{
-						switch (fec)
-						{
-							case eDVBFrontendParametersSatellite::FEC_2_3:  modcod = DVB_S2_MODCOD::APSK16_2_3; break;
-							case eDVBFrontendParametersSatellite::FEC_3_4:  modcod = DVB_S2_MODCOD::APSK16_3_4; break;
-							case eDVBFrontendParametersSatellite::FEC_4_5:  modcod = DVB_S2_MODCOD::APSK16_4_5; break;
-							case eDVBFrontendParametersSatellite::FEC_5_6:  modcod = DVB_S2_MODCOD::APSK16_5_6; break;
-							case eDVBFrontendParametersSatellite::FEC_8_9:  modcod = DVB_S2_MODCOD::APSK16_8_9; break;
-							case eDVBFrontendParametersSatellite::FEC_9_10: modcod = DVB_S2_MODCOD::APSK16_9_10; break;
-							default: modcod = 0;
-						}
-					}
-					else if (mod == eDVBFrontendParametersSatellite::Modulation_32APSK)
-					{
-						switch (fec)
-						{
-							case eDVBFrontendParametersSatellite::FEC_3_4:  modcod = DVB_S2_MODCOD::APSK32_3_4; break;
-							case eDVBFrontendParametersSatellite::FEC_4_5:  modcod = DVB_S2_MODCOD::APSK32_4_5; break;
-							case eDVBFrontendParametersSatellite::FEC_5_6:  modcod = DVB_S2_MODCOD::APSK32_5_6; break;
-							case eDVBFrontendParametersSatellite::FEC_8_9:  modcod = DVB_S2_MODCOD::APSK32_8_9; break;
-							case eDVBFrontendParametersSatellite::FEC_9_10: modcod = DVB_S2_MODCOD::APSK32_9_10; break;
-							default: modcod = 0;
-						}
-					}
-					m_modcod = modcod;
-					return modcod;
-				}
-			}
-			return 0;
-		}
-		*/
 	}
 	return 0;
 }
@@ -1821,12 +1717,8 @@ void eDVBFrontend::getTransponderData(ePtr<iDVBTransponderData> &dest, bool orig
 			{
 				p[cmdseq.num++].cmd = DTV_SCRAMBLING_SEQUENCE_INDEX;
 			}
-#if DVB_API_VERSION > 5 || DVB_API_VERSION == 5 && DVB_API_VERSION_MINOR >= 10
-			if (m_dvbversion >= DVB_VERSION(5, 10))
-			{
-				p[cmdseq.num++].cmd = DTV_STAT_MODCOD;
-			}
-#endif
+			/* DTV_STAT_MODCOD is deliberately NOT in this sequence - see the
+			   separate query below. */
 			p[cmdseq.num++].cmd = DTV_ISDBT_SB_SEGMENT_IDX; /* FIXME HACK ALERT use unused by enigma2 ISDBT SEGMENT IDX to pass T2MI PLP ID */
 		}
 		else if (type == feCable)
@@ -1853,13 +1745,37 @@ void eDVBFrontend::getTransponderData(ePtr<iDVBTransponderData> &dest, bool orig
 			original = true;
 		}
 	}
+	/* MODCOD is asked for in an ioctl of its own. dvb-core rejects the ENTIRE
+	   FE_GET_PROPERTY call with EINVAL if any single property in the sequence
+	   is unknown to the driver, so bundling a non-standard property with the
+	   real readback would silently downgrade every field above to the
+	   requested values - a readback that always "matches" and proves nothing. */
+	int modcod = -1;
+	if (!m_simulate && m_fd >= 0 && !original && type == feSatellite)
+	{
+		struct dtv_property mp = {};
+		struct dtv_properties mseq = {};
+		mp.cmd = DTV_STAT_MODCOD;
+		mseq.props = &mp;
+		mseq.num = 1;
+		if (ioctl(m_fd, FE_GET_PROPERTY, &mseq) >= 0)
+		{
+			modcod = mp.u.data;
+			m_modcod = modcod;
+		}
+		else
+			eDebugNoSimulate("[eDVBFrontend%d] DTV_STAT_MODCOD unsupported by driver: %m", m_dvbid);
+	}
+	if (modcod < 0 && m_modcod > 0)
+		modcod = m_modcod;
+
 	switch (type)
 	{
 	case feSatellite:
 		{
 			eDVBFrontendParametersSatellite s;
 			oparm.getDVBS(s);
-			dest = new eDVBSatelliteTransponderData(cmdseq.props, cmdseq.num, s, m_data[FREQ_OFFSET], original, m_modcod);
+			dest = new eDVBSatelliteTransponderData(cmdseq.props, cmdseq.num, s, m_data[FREQ_OFFSET], original, modcod);
 			break;
 		}
 	case feCable:

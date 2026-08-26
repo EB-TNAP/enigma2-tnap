@@ -597,6 +597,11 @@ public:
 	virtual int getGuardInterval() const = 0;
 	virtual int getHierarchyInformation() const = 0;
 	virtual int getPlpId() const = 0;
+	/* DVB-S2 MODCOD. -1 when unknown/not applicable. Non-pure so that the
+	   cable/terrestrial/ATSC implementations need no change. */
+	virtual int getMODCOD() const { return -1; }
+	virtual std::string getMODCODDescription() const { return ""; }
+	virtual int getRequiredSNR() const { return 0; }
 };
 
 class iDVBFrontendData: public iDVBFrontend_ENUMS, public iObject

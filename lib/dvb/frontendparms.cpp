@@ -306,13 +306,13 @@ eDVBSatelliteTransponderData::eDVBSatelliteTransponderData(struct dtv_property *
 : eDVBTransponderData(dtvproperties, propertycount, original), transponderParameters(transponderparms), frequencyOffset(frequencyoffset), m_modcod(modcod)
 {
     // If we already have MODCOD stored in transponder parameters, use it if not provided
-    if (m_modcod == 0 && transponderParameters.modcod > 0)
+    if (m_modcod <= 0 && transponderParameters.modcod > 0)
     {
         m_modcod = transponderParameters.modcod;
     }
-    
+
     // Try to extract MODCOD from properties if available
-    if (m_modcod == 0 && !original)
+    if (m_modcod <= 0 && !original)
     {
         for (unsigned int i = 0; i < propertycount; i++)
         {

@@ -105,7 +105,7 @@ class NetworkOverview(Screen):
 	skin = """
 	<screen name="NetworkOverview" title="Network Overview" position="center,center" size="1070,540" resolution="1280,720">
 		<widget source="adapterList" render="Listbox" position="10,10" size="e-20,250">
-			<template name="Default" colors="#0000CC00,#00CC0000,#00CCCCCC,#00003300,#00330000,#00333333" fonts="Regular;25,enigma2icons;38,Regular;24,Regular;18,enigma2icons;20" itemHeight="50">
+			<template name="Default" colors="#0000CC00,#00CC0000,#00CCCCCC,#0000CC00,#00CC0000,#00CCCCCC" fonts="Regular;25,enigma2icons;38,Regular;24,Regular;18,enigma2icons;20" itemHeight="50">
 				<rowtemplate>
 					<text index="AdapterName" position="0,0" size="240,50" font="0" foregroundColor="#005a5a5a" padding="5,0" verticalAlignment="center" />
 					<text index="StatusText" position="280,0" size="170,50" font="0" foregroundColor="#005a5a5a" padding="5,0" verticalAlignment="center" />
@@ -131,7 +131,7 @@ class NetworkOverview(Screen):
 			<convert type="ConditionalShowHide" />
 		</widget>
 		<widget source="savedList" render="Listbox" position="10,305" size="e-20,175">
-			<template name="Default" colors="#0000CC00,#00CC0000,#00CCCCCC,#00003300,#00330000,#00333333" fonts="Regular;25,Regular;20" itemHeight="35">
+			<template name="Default" colors="#0000CC00,#00CC0000,#00CCCCCC,#0000CC00,#00CC0000,#00CCCCCC" fonts="Regular;25,Regular;20" itemHeight="35">
 				<rowtemplate>
 					<text index="SSID" position="0,0" size="280,35" font="0" foregroundColor="#005a5a5a" padding="5,0" verticalAlignment="center" />
 					<text index="StatusText" position="280,0" size="170,35" font="0" foregroundColor="#005a5a5a" padding="5,0" verticalAlignment="center" />

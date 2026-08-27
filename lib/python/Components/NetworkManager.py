@@ -803,11 +803,22 @@ class NetworkManager:
 			self.discoverAdapters()
 			self.loadInterfacesFile()
 			self.loadWpaSupplicantFiles()
+		# Blacklisted interfaces (VPNs like wg0) never enter self.adapters, so
+		# the check above is always true for them and the discover/load trio
+		# is a no-op. applyNetinfo() is what actually populates
+		# vpnInterfaces from socketdaemon's netinfo, and without it a VPN
+		# that comes up after enigma2 has already started never appears in
+		# NetworkOverview even though it's live.
+		self.applyNetinfo()
 		self.notifyAdaptersChanged()
 
 	def onIfaceRemove(self, interface: str):
 		self.log(f"onIfaceRemove: {interface}.")
 		self.adapters.pop(interface, None)
+		# Symmetric with onIfaceAdd: a removed VPN interface isn't in
+		# self.adapters to begin with, so it can only be dropped from
+		# vpnInterfaces by re-deriving it from current netinfo.
+		self.applyNetinfo()
 		self.notifyAdaptersChanged()
 
 	def onScanTrigger(self, interface: str):

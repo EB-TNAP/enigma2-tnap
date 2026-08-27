@@ -1116,6 +1116,28 @@ class NetworkInformation(InformationBase):
 				info.append("")
 				info.append(formatLine("P1", _("Bytes received"), "%d (%s)" % (net.rxBytes, scaleNumber(net.rxBytes, style="Iec", format="%.1f"))))
 				info.append(formatLine("P1", _("Bytes sent"), "%d (%s)" % (net.txBytes, scaleNumber(net.txBytes, style="Iec", format="%.1f"))))
+		if not selectedAdapter:
+			for interface in sorted(networkManager.vpnInterfaces.keys()):
+				vpn = networkManager.vpnInterfaces[interface]
+				info.append("")
+				info.append(formatLine("S", _("Interface '%s'") % interface, _("VPN")))
+				info.append(formatLine("P1", _("Status"), (_("Up / Active") if vpn.up else _("Down / Inactive"))))
+				if vpn.up:
+					if vpn.ip != [0, 0, 0, 0]:
+						info.append(formatLine("P1", _("IP address"), ".".join(str(x) for x in vpn.ip)))
+					if vpn.netmask != [0, 0, 0, 0]:
+						info.append(formatLine("P1", _("Netmask"), ".".join(str(x) for x in vpn.netmask)))
+					if vpn.bcast != [0, 0, 0, 0]:
+						info.append(formatLine("P1", _("Broadcast address"), ".".join(str(x) for x in vpn.bcast)))
+					if vpn.mac and vpn.mac != "00:00:00:00:00:00":
+						info.append(formatLine("P1", _("MAC address"), vpn.mac))
+					if vpn.mtu:
+						info.append(formatLine("P1", _("MTU"), vpn.mtu))
+					info.append(formatLine("P1", _("Link detected"), (_("Yes") if vpn.link else _("No"))))
+				if vpn.rxBytes or vpn.txBytes:
+					info.append("")
+					info.append(formatLine("P1", _("Bytes received"), "%d (%s)" % (vpn.rxBytes, scaleNumber(vpn.rxBytes, style="Iec", format="%.1f"))))
+					info.append(formatLine("P1", _("Bytes sent"), "%d (%s)" % (vpn.txBytes, scaleNumber(vpn.txBytes, style="Iec", format="%.1f"))))
 		info += self.geolocationData
 		self["information"].setText("\n".join(info))
 

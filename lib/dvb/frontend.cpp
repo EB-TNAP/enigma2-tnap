@@ -565,7 +565,9 @@ RESULT eDVBFrontendParameters::getHash(unsigned long &hash) const
 		case iDVBFrontend::feSatellite:
 		{
 			hash = (sat.orbital_position << 16);
-			hash |= ((sat.frequency/1000)&0xFFFF)|((sat.polarisation&1) << 15);
+	        hash |= ((sat.frequency / 1000) & 0x3FFF)
+	              | (((sat.frequency % 1000) ? 1u : 0u) << 14)
+	              | ((sat.polarisation & 1) << 15);
 			return 0;
 		}
 		case iDVBFrontend::feCable:

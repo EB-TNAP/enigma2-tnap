@@ -206,6 +206,15 @@ class NetworkManager:
 		except OSError:
 			names = []
 
+		# Adapters we knew about (from a previous scan or the interfaces file) that aren't
+		# physically here anymore. Keep them (so save() doesn't drop their interfaces-file
+		# stanza) but mark them absent so adapter-picker UI can hide them.
+		for interface, adapter in self.adapters.items():
+			if interface not in names:
+				adapter.present = False
+				adapter.netInfo.up = False
+				adapter.netInfo.link = False
+
 		def isWireless(interface: str) -> bool:
 			if isWirelessName(interface):
 				return True
@@ -252,6 +261,7 @@ class NetworkManager:
 					name=interface,
 					isWiFi=isWirelessName(interface),
 					driverApi=apiNl80211,
+					present=False,
 				)
 			self.connections[interface] = conns
 			self.adapters[interface].adapterEnabled = interface in autoIfaces
@@ -406,6 +416,11 @@ class NetworkManager:
 
 	def getAdapter(self, interface: str) -> Adapter | None:
 		return self.adapters.get(interface)
+
+	def getAdapters(self) -> dict[str, Adapter]:
+		"""self.adapters filtered to physically present adapters - use this wherever
+		only real, currently plugged-in adapters should be listed/selected."""
+		return {name: adapter for name, adapter in self.adapters.items() if adapter.present}
 
 	def getNetInfo(self, interface: str) -> NetInfo:
 		adapter = self.adapters.get(interface)
@@ -807,7 +822,8 @@ class NetworkManager:
 
 	def onIfaceAdd(self, interface: str):
 		self.log(f"onIfaceAdd: {interface}.")
-		if interface not in self.adapters:
+		adapter = self.adapters.get(interface)
+		if adapter is None or not adapter.present:
 			self.discoverAdapters()
 			self.loadInterfacesFile()
 			self.loadWpaSupplicantFiles()
@@ -822,11 +838,14 @@ class NetworkManager:
 
 	def onIfaceRemove(self, interface: str):
 		self.log(f"onIfaceRemove: {interface}.")
-		self.adapters.pop(interface, None)
-		# Symmetric with onIfaceAdd: a removed VPN interface isn't in
-		# self.adapters to begin with, so it can only be dropped from
-		# vpnInterfaces by re-deriving it from current netinfo.
-		self.applyNetinfo()
+		adapter = self.adapters.get(interface)
+		if adapter is not None:
+			# Keep the adapter (and its connections) around, just hidden - a hotplug
+			# removal is often temporary and save() must not drop its interfaces-file
+			# stanza just because the device isn't plugged in right now.
+			adapter.present = False
+			adapter.netInfo.up = False
+			adapter.netInfo.link = False
 		self.notifyAdaptersChanged()
 
 	def onScanTrigger(self, interface: str):
@@ -943,6 +962,7 @@ class Adapter:
 	isBroadcomWl: bool = False  # Has the vendor "wl" tool available (needed to kick iwlist scans alive).
 	canWakeOnWiFi: bool = False
 	adapterEnabled: bool = False  # False -> Every line of this adapter's stanza in /etc/network/interfaces is commented out with "# " (see serializeConnection()), not just "auto <iface>".
+	present: bool = True  # False -> Known from /etc/network/interfaces (or was hotplug-removed) but not currently found in /sys/class/net. Kept in adapters/connections so save() doesn't drop its config, but should be hidden from adapter-picker UI.
 	netInfo: NetInfo = field(default_factory=NetInfo)
 	hasInternet: bool | None = None  # None = Not checked (yet) by NetworkManager.checkConnectionInternet().
 

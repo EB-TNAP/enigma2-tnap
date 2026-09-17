@@ -949,8 +949,24 @@ void eDVBFrontend::feEvent(int w)
 		int state;
 		res = ::ioctl(m_fd, FE_GET_EVENT, &event);
 
-		if (res && (errno == EAGAIN))
+		if (res)
+		{
+			if (errno == EAGAIN)
+				break;
+			if (errno == ENODEV)
+			{
+				/*
+				 * The USB tuner behind this frontend is gone. Close it so we
+				 * stop polling a dead fd; don't process the zeroed event
+				 * below as if it were a real status change.
+				 */
+				eWarning("[eDVBFrontend%d] frontend gone (%m), closing", m_dvbid);
+				closeFrontend(true, true);
+				return;
+			}
+			/* unexpected error, don't spin on it and don't process a zeroed event */
 			break;
+		}
 
 		if (w < 0)
 			continue;

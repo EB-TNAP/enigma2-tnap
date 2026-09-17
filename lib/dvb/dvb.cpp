@@ -273,6 +273,8 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 	char name[128] = {};
 	int vtunerid = nr - 1;
 
+	m_nr = nr;
+	m_lost = false;
 	pumpThread = 0;
 
 	int num_fe = 0;
@@ -292,6 +294,14 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 	virtualFrontendName = filename;
 
 	demuxFd = vtunerFd = pipeFd[0] = pipeFd[1] = -1;
+
+	/*
+	 * Remember the USB device this adapter came from, so a re-probe after
+	 * a disconnect can be matched back up even if it re-enumerates under a
+	 * different adapter number.
+	 */
+	snprintf(filename, sizeof(filename), "/sys/class/dvb/dvb%d.frontend0/device", nr);
+	m_devicePath = readLink(filename);
 
 	/* find the device name */
 	snprintf(filename, sizeof(filename), "/sys/class/dvb/dvb%d.frontend0/device/product", nr);
@@ -373,10 +383,9 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 		/* we did not find a usable name, fallback to a default */
 		snprintf(name, sizeof(name), "usb frontend");
 	}
+	m_product = name;
 
-	snprintf(filename, sizeof(filename), "/dev/dvb/adapter%d/demux0", nr);
-	demuxFd = open(filename, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-	if (demuxFd < 0)
+	if (!openDemux(nr))
 	{
 		goto error;
 	}
@@ -486,6 +495,87 @@ error:
 	}
 }
 
+#define DEMUX_BUFFER_SIZE (16 * 1024 * 188 ) /* 3 MB */
+
+bool eDVBUsbAdapter::openDemux(int nr)
+{
+	char filename[256] = {};
+
+	if (demuxFd >= 0)
+	{
+		::close(demuxFd);
+		demuxFd = -1;
+	}
+
+	snprintf(filename, sizeof(filename), "/dev/dvb/adapter%d/demux0", nr);
+	demuxFd = open(filename, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	if (demuxFd < 0)
+	{
+		return false;
+	}
+
+	::ioctl(demuxFd, DMX_SET_BUFFER_SIZE, DEMUX_BUFFER_SIZE);
+	return true;
+}
+
+bool eDVBUsbAdapter::scanForReturnedAdapter(int &foundNr)
+{
+	/*
+	 * Scan for an adapter whose /device symlink resolves to the same USB
+	 * device we started on. Start at our own number since a lot of the
+	 * time the kernel hands the same adapter number back; fall back to
+	 * scanning outward for the (more common on this box) renumbered case.
+	 */
+	if (m_devicePath.empty())
+		return false;
+
+	for (int nr = 0; nr < 32; ++nr)
+	{
+		char filename[256] = {};
+		snprintf(filename, sizeof(filename), "/sys/class/dvb/dvb%d.frontend0", nr);
+		if (::access(filename, X_OK) < 0)
+			continue;
+		snprintf(filename, sizeof(filename), "/sys/class/dvb/dvb%d.frontend0/device", nr);
+		if (readLink(filename) != m_devicePath)
+			continue;
+		snprintf(filename, sizeof(filename), "/dev/dvb/adapter%d/demux0", nr);
+		if (::access(filename, R_OK) < 0)
+			continue;
+		foundNr = nr;
+		return true;
+	}
+	return false;
+}
+
+void eDVBUsbAdapter::rebuildPidFilter()
+{
+	int pidcount = 0;
+	for (int i = 0; i < 30; ++i)
+	{
+		if (pidList[i] == 0xffff)
+			continue;
+		if (pidcount)
+		{
+			::ioctl(demuxFd, DMX_ADD_PID, &pidList[i]);
+			pidcount++;
+		}
+		else
+		{
+			struct dmx_pes_filter_params filter = {};
+			filter.input = DMX_IN_FRONTEND;
+			filter.flags = 0;
+			filter.pid = pidList[i];
+			filter.output = DMX_OUT_TSDEMUX_TAP;
+			filter.pes_type = DMX_PES_OTHER;
+			if (ioctl(demuxFd, DMX_SET_PES_FILTER, &filter) >= 0
+					&& ioctl(demuxFd, DMX_START) >= 0)
+			{
+				pidcount = 1;
+			}
+		}
+	}
+}
+
 eDVBUsbAdapter::~eDVBUsbAdapter()
 {
 	running = false;
@@ -539,31 +629,81 @@ void *eDVBUsbAdapter::vtunerPump()
 		unsigned char pad[64]; /* nobody knows the much data the driver will try to copy into our struct, add some padding to be sure */
 	};
 
-#define DEMUX_BUFFER_SIZE (16 * 1024 * 188 ) /* 3 MB */
-	ioctl(demuxFd, DMX_SET_BUFFER_SIZE, DEMUX_BUFFER_SIZE);
+		/* how often we poll for the device coming back while it's lost */
+#define REPROBE_POLL_MS 500
 
 	while (running)
 	{
 		fd_set rset, xset;
 		int maxfd = vtunerFd;
-		if (demuxFd > maxfd) maxfd = demuxFd;
 		if (pipeFd[0] > maxfd) maxfd = pipeFd[0];
 		FD_ZERO(&rset);
 		FD_ZERO(&xset);
 		FD_SET(vtunerFd, &xset);
-		FD_SET(demuxFd, &rset);
 		FD_SET(pipeFd[0], &rset);
-		if (Select(maxfd + 1, &rset, NULL, &xset, NULL) > 0)
+		if (demuxFd >= 0)
 		{
-			if (FD_ISSET(vtunerFd, &xset))
-			{
-				struct vtuner_message message = {};
-				memset(message.pidlist, 0xff, sizeof(message.pidlist));
-				::ioctl(vtunerFd, VTUNER_GET_MESSAGE, &message);
+			if (demuxFd > maxfd) maxfd = demuxFd;
+			FD_SET(demuxFd, &rset);
+		}
 
-				switch (message.type)
+		struct timeval tv;
+		struct timeval *tvp = NULL;
+		if (m_lost)
+		{
+			tv.tv_sec = REPROBE_POLL_MS / 1000;
+			tv.tv_usec = (REPROBE_POLL_MS % 1000) * 1000;
+			tvp = &tv;
+		}
+
+		int r = Select(maxfd + 1, &rset, NULL, &xset, tvp);
+
+		if (m_lost)
+		{
+			int foundNr;
+			if (scanForReturnedAdapter(foundNr))
+			{
+				/* give the frontend a moment to finish attaching before we poke it */
+				usleep(500 * 1000);
+				if (openDemux(foundNr))
 				{
-				case MSG_PIDLIST:
+					pidcount = 0;
+					rebuildPidFilter();
+					if (foundNr != m_nr)
+					{
+						char filename[256] = {};
+						std::string oldUsbFrontendName = usbFrontendName;
+						snprintf(filename, sizeof(filename), "/dev/dvb/adapter%d/frontend0", foundNr);
+						usbFrontendName = filename;
+						mappedFrontendName[virtualFrontendName] = usbFrontendName;
+						eWarning("[eDVBUsbAdapter] '%s' returned as adapter%d (was adapter%d); the running frontend still points at '%s' until the next restart",
+							m_product.c_str(), foundNr, m_nr, oldUsbFrontendName.c_str());
+						m_nr = foundNr;
+						::ioctl(vtunerFd, VTUNER_SET_ADAPTER, foundNr);
+					}
+					else
+					{
+						eWarning("[eDVBUsbAdapter] '%s' returned as adapter%d", m_product.c_str(), foundNr);
+					}
+					m_lost = false;
+				}
+			}
+		}
+
+		if (r <= 0)
+			continue;
+
+		if (FD_ISSET(vtunerFd, &xset))
+		{
+			struct vtuner_message message = {};
+			memset(message.pidlist, 0xff, sizeof(message.pidlist));
+			::ioctl(vtunerFd, VTUNER_GET_MESSAGE, &message);
+
+			switch (message.type)
+			{
+			case MSG_PIDLIST:
+				if (demuxFd >= 0)
+				{
 					/* remove old pids */
 					for (int i = 0; i < 30; i++)
 					{
@@ -612,20 +752,37 @@ void *eDVBUsbAdapter::vtunerPump()
 							}
 						}
 					}
-
-					/* copy pids */
-					memcpy(pidList, message.pidlist, sizeof(message.pidlist));
-
-					break;
 				}
+				/*
+				 * Keep tracking the desired pid list even while the device is
+				 * lost, so rebuildPidFilter() can replay it once it returns.
+				 */
+				memcpy(pidList, message.pidlist, sizeof(message.pidlist));
+
+				break;
 			}
-			if (FD_ISSET(demuxFd, &rset))
+		}
+		if (demuxFd >= 0 && FD_ISSET(demuxFd, &rset))
+		{
+			errno = 0;
+			ssize_t size = singleRead(demuxFd, buffer, sizeof(buffer));
+			if (size > 0)
 			{
-				ssize_t size = singleRead(demuxFd, buffer, sizeof(buffer));
-				if (size > 0 && writeAll(vtunerFd, buffer, size) <= 0)
-				{
+				if (writeAll(vtunerFd, buffer, size) <= 0)
 					break;
-				}
+			}
+			else if (size < 0 && (errno == EAGAIN || errno == EINTR))
+			{
+				/* transient, try again next time round */
+			}
+			else
+			{
+				/* size == 0 (EOF) or any other read error: the device is gone */
+				eWarning("[eDVBUsbAdapter] '%s' (adapter%d) lost (%m)", m_product.c_str(), m_nr);
+				::close(demuxFd);
+				demuxFd = -1;
+				pidcount = 0;
+				m_lost = true;
 			}
 		}
 	}

@@ -135,32 +135,17 @@ class eDVBUsbAdapter: public eDVBAdapterLinux
 {
 	DECLARE_REF(eDVBUsbAdapter);
 private:
-	int m_nr;
 	int vtunerFd;
 	int demuxFd;
 	int pipeFd[2];
 	std::string usbFrontendName;
 	std::string virtualFrontendName;
-		/*
-		 * Identity of the USB device backing this adapter, so a re-probe
-		 * after a disconnect can be recognised even if it comes back under
-		 * a different adapter number. m_devicePath is the resolved sysfs
-		 * device symlink target (stable across a reconnect, unlike the
-		 * adapter number); m_product is a secondary sanity check.
-		 */
-	std::string m_devicePath;
-	std::string m_product;
-		/* true once the demux fd has been closed after a device loss */
-	bool m_lost;
 	bool running;
 	unsigned short int pidList[30];
 	unsigned char buffer[4 * 1024 * 188];
 	pthread_t pumpThread;
 	static void *threadproc(void *arg);
 	void *vtunerPump();
-	bool openDemux(int nr);
-	bool scanForReturnedAdapter(int &foundNr);
-	void rebuildPidFilter();
 
 public:
 	eDVBUsbAdapter(int nr);

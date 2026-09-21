@@ -20,5 +20,5 @@ install_PYTHON = \
 	Task.py Console.py ResourceManager.py TuneTest.py updatecheck.py \
 	Keyboard.py Sensors.py FanControl.py HdmiCec.py RcModel.py \
 	ServiceScan.py \
-	ImportChannels.py StackTrace.py EpgLoadSave.py \
+	ImportChannels.py StackTrace.py EpgLoadSave.py SkinIcon.py \
 	HdmiRecord.py PowerOffTimer.py NetworkTime.py NetworkManager.py FrontPanelLed.py International.py

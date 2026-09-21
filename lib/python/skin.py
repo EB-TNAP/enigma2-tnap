@@ -644,7 +644,11 @@ def parseParameter(value):
 		(font, size) = (x.strip() for x in value.split(";", 1))
 		return [font, int(size)]
 	else:  # Integer.
-		return int(value)
+		try:
+			return int(value)
+		except ValueError:
+			skinError(f"Parameter value '{value}' is not a number, a defined color or a font, using 0")
+			return 0
 
 
 def parsePixmap(path, desktop, width=0, height=0):

@@ -1,94 +1,105 @@
-# -*- coding: utf-8 -*-
-import enigma
+import importlib.util
+from pathlib import Path
+import sys
 import time
+from types import SimpleNamespace
 
-import tests
-
-#enigma.reset()
-
-
-def test_timer(repeat=0, timer_start=3600, timer_length=1000, sim_length=86400 * 7):
-
-	import NavigationInstance
-
-	at = time.time()
-
-	t = NavigationInstance.instance.RecordTimer
-	print(t)
-	print("old mwt:", t.MaxWaitTime)
-	t.MaxWaitTime = 86400 * 1000
-
-	# hack:
-	NavigationInstance.instance.SleepTimer.MaxWaitTime = 86400 * 1000
-
-	t.processed_timers = []
-	t.timer_list = []
-
-	# generate a timer to test
-	import xml.etree.ElementTree
-	import RecordTimer
-
-	timer = RecordTimer.createTimer(xml.etree.ElementTree.fromstring(
-	"""
-		<timer
-			begin="%d"
-			end="%d"
-			serviceref="1:0:1:6DD2:44D:1:C00000:0:0:0:"
-			repeated="%d"
-			name="Test Event Name"
-			description="Test Event Description"
-			afterevent="nothing"
-			eit="56422"
-			disabled="0"
-			justplay="0">
-	</timer>""" % (at + timer_start, at + timer_start + timer_length, repeat)
-	))
-
-	t.record(timer)
-
-	# run virtual environment
-	enigma.run(sim_length)
-
-	print("done.")
-
-	timers = t.processed_timers + t.timer_list
-
-	print("start: %s" % (time.ctime(at + 10)))
-
-	assert len(timers) == 1
-
-	for t in timers:
-		print("begin=%d, end=%d, repeated=%d, state=%d" % (t.begin - at, t.end - at, t.repeated, t.state))
-		print("begin: %s" % (time.ctime(t.begin)))
-		print("end: %s" % (time.ctime(t.end)))
-
-	# if repeat, check if the calculated repeated time of day matches the initial time of day
-	if repeat:
-		t_initial = time.localtime(at + timer_start)
-		t_repeated = time.localtime(timers[0].begin)
-		print(t_initial)
-		print(t_repeated)
-
-	if t_initial[3:6] != t_repeated[3:6]:
-		raise tests.TestError("repeated timer time of day does not match")
+import pytest
 
 
-# required stuff for timer (we try to keep this minimal)
-enigma.init_nav()
-enigma.init_record_config()
-enigma.init_parental_control()
+@pytest.fixture
+def timer_module(monkeypatch):
+    class FakeTimer:
+        def __init__(self):
+            self.callback = []
+
+        def start(self, delay, single_shot=False):
+            self.delay = delay
+            self.single_shot = single_shot
+
+    # Only the event-loop timer is native; exercise the real scheduling code.
+    monkeypatch.setitem(sys.modules, "enigma", SimpleNamespace(eTimer=FakeTimer))
+    source = Path(__file__).resolve().parents[1] / "lib/python/timer.py"
+    spec = importlib.util.spec_from_file_location("timer_under_test", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with monkeypatch.context() as timezone:
+        timezone.setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3")
+        time.tzset()
+        try:
+            yield module
+        finally:
+            timezone.undo()
+            time.tzset()
 
 
-from events import log  # noqa: E402
+def timestamp(year, month, day, hour, minute=0):
+    return int(time.mktime((year, month, day, hour, minute, 0, -1, -1, -1)))
 
-import calendar  # noqa: E402
+
+@pytest.mark.parametrize("start, expected", [
+    ((2007, 3, 24, 4), (2007, 3, 25, 4)),
+    ((2007, 10, 27, 4), (2007, 10, 28, 4)),
+    # 02:00 does not exist on the spring transition day: skip that day.
+    ((2007, 3, 24, 2), (2007, 3, 26, 2)),
+])
+def test_repeated_timer_preserves_local_time(timer_module, monkeypatch, start, expected):
+    begin = timestamp(*start)
+    entry = timer_module.TimerEntry(begin, begin + 1000)
+    entry.repeated = 0x7f
+    monkeypatch.setattr(timer_module, "time", lambda: entry.end + 1)
+    entry.processRepeated()
+    assert entry.begin == timestamp(*expected)
+    assert entry.end - entry.begin == 1000
 
 
-import os  # noqa: E402
-# we are operating in CET/CEST
-os.environ['TZ'] = 'CET'
-time.tzset()
+def test_repeated_timer_respects_weekdays(timer_module, monkeypatch):
+    begin = timestamp(2007, 3, 23, 12)  # Friday
+    entry = timer_module.TimerEntry(begin, begin + 1000)
+    for weekday in range(5):
+        entry.setRepeated(weekday)
+    monkeypatch.setattr(timer_module, "time", lambda: begin + 1001)
+    entry.processRepeated()
+    assert entry.begin == timestamp(2007, 3, 26, 12)  # Monday after DST
+    assert entry.end - entry.begin == 1000
 
-#log(test_timer, test_name = "test_timer_repeating", base_time = calendar.timegm((2007, 3, 1, 12, 0, 0)), repeat=0x7f, sim_length = 86400 * 7)
-log(test_timer, test_name="test_timer_repeating_dst_skip", base_time=calendar.timegm((2007, 3, 20, 0, 0, 0)), timer_start=3600, repeat=0x7f, sim_length=86400 * 7)
-#log(test_timer, test_name = "test_timer_repeating_dst_start", base_time = calendar.timegm((2007, 03, 20, 0, 0, 0)), timer_start = 10000, repeat=0x7f, sim_length = 86400 * 7)
+
+def test_one_shot_timer_completes_once(timer_module, monkeypatch):
+    now = [timestamp(2007, 3, 20, 12)]
+    monkeypatch.setattr(timer_module, "time", lambda: now[0])
+    activations = []
+
+    class Entry(timer_module.TimerEntry):
+        def getNextActivation(self):
+            return (self.begin - self.prepare_time, self.begin, self.end)[self.state]
+
+        def activate(self):
+            activations.append(self.state)
+            return True
+
+    scheduler = timer_module.Timer()
+    entry = Entry(now[0] + 3600, now[0] + 4600)
+    scheduler.addTimerEntry(entry)
+    for activation in (entry.begin - entry.prepare_time, entry.begin, entry.end):
+        now[0] = activation
+        scheduler.calcNextActivation()
+    assert activations == [entry.StateWaiting, entry.StatePrepared, entry.StateRunning]
+    assert entry.state == entry.StateEnded
+    assert scheduler.timer_list == []
+    assert scheduler.processed_timers == [entry]
+    now[0] += 86400
+    scheduler.calcNextActivation()
+    assert len(activations) == 3
+    assert scheduler.processed_timers == [entry]
+
+
+def test_disabled_timer_does_not_activate(timer_module, monkeypatch):
+    now = timestamp(2007, 3, 20, 12)
+    monkeypatch.setattr(timer_module, "time", lambda: now)
+    scheduler = timer_module.Timer()
+    entry = timer_module.TimerEntry(now + 3600, now + 4600)
+    entry.disable()
+    scheduler.addTimerEntry(entry)
+    assert scheduler.timer_list == []
+    assert scheduler.processed_timers == [entry]
+    assert entry.state == entry.StateEnded

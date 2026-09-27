@@ -5,7 +5,6 @@
 
 #include <lib/base/eerror.h>
 #include <lib/base/estring.h>
-#include <lib/base/esimpleconfig.h>
 #include <lib/base/wrappers.h>
 #include <lib/dvb/cahandler.h>
 #include <lib/dvb/idvb.h>
@@ -117,7 +116,6 @@ eDVBResourceManager::eDVBResourceManager()
 
 	eDebug("[eDVBResourceManager] found %zd adapter, %zd frontends(%zd sim) and %zd demux",
 		m_adapter.size(), m_frontend.size(), m_simulate_frontend.size(), m_demux.size());
-
 	m_fbcmng = new eFBCTunerManager(instance);
 
 	CONNECT(m_releaseCachedChannelTimer->timeout, eDVBResourceManager::releaseCachedChannel);
@@ -160,20 +158,28 @@ void eDVBAdapterLinux::scanDevices()
 		eDVBFrontend *fe;
 		std::string name = filename;
 		std::map<std::string, std::string>::iterator it = mappedFrontendName.find(name);
-		if (it != mappedFrontendName.end()) name = it->second;
+		bool is_usb = (it != mappedFrontendName.end());
+		if (is_usb) name = it->second;
 
 		{
 			int ok = 0;
 			fe = new eDVBFrontend(name.c_str(), num_fe, ok, true);
 			if (ok)
+			{
+				/* vtuner-backed USB frontend: flag it without relying on the driver's nim_sockets name */
+				if (is_usb) fe->setUSBTuner(true);
 				m_simulate_frontend.push_back(ePtr<eDVBFrontend>(fe));
+			}
 		}
 
 		{
 			int ok = 0;
 			fe = new eDVBFrontend(name.c_str(), num_fe, ok, false, fe);
 			if (ok)
+			{
+				if (is_usb) fe->setUSBTuner(true);
 				m_frontend.push_back(ePtr<eDVBFrontend>(fe));
+			}
 		}
 		++num_fe;
 	}
@@ -272,9 +278,9 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 	char filename[256] = {};
 	char name[128] = {};
 	int vtunerid = nr - 1;
+	int threadError = 0;
+	running = false;
 
-	m_nr = nr;
-	m_lost = false;
 	pumpThread = 0;
 
 	int num_fe = 0;
@@ -294,14 +300,27 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 	virtualFrontendName = filename;
 
 	demuxFd = vtunerFd = pipeFd[0] = pipeFd[1] = -1;
+	usbFeFd = proxyFd = -1;
+	statusRunning = false;
+	statusThread = 0;
 
 	/*
-	 * Remember the USB device this adapter came from, so a re-probe after
-	 * a disconnect can be matched back up even if it re-enumerates under a
-	 * different adapter number.
+	 * GigaBlue BCM7252 style platform (also used by the Vu+ Duo 4K Lite): nexus.ko plus a
+	 * monolithic dvb.ko that contains its own vtuner implementation. That vtuner only passes
+	 * TS data once the proxy frontend has reported a status, see statusPoll().
 	 */
-	snprintf(filename, sizeof(filename), "/sys/class/dvb/dvb%d.frontend0/device", nr);
-	m_devicePath = readLink(filename);
+	gbVtuner = (::access("/sys/module/nexus", F_OK) == 0 && ::access("/sys/module/dvb", F_OK) == 0);
+	if (gbVtuner)
+	{
+		/*
+		 * Reserve a file descriptor number below vtunerFd for the proxy frontend. On process
+		 * exit (including crashes) the kernel closes descriptors in ascending order. Closing
+		 * vtunerFd makes the driver unregister the proxy frontend, which blocks until every
+		 * handle on that frontend is closed; if our own proxy handle were closed after
+		 * vtunerFd, enigma2 would hang forever in exit.
+		 */
+		proxyFd = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
+	}
 
 	/* find the device name */
 	snprintf(filename, sizeof(filename), "/sys/class/dvb/dvb%d.frontend0/device/product", nr);
@@ -335,6 +354,7 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 		frontend = -1;
 		goto error;
 	}
+
 #ifdef HAVE_OLDE2_API
 #if defined DTV_ENUM_DELSYS
 	prop[0].cmd = DTV_ENUM_DELSYS;
@@ -383,9 +403,10 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 		/* we did not find a usable name, fallback to a default */
 		snprintf(name, sizeof(name), "usb frontend");
 	}
-	m_product = name;
 
-	if (!openDemux(nr))
+	snprintf(filename, sizeof(filename), "/dev/dvb/adapter%d/demux0", nr);
+	demuxFd = open(filename, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	if (demuxFd < 0)
 	{
 		goto error;
 	}
@@ -393,11 +414,7 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 	while (vtunerFd < 0)
 	{
 		snprintf(filename, sizeof(filename), "/dev/misc/vtuner%d", vtunerid);
-		if (::access(filename, F_OK) < 0)
-		{
-			eDebug("[eDVBUsbAdapter] '%s' not found -> stop here!", filename);
-			break;
-		}
+		if (::access(filename, F_OK) < 0) break;
 		vtunerFd = open(filename, O_RDWR | O_CLOEXEC);
 		if (vtunerFd < 0)
 		{
@@ -411,6 +428,16 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 	}
 
 	eDebug("[eDVBUsbAdapter] linking adapter%d/frontend0 to vtuner%d", nr, vtunerid);
+
+	if (proxyFd >= 0 && proxyFd > vtunerFd)
+	{
+		/* keep the reserved proxy descriptor below vtunerFd (see above) */
+		int fd = ::fcntl(vtunerFd, F_DUPFD_CLOEXEC, proxyFd + 1);
+		if (fd < 0)
+			goto error;
+		::close(vtunerFd);
+		vtunerFd = fd;
+	}
 
 	switch (fe_info.type)
 	{
@@ -434,7 +461,7 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 		goto error;
 	}
 
-#if _IOC_NONE > 0				/* MIPS receivers return _IOC_NONE=1 */
+#if _IOC_NONE > 0		/* MIPS receivers return _IOC_NONE=1 */
 #define VTUNER_GET_MESSAGE      1
 #define VTUNER_SET_RESPONSE     2
 #define VTUNER_SET_NAME         3
@@ -443,7 +470,7 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 #define VTUNER_SET_FE_INFO      6
 #define VTUNER_SET_NUM_MODES    7
 #define VTUNER_SET_MODES        8
-#else							/* ARM receivers return _IOC_NONE=0 */
+#else				/* ARM receivers return _IOC_NONE=0 */
 #define VTUNER_GET_MESSAGE     11
 #define VTUNER_SET_RESPONSE    12
 #define VTUNER_SET_NAME        13
@@ -455,6 +482,7 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 #endif
 #define VTUNER_SET_DELSYS      32
 #define VTUNER_SET_ADAPTER     33
+
 	ioctl(vtunerFd, VTUNER_SET_NAME, name);
 	ioctl(vtunerFd, VTUNER_SET_TYPE, type);
 	ioctl(vtunerFd, VTUNER_SET_FE_INFO, &fe_info);
@@ -468,7 +496,14 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 		ioctl(vtunerFd, VTUNER_SET_DELSYS, prop[0].u.buffer.data);
 #endif
 	ioctl(vtunerFd, VTUNER_SET_HAS_OUTPUTS, "no");
-	ioctl(vtunerFd, VTUNER_SET_ADAPTER, nr);
+	/*
+	 * On the GigaBlue style vtuner a non-zero adapter number makes the driver inject empty
+	 * PID list messages from poll() whenever no PID is active, overwriting any pending
+	 * request (such as MSG_READ_STATUS) and leaving its caller waiting forever while holding
+	 * the vtuner lock. It also adds a 100 ms sleep to every write(). Leave it unset there.
+	 */
+	if (!gbVtuner)
+		ioctl(vtunerFd, VTUNER_SET_ADAPTER, nr);
 
 	memset(pidList, 0xff, sizeof(pidList));
 
@@ -478,11 +513,44 @@ eDVBUsbAdapter::eDVBUsbAdapter(int nr)
 		eWarning("[eDVBUsbAdapter] failed to create pipe (%m)");
 		goto error;
 	}
+	/* Set the shared descriptor before starting the pump that reads it. */
+	if (gbVtuner)
+		usbFeFd = ::open(usbFrontendName.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
 	running = true;
-	pthread_create(&pumpThread, NULL, threadproc, (void*)this);
+	threadError = pthread_create(&pumpThread, NULL, threadproc, (void*)this);
+	if (threadError)
+	{
+		pumpThread = 0;
+		running = false;
+		eWarning("[eDVBUsbAdapter] cannot start vtuner pump: %s", strerror(threadError));
+		goto error;
+	}
+	if (usbFeFd >= 0 && proxyFd >= 0)
+	{
+		statusRunning = true;
+		threadError = pthread_create(&statusThread, NULL, statusThreadproc, (void*)this);
+		if (threadError)
+		{
+			statusThread = 0;
+			statusRunning = false;
+			eWarning("[eDVBUsbAdapter] cannot start status poller: %s", strerror(threadError));
+		}
+	}
+	else if (gbVtuner)
+		eWarning("[eDVBUsbAdapter] cannot open %s read-only (%m), proxy status will not be reported", usbFrontendName.c_str());
 	return;
 
 error:
+	if (usbFeFd >= 0)
+	{
+		::close(usbFeFd);
+		usbFeFd = -1;
+	}
+	if (proxyFd >= 0)
+	{
+		::close(proxyFd);
+		proxyFd = -1;
+	}
 	if (vtunerFd >= 0)
 	{
 		close(vtunerFd);
@@ -495,89 +563,17 @@ error:
 	}
 }
 
-#define DEMUX_BUFFER_SIZE (16 * 1024 * 188 ) /* 3 MB */
-
-bool eDVBUsbAdapter::openDemux(int nr)
-{
-	char filename[256] = {};
-
-	if (demuxFd >= 0)
-	{
-		::close(demuxFd);
-		demuxFd = -1;
-	}
-
-	snprintf(filename, sizeof(filename), "/dev/dvb/adapter%d/demux0", nr);
-	demuxFd = open(filename, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-	if (demuxFd < 0)
-	{
-		return false;
-	}
-
-	::ioctl(demuxFd, DMX_SET_BUFFER_SIZE, DEMUX_BUFFER_SIZE);
-	return true;
-}
-
-bool eDVBUsbAdapter::scanForReturnedAdapter(int &foundNr)
-{
-	/*
-	 * Scan for an adapter whose /device symlink resolves to the same USB
-	 * device we started on. Start at our own number since a lot of the
-	 * time the kernel hands the same adapter number back; fall back to
-	 * scanning outward for the (more common on this box) renumbered case.
-	 */
-	if (m_devicePath.empty())
-		return false;
-
-	for (int nr = 0; nr < 32; ++nr)
-	{
-		char filename[256] = {};
-		snprintf(filename, sizeof(filename), "/sys/class/dvb/dvb%d.frontend0", nr);
-		if (::access(filename, X_OK) < 0)
-			continue;
-		snprintf(filename, sizeof(filename), "/sys/class/dvb/dvb%d.frontend0/device", nr);
-		if (readLink(filename) != m_devicePath)
-			continue;
-		snprintf(filename, sizeof(filename), "/dev/dvb/adapter%d/demux0", nr);
-		if (::access(filename, R_OK) < 0)
-			continue;
-		foundNr = nr;
-		return true;
-	}
-	return false;
-}
-
-void eDVBUsbAdapter::rebuildPidFilter()
-{
-	int pidcount = 0;
-	for (int i = 0; i < 30; ++i)
-	{
-		if (pidList[i] == 0xffff)
-			continue;
-		if (pidcount)
-		{
-			::ioctl(demuxFd, DMX_ADD_PID, &pidList[i]);
-			pidcount++;
-		}
-		else
-		{
-			struct dmx_pes_filter_params filter = {};
-			filter.input = DMX_IN_FRONTEND;
-			filter.flags = 0;
-			filter.pid = pidList[i];
-			filter.output = DMX_OUT_TSDEMUX_TAP;
-			filter.pes_type = DMX_PES_OTHER;
-			if (ioctl(demuxFd, DMX_SET_PES_FILTER, &filter) >= 0
-					&& ioctl(demuxFd, DMX_START) >= 0)
-			{
-				pidcount = 1;
-			}
-		}
-	}
-}
-
 eDVBUsbAdapter::~eDVBUsbAdapter()
 {
+	/* stop the status poller first, the pump must still be running to answer its last request */
+	statusRunning = false;
+	if (statusThread) pthread_join(statusThread, NULL);
+	/* the proxy frontend handle must be closed before vtunerFd, see the constructor */
+	if (proxyFd >= 0)
+	{
+		::close(proxyFd);
+		proxyFd = -1;
+	}
 	running = false;
 	if (pipeFd[1] >= 0)
 	{
@@ -585,6 +581,11 @@ eDVBUsbAdapter::~eDVBUsbAdapter()
 		pipeFd[1] = -1;
 	}
 	if (pumpThread) pthread_join(pumpThread, NULL);
+	if (usbFeFd >= 0)
+	{
+		::close(usbFeFd);
+		usbFeFd = -1;
+	}
 	if (pipeFd[0] >= 0)
 	{
 		::close(pipeFd[0]);
@@ -608,6 +609,64 @@ void *eDVBUsbAdapter::threadproc(void *arg)
 	return user->vtunerPump();
 }
 
+void *eDVBUsbAdapter::statusThreadproc(void *arg)
+{
+	eDVBUsbAdapter *user = (eDVBUsbAdapter*)arg;
+	return user->statusPoll();
+}
+
+void *eDVBUsbAdapter::statusPoll()
+{
+	bool proxyOpen = false;
+	int lastErrno = 0;
+	while (statusRunning)
+	{
+		if (!proxyOpen)
+		{
+			/*
+			 * Open the proxy frontend read/write: that starts the dvb-core frontend thread,
+			 * which initialises the frontend's exit state. The driver allocates the proxy
+			 * frontend without zeroing it, so without this every frontend ioctl can fail with
+			 * ENODEV. Nobody else opens the proxy (enigma2 tunes the real USB frontend).
+			 * The node may appear slightly after VTUNER_SET_TYPE, hence the retry loop.
+			 */
+			int fd = ::open(virtualFrontendName.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC);
+			if (fd < 0)
+				fd = ::open(virtualFrontendName.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+			if (fd >= 0)
+			{
+				/* move it onto the reserved low descriptor number */
+				if (::dup3(fd, proxyFd, O_CLOEXEC) >= 0)
+				{
+					proxyOpen = true;
+					eDebug("[eDVBUsbAdapter] polling proxy frontend %s for %s", virtualFrontendName.c_str(), usbFrontendName.c_str());
+				}
+				::close(fd);
+			}
+		}
+		if (proxyOpen)
+		{
+			fe_status_t status;
+			/* calls the proxy's read_status -> MSG_READ_STATUS -> answered in vtunerPump() */
+			if (::ioctl(proxyFd, FE_READ_STATUS, &status) < 0)
+			{
+				if (errno != lastErrno)
+				{
+					eWarning("[eDVBUsbAdapter] FE_READ_STATUS on proxy %s failed: %m", virtualFrontendName.c_str());
+					lastErrno = errno;
+				}
+			}
+			else if (lastErrno)
+			{
+				eDebug("[eDVBUsbAdapter] FE_READ_STATUS on proxy %s works again", virtualFrontendName.c_str());
+				lastErrno = 0;
+			}
+		}
+		usleep(250 * 1000);
+	}
+	return NULL;
+}
+
 static bool exist_in_pidlist(unsigned short int* pidlist, unsigned short int value)
 {
 	for (int i=0; i<30; ++i)
@@ -619,8 +678,10 @@ static bool exist_in_pidlist(unsigned short int* pidlist, unsigned short int val
 void *eDVBUsbAdapter::vtunerPump()
 {
 	int pidcount = 0;
+	int lastStatus = -1;
 	if (vtunerFd < 0 || demuxFd < 0 || pipeFd[0] < 0) return NULL;
 
+#define MSG_READ_STATUS      3
 #define MSG_PIDLIST         14
 	struct vtuner_message
 	{
@@ -629,81 +690,32 @@ void *eDVBUsbAdapter::vtunerPump()
 		unsigned char pad[64]; /* nobody knows the much data the driver will try to copy into our struct, add some padding to be sure */
 	};
 
-		/* how often we poll for the device coming back while it's lost */
-#define REPROBE_POLL_MS 500
+#define DEMUX_BUFFER_SIZE (16 * 1024 * 188 ) /* 3 MB */
+	ioctl(demuxFd, DMX_SET_BUFFER_SIZE, DEMUX_BUFFER_SIZE);
 
 	while (running)
 	{
 		fd_set rset, xset;
 		int maxfd = vtunerFd;
+		if (demuxFd > maxfd) maxfd = demuxFd;
 		if (pipeFd[0] > maxfd) maxfd = pipeFd[0];
 		FD_ZERO(&rset);
 		FD_ZERO(&xset);
 		FD_SET(vtunerFd, &xset);
+		FD_SET(demuxFd, &rset);
 		FD_SET(pipeFd[0], &rset);
-		if (demuxFd >= 0)
+		if (Select(maxfd + 1, &rset, NULL, &xset, NULL) > 0)
 		{
-			if (demuxFd > maxfd) maxfd = demuxFd;
-			FD_SET(demuxFd, &rset);
-		}
-
-		struct timeval tv;
-		struct timeval *tvp = NULL;
-		if (m_lost)
-		{
-			tv.tv_sec = REPROBE_POLL_MS / 1000;
-			tv.tv_usec = (REPROBE_POLL_MS % 1000) * 1000;
-			tvp = &tv;
-		}
-
-		int r = Select(maxfd + 1, &rset, NULL, &xset, tvp);
-
-		if (m_lost)
-		{
-			int foundNr;
-			if (scanForReturnedAdapter(foundNr))
+			if (FD_ISSET(vtunerFd, &xset))
 			{
-				/* give the frontend a moment to finish attaching before we poke it */
-				usleep(500 * 1000);
-				if (openDemux(foundNr))
+				struct vtuner_message message = {};
+				memset(message.pidlist, 0xff, sizeof(message.pidlist));
+				if (::ioctl(vtunerFd, VTUNER_GET_MESSAGE, &message) < 0)
+					message.type = -1;
+
+				switch (message.type)
 				{
-					pidcount = 0;
-					rebuildPidFilter();
-					if (foundNr != m_nr)
-					{
-						char filename[256] = {};
-						std::string oldUsbFrontendName = usbFrontendName;
-						snprintf(filename, sizeof(filename), "/dev/dvb/adapter%d/frontend0", foundNr);
-						usbFrontendName = filename;
-						mappedFrontendName[virtualFrontendName] = usbFrontendName;
-						eWarning("[eDVBUsbAdapter] '%s' returned as adapter%d (was adapter%d); the running frontend still points at '%s' until the next restart",
-							m_product.c_str(), foundNr, m_nr, oldUsbFrontendName.c_str());
-						m_nr = foundNr;
-						::ioctl(vtunerFd, VTUNER_SET_ADAPTER, foundNr);
-					}
-					else
-					{
-						eWarning("[eDVBUsbAdapter] '%s' returned as adapter%d", m_product.c_str(), foundNr);
-					}
-					m_lost = false;
-				}
-			}
-		}
-
-		if (r <= 0)
-			continue;
-
-		if (FD_ISSET(vtunerFd, &xset))
-		{
-			struct vtuner_message message = {};
-			memset(message.pidlist, 0xff, sizeof(message.pidlist));
-			::ioctl(vtunerFd, VTUNER_GET_MESSAGE, &message);
-
-			switch (message.type)
-			{
-			case MSG_PIDLIST:
-				if (demuxFd >= 0)
-				{
+				case MSG_PIDLIST:
 					/* remove old pids */
 					for (int i = 0; i < 30; i++)
 					{
@@ -752,37 +764,52 @@ void *eDVBUsbAdapter::vtunerPump()
 							}
 						}
 					}
-				}
-				/*
-				 * Keep tracking the desired pid list even while the device is
-				 * lost, so rebuildPidFilter() can replay it once it returns.
-				 */
-				memcpy(pidList, message.pidlist, sizeof(message.pidlist));
 
-				break;
-			}
-		}
-		if (demuxFd >= 0 && FD_ISSET(demuxFd, &rset))
-		{
-			errno = 0;
-			ssize_t size = singleRead(demuxFd, buffer, sizeof(buffer));
-			if (size > 0)
-			{
-				if (writeAll(vtunerFd, buffer, size) <= 0)
+					/* copy pids */
+					memcpy(pidList, message.pidlist, sizeof(message.pidlist));
+
 					break;
+				default:
+				{
+					/*
+					 * Every other request waits for a response; answer it so the driver never
+					 * blocks. MSG_READ_STATUS gets the real USB frontend status, which also
+					 * opens the driver's data gate when the USB tuner has a signal.
+					 */
+					struct
+					{
+						int type;
+						unsigned int status;
+						unsigned char pad[120];
+					} response = {};
+					if (message.type <= 0)
+						break;
+					response.type = message.type;
+					if (message.type == MSG_READ_STATUS && usbFeFd >= 0)
+					{
+						fe_status_t status = (fe_status_t)0;
+						if (::ioctl(usbFeFd, FE_READ_STATUS, &status) >= 0)
+							response.status = (unsigned int)status;
+						if ((int)response.status != lastStatus)
+						{
+							eDebug("[eDVBUsbAdapter] reporting status 0x%x of %s to vtuner", response.status, usbFrontendName.c_str());
+							lastStatus = (int)response.status;
+						}
+					}
+					else if (message.type != MSG_READ_STATUS)
+						eDebug("[eDVBUsbAdapter] answering vtuner request type %d", message.type);
+					::ioctl(vtunerFd, VTUNER_SET_RESPONSE, &response);
+					break;
+				}
+				}
 			}
-			else if (size < 0 && (errno == EAGAIN || errno == EINTR))
+			if (FD_ISSET(demuxFd, &rset))
 			{
-				/* transient, try again next time round */
-			}
-			else
-			{
-				/* size == 0 (EOF) or any other read error: the device is gone */
-				eWarning("[eDVBUsbAdapter] '%s' (adapter%d) lost (%m)", m_product.c_str(), m_nr);
-				::close(demuxFd);
-				demuxFd = -1;
-				pidcount = 0;
-				m_lost = true;
+				ssize_t size = singleRead(demuxFd, buffer, sizeof(buffer));
+				if (size > 0 && writeAll(vtunerFd, buffer, size) <= 0)
+				{
+					break;
+				}
 			}
 		}
 	}
@@ -1106,9 +1133,8 @@ RESULT eDVBResourceManager::allocateFrontend(ePtr<eDVBAllocatedFrontend> &fe, eP
 	eSmartPtrList<eDVBRegisteredFrontend> &frontends = simulate ? m_simulate_frontend : m_frontend;
 	eDVBRegisteredFrontend *best, *fbc_fe, *best_fbc_fe;
 	int bestval, foundone, current_fbc_setid, c;
-	bool check_fbc_leaf_linkable;
-	[[maybe_unused]] bool is_configured_sat;
-	[[maybe_unused]] long link;
+	bool check_fbc_leaf_linkable, is_configured_sat;
+	long link;
 
 	fbc_fe  = NULL;
 	best_fbc_fe = NULL;
@@ -1164,7 +1190,10 @@ RESULT eDVBResourceManager::allocateFrontend(ePtr<eDVBAllocatedFrontend> &fe, eP
 		}
 
 		if (c)	/* if we have at least one frontend which is compatible with the source, flag this. */
+		{
+			// eDebug("[eDVBResourceManager] allocateFrontend, score=%d", c);
 			foundone = 1;
+		}
 
 		if (!i->m_inuse)
 		{
@@ -1640,7 +1669,12 @@ int tuner_type_channel_default(ePtr<iDVBChannelList> &channellist, const eDVBCha
 	return 0;
 }
 
-int eDVBResourceManager::canAllocateChannel(const eDVBChannelID &channelid, const eDVBChannelID& ignore, int &system, bool simulate)
+int eDVBResourceManager::canAllocateChannel(const eDVBChannelID &channelid, const eDVBChannelID &ignore, int &system, bool simulate)
+{
+	return canAllocateChannel(channelid, ignore, eDVBChannelID(), system, simulate);
+}
+
+int eDVBResourceManager::canAllocateChannel(const eDVBChannelID &channelid, const eDVBChannelID& ignore, const eDVBChannelID& ignoresr, int &system, bool simulate)
 {
 	std::list<active_channel> &active_channels = simulate ? m_active_simulate_channels : m_active_channels;
 	int ret = 0;
@@ -1648,8 +1682,9 @@ int eDVBResourceManager::canAllocateChannel(const eDVBChannelID &channelid, cons
 	if (!simulate && m_cached_channel)
 	{
 		eDVBChannel *cache_chan = (eDVBChannel*)&(*m_cached_channel);
-		if(channelid==cache_chan->getChannelID())
+		if(channelid==cache_chan->getChannelID()) {
 			return tuner_type_channel_default(m_list, channelid, system);
+		}
 	}
 
 		/* first, check if a channel is already existing. */
@@ -1671,6 +1706,7 @@ int eDVBResourceManager::canAllocateChannel(const eDVBChannelID &channelid, cons
 	std::vector<int*> fcc_decremented_fe_usecounts;
 	std::map<eDVBChannelID, int> fcc_chids;
 	int apply_to_ignore = 0;
+	int apply_to_ignoresr = 0;
 	if (!eFCCServiceManager::getFCCChannelID(fcc_chids))
 	{
 		for (std::map<eDVBChannelID, int>::iterator i(fcc_chids.begin()); i != fcc_chids.end(); ++i)
@@ -1717,6 +1753,18 @@ int eDVBResourceManager::canAllocateChannel(const eDVBChannelID &channelid, cons
 		}
 	}
 
+	// For stream relayed channel make a check is it in the available channels and if it is ignore it
+	if (ignoresr) {
+		for (std::list<active_channel>::iterator i(active_channels.begin()); i != active_channels.end(); ++i)
+		{
+			if (i->m_channel_id == ignoresr)
+			{
+				apply_to_ignoresr = 1;
+				break;
+			}
+		}
+	}
+
 	for (std::list<active_channel>::iterator i(active_channels.begin()); i != active_channels.end(); ++i)
 	{
 		eSmartPtrList<eDVBRegisteredFrontend> &frontends = simulate ? m_simulate_frontend : m_frontend;
@@ -1730,6 +1778,7 @@ int eDVBResourceManager::canAllocateChannel(const eDVBChannelID &channelid, cons
 			// or 2 when the cached channel is not equal to the compared channel
 			int check_usecount = channel == &(*m_cached_channel) ? 1 : 0;
 			check_usecount += (apply_to_ignore+1) * 2; // one is used in eDVBServicePMTHandler and another is used in eDVBScan.
+			check_usecount += apply_to_ignoresr;
 			//eDebug("[eDVBResourceManager] canAllocateChannel channel->getUseCount() : %d , check_usecount : %d (cached : %d)", channel->getUseCount(), check_usecount, channel == &(*m_cached_channel));
 			if (channel->getUseCount() == check_usecount)  // channel only used once..(except fcc)
 			{
@@ -1879,13 +1928,8 @@ void eDVBChannelFilePush::filterRecordData(const unsigned char *_data, int len)
 
 DEFINE_REF(eDVBChannel);
 
-int eDVBChannel::m_debug = -1;
-
 eDVBChannel::eDVBChannel(eDVBResourceManager *mgr, eDVBAllocatedFrontend *frontend): m_state(state_idle), m_mgr(mgr)
 {
-	if(eDVBChannel::m_debug < 0)
-		eDVBChannel::m_debug = eSimpleConfig::getBool("config.crash.debugDVB", false) ? 1 : 0;
-
 	m_frontend = frontend;
 
 	m_pvr_thread = 0;
@@ -1918,13 +1962,11 @@ void eDVBChannel::frontendStateChanged(iDVBFrontend*fe)
 
 	if (state == iDVBFrontend::stateLock)
 	{
-		if(eDVBChannel::m_debug)
-			eDebug("[eDVBChannel] OURSTATE: ok");
+		eDebug("[eDVBChannel] OURSTATE: ok");
 		ourstate = state_ok;
 	} else if (state == iDVBFrontend::stateTuning)
 	{
-		if(eDVBChannel::m_debug)
-			eDebug("[eDVBChannel] OURSTATE: tuning");
+		eDebug("[eDVBChannel] OURSTATE: tuning");
 		ourstate = state_tuning;
 	} else if (state == iDVBFrontend::stateLostLock)
 	{
@@ -2007,9 +2049,11 @@ void eDVBChannel::cueSheetEvent(int event)
 				eDebug("[eDVBChannel] skipmode ratio is %lld:90000, bitrate is %d bit/s", m_cue->m_skipmode_ratio, bitrate);
 						/* i agree that this might look a bit like black magic. */
 				m_skipmode_n = 512*1024; /* must be 1 iframe at least. */
-				//* The / and * are done in order, resulting in a distinct integer
-				// truncation after bitrate / 8 / 90000
-				// I don't think that this is intended*/
+// The / and * are done in order, resulting in a distinct integer
+// truncation after bitrate / 8 / 90000
+// I don't think that this is intended...
+// github.com/OpenViX/enigma2/commit/33d172b5a3ad1b22d69ce60c2102552537b77929
+//				m_skipmode_m = bitrate / 8 / 90000 * m_cue->m_skipmode_ratio / 8;
 				m_skipmode_frames = m_cue->m_skipmode_ratio / 90000;
 				m_skipmode_m = (bitrate / 8) * (m_skipmode_frames / 8);
 				m_skipmode_frames_remainder = 0;
@@ -2109,7 +2153,7 @@ void eDVBChannel::getNextSourceSpan(off_t current_offset, size_t bytes_read, off
 	if (m_skipmode_m)
 	{
 		int frames_to_skip = m_skipmode_frames + m_skipmode_frames_remainder;
-		//eDebug("[eDVBChannel] we are at %llu, and we try to skip %d+%d frames from here", current_offset, m_skipmode_frames, m_skipmode_frames_remainder);
+		//eDebug("[eDVBChannel] we are at %lld, and we try to skip %d+%d frames from here", current_offset, m_skipmode_frames, m_skipmode_frames_remainder);
 		size_t iframe_len;
 		off_t iframe_start = current_offset;
 		int frames_skipped = frames_to_skip;
@@ -2255,7 +2299,7 @@ void eDVBChannel::getNextSourceSpan(off_t current_offset, size_t bytes_read, off
 			if (current_offset < i->second)
 			{
 				start = current_offset;
-				size = diff_upto(i->second, start, max);
+				size = align(diff_upto(i->second, start, max), blocksize);
 				//eDebug("[eDVBChannel] HIT, %lld < %lld < %lld, size: %zd", i->first, current_offset, i->second, size);
 				return;
 			}
@@ -2281,13 +2325,13 @@ void eDVBChannel::getNextSourceSpan(off_t current_offset, size_t bytes_read, off
 				/* when skipping reverse, however, choose the zone before. */
 				/* This returns a size 0 block, in case you noticed... */
 				--i;
-				eDebug("[eDVBChannel] skip to previous block, which is %ju..%ju", i->first, i->second);
+				eDebug("[eDVBChannel] skip to previous block, which is %jd..%jd", (intmax_t)i->first, (intmax_t)i->second);
 				size_t len = diff_upto(i->second, i->first, max);
 				start = i->second - len;
 				eDebug("[eDVBChannel] skipping to %jd, %zd", (intmax_t)start, len);
 			}
 
-			eDebug("[eDVBChannel] result: %jd, %zx (%ju %ju)", (intmax_t)start, size, i->first, i->second);
+			eDebug("[eDVBChannel] result: %jd, %zx (%jd %jd)", (intmax_t)start, size, (intmax_t)i->first, (intmax_t)i->second);
 			return;
 		}
 	}
@@ -2454,8 +2498,7 @@ RESULT eDVBChannel::getDemux(ePtr<iDVBDemux> &demux, int cap)
 {
 	ePtr<eDVBAllocatedDemux> &our_demux = (cap & capDecode) ? m_decoder_demux : m_demux;
 
-	if(eDVBChannel::m_debug)
-		eDebug("[eDVBChannel] getDemux cap=%02X", cap);
+	eDebug("[eDVBChannel] getDemux cap=%02X", cap);
 
 	if (!m_frontend)
 	{

@@ -3,6 +3,7 @@
 
 #ifndef SWIG
 
+#include <atomic>
 #include <lib/base/ebase.h>
 #include <lib/base/elock.h>
 #include <lib/dvb/idvb.h>
@@ -135,32 +136,31 @@ class eDVBUsbAdapter: public eDVBAdapterLinux
 {
 	DECLARE_REF(eDVBUsbAdapter);
 private:
-	int m_nr;
 	int vtunerFd;
 	int demuxFd;
 	int pipeFd[2];
 	std::string usbFrontendName;
 	std::string virtualFrontendName;
-		/*
-		 * Identity of the USB device backing this adapter, so a re-probe
-		 * after a disconnect can be recognised even if it comes back under
-		 * a different adapter number. m_devicePath is the resolved sysfs
-		 * device symlink target (stable across a reconnect, unlike the
-		 * adapter number); m_product is a secondary sanity check.
-		 */
-	std::string m_devicePath;
-	std::string m_product;
-		/* true once the demux fd has been closed after a device loss */
-	bool m_lost;
-	bool running;
+	std::atomic<bool> running;
 	unsigned short int pidList[30];
 	unsigned char buffer[4 * 1024 * 188];
 	pthread_t pumpThread;
 	static void *threadproc(void *arg);
 	void *vtunerPump();
-	bool openDemux(int nr);
-	bool scanForReturnedAdapter(int &foundNr);
-	void rebuildPidFilter();
+	/*
+	 * Some vtuner drivers (e.g. the GigaBlue/Broadcom 7252 dvb.ko) only pass TS data written to
+	 * the vtuner device on to the demux after the proxy frontend has reported a non-zero status
+	 * via MSG_READ_STATUS. Enigma2 tunes the real USB frontend directly, so nothing ever queries
+	 * the proxy frontend and all data is silently dropped. The status thread polls the proxy
+	 * frontend, and the pump answers the resulting request with the real USB frontend status.
+	 */
+	int usbFeFd;
+	int proxyFd;
+	bool gbVtuner;
+	std::atomic<bool> statusRunning;
+	pthread_t statusThread;
+	static void *statusThreadproc(void *arg);
+	void *statusPoll();
 
 public:
 	eDVBUsbAdapter(int nr);
@@ -189,7 +189,6 @@ public:
 
 		active_channel(const eDVBChannelID &chid, eDVBChannel *ch) : m_channel_id(chid), m_channel(ch) { }
 	};
-	void feStateChanged();
 
 private:
 	std::list<active_channel> m_active_channels, m_active_simulate_channels;
@@ -212,6 +211,7 @@ private:
 #ifndef SWIG
 public:
 #endif
+	void feStateChanged();
 	void releaseCachedChannel();
 	eDVBResourceManager();
 	virtual ~eDVBResourceManager();
@@ -232,6 +232,7 @@ public:
 
 	RESULT connectChannelAdded(const sigc::slot<void(eDVBChannel*)> &channelAdded, ePtr<eConnection> &connection);
 	int canAllocateChannel(const eDVBChannelID &channelid, const eDVBChannelID &ignore, int &system, bool simulate=false);
+	int canAllocateChannel(const eDVBChannelID &channelid, const eDVBChannelID &ignore, const eDVBChannelID& ignoresr, int &system, bool simulate=false);
 
 		/* allocate channel... */
 	RESULT allocateChannel(const eDVBChannelID &channelid, eUsePtr<iDVBChannel> &channel, bool simulate=false);
@@ -363,7 +364,6 @@ private:
 	ePtr<iDVBDemux> m_tsid_onid_demux;
 	ePtr<eTable<ServiceDescriptionSection> > m_SDT;
 	void SDTready(int err);
-	static int m_debug;
 };
 #endif // SWIG
 

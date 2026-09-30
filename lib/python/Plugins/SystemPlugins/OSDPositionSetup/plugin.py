@@ -1,14 +1,23 @@
 # -*- coding: utf-8 -*-
+from os.path import exists
 from Screens.Screen import Screen
 from Components.config import config, ConfigSelectionNumber, ConfigSubsection, ConfigInteger
 from Components.SystemInfo import BoxInfo
 from enigma import getDesktop
 
 def getMaxResolution():
+	# /proc/stb/fb/dst_* of Broadcom receivers is a 720x576 coordinate space, independent of the
+	# desktop size; writing desktop pixels (e.g. 1920x1080) there stretches the picture.
+	if not BoxInfo.getItem("AmlogicFamily") and exists("/proc/stb/fb/dst_left"):
+		return (720, 576)
 	desktop_size = getDesktop(0).size()
-	max_width = desktop_size.width()
-	max_height = desktop_size.height()
-	return (max_width, max_height)
+	return (desktop_size.width(), desktop_size.height())
+
+
+def getOSDDefault(name, fallback):
+	element = getattr(config.osd, name, None)
+	return element is not None and int(element.value) or fallback
+
 
 config.plugins.OSDPositionSetup = ConfigSubsection()
 if BoxInfo.getItem("AmlogicFamily"):
@@ -20,10 +29,10 @@ if BoxInfo.getItem("AmlogicFamily"):
 	config.plugins.OSDPositionSetup.dst_height = ConfigSelectionNumber(default=limits[3], stepwidth=1, min=limits[3] - 255, max=limits[3] + 255, wraparound=False)
 else:
 	max_width, max_height = getMaxResolution()
-	config.plugins.OSDPositionSetup.dst_left = ConfigSelectionNumber(default=0, stepwidth=1, min=0, max=max_width, wraparound=False)
-	config.plugins.OSDPositionSetup.dst_width = ConfigSelectionNumber(default=max_width, stepwidth=1, min=0, max=max_width, wraparound=False)
-	config.plugins.OSDPositionSetup.dst_top = ConfigSelectionNumber(default=0, stepwidth=1, min=0, max=max_height, wraparound=False)
-	config.plugins.OSDPositionSetup.dst_height = ConfigSelectionNumber(default=max_height, stepwidth=1, min=0, max=max_height, wraparound=False)
+	config.plugins.OSDPositionSetup.dst_left = ConfigSelectionNumber(default=min(getOSDDefault("dst_left", 0), max_width), stepwidth=1, min=0, max=max_width, wraparound=False)
+	config.plugins.OSDPositionSetup.dst_width = ConfigSelectionNumber(default=min(getOSDDefault("dst_width", max_width), max_width), stepwidth=1, min=0, max=max_width, wraparound=False)
+	config.plugins.OSDPositionSetup.dst_top = ConfigSelectionNumber(default=min(getOSDDefault("dst_top", 0), max_height), stepwidth=1, min=0, max=max_height, wraparound=False)
+	config.plugins.OSDPositionSetup.dst_height = ConfigSelectionNumber(default=min(getOSDDefault("dst_height", max_height), max_height), stepwidth=1, min=0, max=max_height, wraparound=False)
 
 
 def setPosition(dst_left, dst_width, dst_top, dst_height):

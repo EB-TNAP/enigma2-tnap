@@ -4,7 +4,7 @@ from Components.ActionMap import ActionMap
 from Components.ConfigList import ConfigListScreen
 from Components.config import config, ConfigSlider, ConfigYesNo
 from Components.Label import Label
-from Plugins.SystemPlugins.OSDPositionSetup.plugin import setPosition, setConfiguredPosition
+from Plugins.SystemPlugins.OSDPositionSetup.plugin import setPosition, setConfiguredPosition, getMaxResolution
 from enigma import quitMainloop, eTimer, getDesktop
 
 
@@ -68,12 +68,7 @@ class OverscanWizard(ConfigListScreen, Screen):
 			self["introduction"].instance.resize(eSize(800, 440 - lenlist))
 
 	def _readHwMaxResolution(self):
-		try:
-			self.hw_max_width = int(open("/proc/stb/fb/dst_width").read().strip(), 16) or getDesktop(0).size().width()
-			self.hw_max_height = int(open("/proc/stb/fb/dst_height").read().strip(), 16) or getDesktop(0).size().height()
-		except Exception:
-			self.hw_max_width = getDesktop(0).size().width()
-			self.hw_max_height = getDesktop(0).size().height()
+		self.hw_max_width, self.hw_max_height = getMaxResolution()
 
 	def setScreen(self):
 		self.list = []
@@ -89,7 +84,7 @@ class OverscanWizard(ConfigListScreen, Screen):
 			self.yes_no = ConfigYesNo(default=True, graphic=False)
 			self.list.append((_("Did you see all eight arrow heads?"), self.yes_no))
 			self.save_new_position = False
-			max_width, max_height = getDesktop(0).size().width(), getDesktop(0).size().height()
+			max_width, max_height = getMaxResolution()
 			setPosition(0, max_width, 0, max_height)
 			self._readHwMaxResolution()
 		elif self.step == 2:
@@ -102,7 +97,7 @@ class OverscanWizard(ConfigListScreen, Screen):
 			self.list.append((_("Did you see all eight arrow heads?"), self.yes_no))
 			self.yes_no.value = True
 			self.save_new_position = False
-			max_width, max_height = getDesktop(0).size().width(), getDesktop(0).size().height()
+			max_width, max_height = getMaxResolution()
 			setPosition(0, max_width, 0, max_height)
 			self._readHwMaxResolution()
 		elif self.step == 3:
@@ -111,8 +106,8 @@ class OverscanWizard(ConfigListScreen, Screen):
 				"you may also miss parts of the user interface, for example volume bars and more.\n\n"
 				"You can now try to resize and change the position of the user interface until you see the eight arrow heads.\n\n"
 				"When done press OK.\n\n"))
-			max_width = getattr(self, 'hw_max_width', getDesktop(0).size().width())
-			max_height = getattr(self, 'hw_max_height', getDesktop(0).size().height())
+			max_width = getattr(self, 'hw_max_width', getMaxResolution()[0])
+			max_height = getattr(self, 'hw_max_height', getMaxResolution()[1])
 			self.dst_left = ConfigSlider(default=min(config.plugins.OSDPositionSetup.dst_left.value, max_width), increment=1, limits=(0, max_width))
 			self.dst_right = ConfigSlider(default=min(config.plugins.OSDPositionSetup.dst_left.value + config.plugins.OSDPositionSetup.dst_width.value, max_width), increment=1, limits=(0, max_width))
 			self.dst_top = ConfigSlider(default=min(config.plugins.OSDPositionSetup.dst_top.value, max_height), increment=1, limits=(0, max_height))

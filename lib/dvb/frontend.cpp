@@ -19,6 +19,35 @@
 #define I2C_SLAVE_FORCE	0x0706
 #endif
 
+/*
+ * TNAP blindscan diagnostics. A driver-based blindscan tune passes the range
+ * start as DTV_FREQUENCY and the search width (MHz) as DTV_SYMBOL_RATE; the
+ * blindscan flag itself never reaches the driver. After a lock, ask the
+ * driver what it actually locked to. If it hands back exactly what was
+ * requested, the driver has no get_frontend and dvb-core is echoing its
+ * property cache - the "found" transponder is then just the request.
+ */
+static void blindscanReadbackDebug(int fd, int dvbid, unsigned int req_freq, unsigned int req_sr, unsigned int req_sys)
+{
+	struct dtv_property p[4] = {};
+	struct dtv_properties cmdseq = {};
+	p[0].cmd = DTV_DELIVERY_SYSTEM;
+	p[1].cmd = DTV_FREQUENCY;
+	p[2].cmd = DTV_SYMBOL_RATE;
+	p[3].cmd = DTV_MODULATION;
+	cmdseq.props = p;
+	cmdseq.num = 4;
+	if (::ioctl(fd, FE_GET_PROPERTY, &cmdseq) < 0)
+	{
+		eDebug("[eDVBFrontend%d] BSDIAG lock readback failed: %m", dvbid);
+		return;
+	}
+	bool echo = (p[1].u.data == req_freq && p[2].u.data == req_sr);
+	eDebug("[eDVBFrontend%d] BSDIAG lock: requested IF %u kHz width/SR %u sys %u -> driver IF %u kHz SR %u sys %u mod %u%s",
+		dvbid, req_freq, req_sr, req_sys, p[1].u.data, p[2].u.data, p[0].u.data, p[3].u.data,
+		echo ? " ECHO(driver reported the request, not the carrier)" : "");
+}
+
 // Define DTV_STAT_MODCOD if not defined in the DVB API
 #ifndef DTV_STAT_MODCOD
 #define DTV_STAT_MODCOD 92
@@ -976,6 +1005,18 @@ void eDVBFrontend::feEvent(int w)
 		{
 			state = stateLock;
 			eDebug("[eDVB-#865-Frontend%d] fe event: Has Lock!!!", m_dvbid);
+			if (m_blindscan && m_tuning)
+			{
+				int fetype = -1;
+				oparm.getSystem(fetype);
+				if (fetype == feSatellite)
+				{
+					eDVBFrontendParametersSatellite req;
+					oparm.getDVBS(req);
+					blindscanReadbackDebug(m_fd, m_dvbid, (unsigned int)satfrequency, (unsigned int)req.symbol_rate,
+						req.system == eDVBFrontendParametersSatellite::System_DVB_S2 ? (unsigned int)SYS_DVBS2 : (unsigned int)SYS_DVBS);
+				}
+			}
 		}
 		else
 		{
@@ -984,6 +1025,8 @@ void eDVBFrontend::feEvent(int w)
 				state = stateTuning;
 				if (event.status & FE_TIMEDOUT) {
 					eDebug("[eDVBFrontend%d] FE_TIMEDOUT! ..abort", m_dvbid);
+					if (m_blindscan)
+						eDebug("[eDVBFrontend%d] BSDIAG seek ended: driver FE_TIMEDOUT", m_dvbid);
 					m_tuneTimer->stop();
 					timeout();
 					return;
@@ -1011,6 +1054,10 @@ void eDVBFrontend::timeout()
 	m_tuning = 0;
 	if (m_state == stateTuning)
 	{
+		/* Without a preceding "BSDIAG seek ended: driver FE_TIMEDOUT" line this
+		   is enigma2's own tune timer expiring, not the driver giving up. */
+		if (m_blindscan)
+			eDebug("[eDVBFrontend%d] BSDIAG seek ended: tune failed (state failed)", m_dvbid);
 		m_state = stateFailed;
 		m_data[CSW] = m_data[UCSW] = m_data[TONEBURST] = -1; // reset diseqc
 		m_stateChanged(this);
@@ -2764,8 +2811,20 @@ RESULT eDVBFrontend::tune(const iDVBFrontendParameters &where, bool blindscan)
 	m_blindscan = blindscan;
 	if (m_blindscan)
 	{
-		/* blindscan iterations can take a long time, use a long timeout */
-		timeout = 20000;
+		/*
+		 * blindscan iterations can take a long time, use a long timeout.
+		 * TNAP: the old fixed 20 s was indistinguishable from "end of range" to
+		 * both callers (scan.cpp and dmmBlindScan), so any seek slower than
+		 * 20 s silently ended its whole pol/band quadrant. Make it tunable via
+		 * config.misc.blindscan_tune_timeout (seconds, 5..180, default 20).
+		 */
+		int secs = eConfigManager::getConfigIntValue("config.misc.blindscan_tune_timeout", 20);
+		if (secs < 5)
+			secs = 5;
+		else if (secs > 180)
+			secs = 180;
+		timeout = secs * 1000;
+		eDebugNoSimulate("[eDVBFrontend%d] BSDIAG blindscan tune, timeout %u ms", m_dvbid, timeout);
 	}
 	else
 	{

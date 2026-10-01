@@ -33,6 +33,77 @@
 #define SCAN_eDebugNoNewLineStart(x...) do { if (m_scan_debug) eDebugNoNewLineStart(x); } while(0)
 #define SCAN_eDebugNoNewLine(x...) do { if (m_scan_debug) eDebugNoNewLine(x); } while(0)
 
+/*
+ * Driver-based satellite blindscan: the search request at m_ch_blindscan.front()
+ * carries the range start (kHz) as frequency and the search width (MHz) as
+ * symbol_rate. The original design re-tuned that same request after every lock
+ * and relied on the driver remembering where its seek stopped (Dreambox Si216x
+ * drivers do). Drivers that don't (Pulse 4K Si2166D) restart from the range
+ * start every time, so the scan keeps finding the first carrier or two.
+ * Move the request's start past the carrier just found instead, and narrow the
+ * width to what is left. Harmless on stateful drivers. Also stops a range that
+ * keeps returning the same carrier, or that the driver merely echoes back.
+ */
+template<class PrevPtr, class FoundPtr>
+static void advanceSatBlindscan(std::list<ePtr<iDVBFrontendParameters> > &blindscan, const PrevPtr &prevResult, const FoundPtr &found)
+{
+	if (blindscan.empty() || !found)
+		return;
+
+	eDVBFrontendParametersSatellite req, got;
+	if (blindscan.front()->getDVBS(req) || found->getDVBS(got))
+		return;
+
+	/* everything in kHz; symbol_rate of a search request is the width in MHz */
+	int start = (int)req.frequency;
+	int width_khz = (int)req.symbol_rate * 1000;
+	int found_freq = (int)got.frequency;
+	bool downward = found_freq < start; /* C-band: RF seek runs downwards */
+	int end = downward ? start - width_khz : start + width_khz;
+
+	int d = found_freq - start;
+	if ((int)got.symbol_rate == (int)req.symbol_rate && d > -1000 && d < 1000)
+	{
+		eDebug("[eDVBScan] blindscan: driver echoed the request (%d kHz, width %d), ending this range", start, (int)req.symbol_rate);
+		blindscan.pop_front();
+		return;
+	}
+
+	if (prevResult)
+	{
+		eDVBFrontendParametersSatellite prev;
+		if (!prevResult->getDVBS(prev) && prev.polarisation == got.polarisation)
+		{
+			int pd = (int)prev.frequency - found_freq;
+			if (pd > -1000 && pd < 1000)
+			{
+				eDebug("[eDVBScan] blindscan: same carrier %d kHz found twice in a row, ending this range", found_freq);
+				blindscan.pop_front();
+				return;
+			}
+		}
+	}
+
+	/* half occupied bandwidth at rolloff 0.35, plus a 2 MHz guard */
+	int skip = (int)(((long long)got.symbol_rate / 1000) * 135 / 200) + 2000;
+	int next = downward ? found_freq - skip : found_freq + skip;
+
+	if ((!downward && next >= end) || (downward && next <= end))
+	{
+		eDebug("[eDVBScan] blindscan: carrier %d kHz reaches the end of the range", found_freq);
+		blindscan.pop_front();
+		return;
+	}
+
+	req.frequency = next;
+	req.symbol_rate = (downward ? next - end : end - next) / 1000;
+	eDVBFrontendParameters *nreq = new eDVBFrontendParameters;
+	nreq->setDVBS(req);
+	blindscan.front() = nreq;
+	eDebug("[eDVBScan] blindscan: next seek from %d kHz, width %d MHz", next, (int)req.symbol_rate);
+}
+
+
 DEFINE_REF(eDVBScan);
 
 std::set<int> eDVBScan::m_vct_known_positions;
@@ -200,6 +271,8 @@ void eDVBScan::stateChange(iDVBChannel *ch)
 							break;
 						}
 						}
+						if (type == iDVBFrontend::feSatellite)
+							advanceSatBlindscan(m_ch_blindscan, m_ch_blindscan_result, feparm);
 						m_ch_current = m_ch_blindscan_result = feparm;
 					}
 				}
@@ -213,7 +286,9 @@ void eDVBScan::stateChange(iDVBChannel *ch)
 		{
 			int type;
 			m_ch_current->getSystem(type);
-			m_ch_unavailable.push_back(m_ch_current);
+			/* a failed blindscan iteration is a search request, not a transponder */
+			if (m_ch_blindscan.empty())
+				m_ch_unavailable.push_back(m_ch_current);
 			if (type == iDVBFrontend::feTerrestrial)
 			{
 				eDVBFrontendParametersTerrestrial parm;
@@ -318,7 +393,20 @@ RESULT eDVBScan::nextChannel()
 	m_channel_state = iDVBChannel::state_idle;
 
 	if (fe->tune(*m_ch_current, !m_ch_blindscan.empty()))
+	{
+		/*
+		 * During a blindscan, nextChannel() re-reads m_ch_blindscan.front(), so
+		 * retrying without dropping it recursed on the same request forever
+		 * (stack overflow) whenever tune() refused it, e.g. a range start that
+		 * prepare_sat() rejects as out of tuner range.
+		 */
+		if (!m_ch_blindscan.empty())
+		{
+			SCAN_eDebug("[eDVBScan] blindscan tune refused, dropping this search range");
+			m_ch_blindscan.pop_front();
+		}
 		return nextChannel();
+	}
 
 	m_event(evtUpdate);
 	return 0;

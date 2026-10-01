@@ -2,7 +2,9 @@
 from Components.config import ConfigSubsection, config
 from os.path import basename, isdir, join, normpath
 
-config.plugins = ConfigSubsection()
+# Do not replace an existing subsection: StartEnigma defines config.plugins.remotecontroltype before this module may first be imported.
+if not hasattr(config, "plugins"):
+	config.plugins = ConfigSubsection()
 
 
 class PluginDescriptor:

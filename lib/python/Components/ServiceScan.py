@@ -87,6 +87,14 @@ if fileExists("/proc/stb/info/boxtype") and not fileExists("/proc/stb/info/hwmod
 		nimfile.close()
 	except:
 		pass
+if fileExists("/proc/stb/info/gbmodel"):
+	try:
+		l = open("/proc/stb/info/gbmodel")
+		BOX_NAME = str(l.read().strip().lower())
+		l.close()
+		BOX_MODEL = "gigablue"
+	except:
+		pass
 
 # In-process DVB frontend signal reader (replaces the external dvbstat
 # binary). Opens the frontend read-only, so it can safely run alongside
@@ -212,6 +220,53 @@ class FESignalReader:
 			self.fd = -1
 
 
+# GigaBlue dvb.ko (kernel 4.1, BCM 45308X FBC + plug-in TS2L08/TS3L10/
+# TT2L10/TT3L10 tuners) -- verified by disassembling the driver:
+#  - FE_READ_SNR is a relative 0-65535 percentage derived from the demod
+#    C/N in 0.01 dB:  pct = 43 + (cn - base) // 19,  base 701 (FBC,
+#    NEXUS snrEstimate) or 676 (plug-in tuners).  Clamped to 0x6666 (40%)
+#    below ~7 dB and 0xFFFF above ~18 dB.  Same scale on both paths.
+#  - FE_READ_STATUS: FBC returns 0x1F when locked, but the plug-in tuner
+#    drivers return ONLY FE_HAS_LOCK (0x10).  That bare-lock shape sent
+#    them down the Octagon-blob branch, where every SNR value (always
+#    >= 0x6666) was discarded as a sentinel -> no signal at all.
+#  - No DVB API5 stats (get_property is a stub), so cnr_db is always None.
+# The SNR is decoded back to dB here (to within the driver's 0.19 dB step).
+GB_SNR_FLOOR_RAW = 0x6666
+
+
+def _isFbcFrontend(feid):
+	try:
+		nim = nimmgr.getNim(feid)
+		return "FBC" in str(getattr(nim, "description", "") or "").upper()
+	except:
+		return False
+
+
+def _gigablueSnr(raw, fbc):
+	# raw FE_READ_SNR -> (dB, bound); bound -1 = below the driver's floor,
+	# +1 = at/above its ceiling, 0 = in range. (None, 0) when no reading.
+	if not raw:
+		return None, 0
+	if fbc:
+		floor_db, ceil_db, base = 7.00, 18.00, 701
+	else:
+		floor_db, ceil_db, base = 6.75, 17.75, 676
+	if raw <= GB_SNR_FLOOR_RAW:
+		return floor_db, -1
+	if raw >= 0xFFFF:
+		return ceil_db, 1
+	pct = int(round(raw * 100.0 / 65535.0))
+	cn = (pct - 43) * 19 + base + 9	# +9 = middle of the 19-step bucket
+	return round(min(max(cn / 100.0, floor_db), ceil_db), 2), 0
+
+
+def _fmtDb(db, bound=0):
+	if db is None:
+		return "no estimate"
+	return "%s%.2f" % ("<" if bound < 0 else (">" if bound > 0 else ""), db)
+
+
 def get_signal_data(adapter=0):
 	# Compatibility wrapper with the old dvbstat output contract, plus
 	# 'snr_raw'. dB comes from API5 DTV_STAT_CNR when the driver provides
@@ -221,10 +276,16 @@ def get_signal_data(adapter=0):
 	status, snr, strength, cnr_db = reader.read()
 	reader.close()
 	if status is None:
-		return {'snr': 0, 'snr_raw': 0, 'status': 0, 'strength': 0}
+		return {'snr': 0, 'snr_raw': 0, 'status': 0, 'strength': 0, 'snr_bound': 0}
+	bound = 0
 	if cnr_db:
 		db = round(cnr_db, 2)
 		raw = snr or 0
+	elif BOX_MODEL == "gigablue":
+		raw = snr or 0
+		db, bound = _gigablueSnr(raw, _isFbcFrontend(adapter)) if status & FE_HAS_LOCK else (None, 0)
+		if db is None:
+			db = 0.0
 	elif status & 0x0F:
 		# full status bits = relative-scale legacy register, dB unknown
 		db = 0.0
@@ -235,7 +296,7 @@ def get_signal_data(adapter=0):
 	else:
 		db = 0.0
 		raw = 0
-	return {'snr': db, 'snr_raw': raw,
+	return {'snr': db, 'snr_raw': raw, 'snr_bound': bound,
 		'status': status & 0x1F,
 		'strength': round((strength or 0) * 100.0 / 65535.0, 1)}
 
@@ -1098,9 +1159,16 @@ class ServiceScan:
 		# Zero stats while locked mean the estimator has not converged yet
 		# (seen on ultra-narrowband carriers on the Edision driver) - keep
 		# polling rather than capturing a meaningless 0.
+		bound = 0
 		if cnr_db:
 			# API5 dB is authoritative; raw is the legacy register as-is
 			raw, db = (snr or 0), round(cnr_db, 2)
+		elif BOX_MODEL == "gigablue":
+			# relative-% register on both FBC and plug-in tuners; decode to dB
+			db, bound = _gigablueSnr(snr, self.gb_fbc)
+			if db is None:
+				return
+			raw = snr
 		elif (status & 0x0F) or self.fereader.api5_seen:
 			# driver sets the intermediate status bits (Edision style):
 			# legacy register is a relative 0-65535 scale, dB unknown
@@ -1116,6 +1184,7 @@ class ServiceScan:
 			return	# never displace a capture that had a real dB reading
 		self.tp_locked_raw = raw
 		self.tp_locked_db = db
+		self.tp_locked_bound = bound
 		if strength:
 			self.tp_locked_strength = strength
 
@@ -1124,18 +1193,19 @@ class ServiceScan:
 		# reset the capture for the next one. Falls back to an instantaneous
 		# read if the sampler never saw a lock on this transponder.
 		if self.tp_locked_raw is not None:
-			self.signaltp = ("%.2fdb" % self.tp_locked_db) if self.tp_locked_db is not None else "no estimate"
+			self.signaltp = (_fmtDb(self.tp_locked_db, self.tp_locked_bound) + "db") if self.tp_locked_db is not None else "no estimate"
 			self.signaltp3 = self.tp_locked_raw
 			self.signaltp1 = FE_HAS_LOCK
 			self.signaltp2 = round((self.tp_locked_strength or 0) * 100.0 / 65535.0, 1)
 		else:
 			signal_data = get_signal_data(self.feid)
-			self.signaltp = "%.2fdb" % signal_data['snr']
+			self.signaltp = _fmtDb(signal_data['snr'], signal_data.get('snr_bound', 0)) + "db"
 			self.signaltp3 = signal_data['snr_raw']
 			self.signaltp1 = signal_data['status']
 			self.signaltp2 = signal_data['strength']
 		self.tp_locked_raw = None
 		self.tp_locked_db = None
+		self.tp_locked_bound = 0
 		self.tp_locked_strength = None
 		return "Locked" if (isinstance(self.signaltp1, int) and self.signaltp1 & FE_HAS_LOCK) else "UnLocked"
 
@@ -1217,6 +1287,7 @@ class ServiceScan:
 		# SNR / quality.
 		snr_pct = None
 		snr_db = None
+		snr_prefix = ""
 		if cnr_db:
 			# API5 dB is authoritative for the text; bar from the relative
 			# register when present, otherwise map dB onto the bar scale.
@@ -1225,6 +1296,13 @@ class ServiceScan:
 				snr_pct = snr * 100.0 / 65535.0
 			else:
 				snr_pct = snr_db * 100.0 / SNR_DB_FULL_SCALE
+		elif BOX_MODEL == "gigablue":
+			# GigaBlue relative-% register decoded to dB; bar on the dB scale
+			# so it reads the same as on the other boxes.
+			snr_db, bound = _gigablueSnr(snr, self.gb_fbc)
+			if snr_db is not None:
+				snr_pct = snr_db * 100.0 / SNR_DB_FULL_SCALE
+				snr_prefix = "<" if bound < 0 else (">" if bound > 0 else "")
 		elif (status & 0x0F) or self.fereader.api5_seen:
 			# Edision-style intermediate path: register is relative 0-65535.
 			if snr:
@@ -1237,7 +1315,7 @@ class ServiceScan:
 		self._setBar(self.snrSlider, snr_pct if snr_pct is not None else 0)
 		if self.snrText is not None:
 			if snr_db is not None:
-				self.snrText.setText("SNR %.1f dB" % snr_db)
+				self.snrText.setText("SNR %s%.1f dB" % (snr_prefix, snr_db))
 			elif snr_pct is not None:
 				self.snrText.setText("SNR %d%%" % int(snr_pct))
 			else:
@@ -1301,6 +1379,8 @@ class ServiceScan:
 		self.fereader = None  #in-process frontend signal reader (replaces dvbstat)
 		self.tp_locked_raw = None  #last SNR raw sampled while locked on current tp
 		self.tp_locked_db = None  #same reading converted to dB
+		self.tp_locked_bound = 0  #GigaBlue: -1/+1 when dB is the driver's floor/ceiling
+		self.gb_fbc = False  #GigaBlue: current scan frontend is an FBC tuner
 		self.tp_locked_strength = None
 		self.signalpolltimer = eTimer()
 		self.signalpolltimer.callback.append(self.pollScanSignal)
@@ -1374,8 +1454,10 @@ class ServiceScan:
 		if self.fereader:
 			self.fereader.close()
 		self.fereader = FESignalReader(self.feid)
+		self.gb_fbc = BOX_MODEL == "gigablue" and _isFbcFrontend(self.feid)
 		self.tp_locked_raw = None
 		self.tp_locked_db = None
+		self.tp_locked_bound = 0
 		self.tp_locked_strength = None
 		self.signalpolltimer.start(300)
 		# Reset the live meter to a neutral "searching" state at scan start.
@@ -1457,13 +1539,16 @@ class ServiceScan:
 		# make sure the report bookkeeping can never raise.
 		NoName = "NoName"
 		self.signal =""
+		signal_bound = 0
 		# prefer the background sampler's capture for the tp being scanned;
 		# instantaneous reads can hit the estimator before it has converged
 		if self.tp_locked_db is not None:
 			self.signal = self.tp_locked_db
+			signal_bound = self.tp_locked_bound
 		else:
 			signal_data = get_signal_data(self.feid)
 			self.signal = signal_data['snr']
+			signal_bound = signal_data.get('snr_bound', 0)
 		newServiceName = self.scan.getLastServiceName()
 		newServiceName = newServiceName.rstrip('\x00')
 		newServiceRef = self.scan.getLastServiceRef()
@@ -1484,6 +1569,8 @@ class ServiceScan:
 			try:
 				if BOX_MODEL == "edision":
 					snr_text = '%.2f' % self.signal
+				elif BOX_MODEL == "gigablue":
+					snr_text = _fmtDb(self.signal, signal_bound)
 				else:
 					snr_text = '%s' % self.signal
 			except:

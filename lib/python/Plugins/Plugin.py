@@ -135,6 +135,23 @@ class PluginDescriptor:
 		else:
 			return self._icon
 
+	# Legacy attribute names used by OpenATV plugins and skins (for example Umbra).
+	@property
+	def function(self):
+		return self.fnc
+
+	@function.setter
+	def function(self, value):
+		self.fnc = value
+
+	@property
+	def iconString(self):
+		return self.iconstr
+
+	@iconString.setter
+	def iconString(self, value):
+		self.iconstr = value
+
 	def __eq__(self, other):
 		return self.fnc == other.fnc
 

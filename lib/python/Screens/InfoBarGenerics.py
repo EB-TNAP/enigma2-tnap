@@ -5,6 +5,7 @@ from Components.ActionMap import ActionMap, HelpableActionMap, NumberActionMap, 
 from Components.Harddisk import harddiskmanager, findMountPoint
 from Components.Input import Input
 from Components.Label import Label
+from Components.ScrollLabel import ScrollLabel
 from Components.MovieList import AUDIO_EXTENSIONS, MOVIE_EXTENSIONS, DVD_EXTENSIONS
 from Components.Pixmap import MovingPixmap
 from Components.PluginComponent import plugins
@@ -436,6 +437,29 @@ class SecondInfoBar(Screen):
 	def __init__(self, session, skinName):
 		Screen.__init__(self, session)
 		self.skinName = skinName
+		# Name based components used by OpenATV style skins (for example Umbra), source based skins do not use them.
+		self["channel"] = Label()
+		self["epg_description"] = ScrollLabel()
+		self["FullDescription"] = ScrollLabel()
+		self.__event_tracker = ServiceEventTracker(screen=self, eventmap={
+				iPlayableService.evUpdatedEventInfo: self.updateEventText,
+			})
+		self.onShow.append(self.updateEventText)
+
+	def updateEventText(self):
+		service = self.session.nav.getCurrentService()
+		info = service and service.info()
+		event = info and info.getEvent(0)
+		if event is None:
+			self["channel"].setText("")
+			self["epg_description"].setText("")
+			self["FullDescription"].setText("")
+			return
+		description = event.getShortDescription()
+		extended = event.getExtendedDescription()
+		self["channel"].setText(event.getEventName())
+		self["epg_description"].setText(f"{description}\n{extended}" if description and extended else description or extended)
+		self["FullDescription"].setText(extended)
 
 
 class InfoBarShowHide(InfoBarScreenSaver):

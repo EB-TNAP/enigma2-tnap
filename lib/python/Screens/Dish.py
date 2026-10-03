@@ -43,6 +43,7 @@ class Dish(Screen):
 		self["From"] = Label(_("From:"))
 		self["Goto"] = Label(_("Goto:"))
 		self["tunerName"] = Label("")
+		self["Tuner"] = Label(_("Tuner :"))
 		self["turnSpeed"] = Label("")
 		self.updateRotorSatList()
 		self.rotorTimer = eTimer()

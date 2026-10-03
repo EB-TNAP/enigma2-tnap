@@ -2,7 +2,7 @@
 from Screens.Screen import Screen
 
 from Components.Label import Label
-from Components.Pixmap import MultiPixmap
+from Components.Pixmap import MultiPixmap, Pixmap
 
 
 class PVRState(Screen):
@@ -14,4 +14,9 @@ class PVRState(Screen):
 
 
 class TimeshiftState(PVRState):
-	pass
+	def __init__(self, session):
+		PVRState.__init__(self, session)
+		# Name based components used by OpenATV style skins (for example Umbra).
+		self["eventname"] = Label()
+		self["PTSSeekBack"] = Pixmap()
+		self["PTSSeekPointer"] = Pixmap()

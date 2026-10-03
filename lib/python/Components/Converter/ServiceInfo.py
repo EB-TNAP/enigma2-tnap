@@ -94,11 +94,14 @@ class ServiceInfo(Converter):
 	IS_VIDEO_AVC = 36
 	IS_VIDEO_HEVC = 37
 	IS_SOFTCSA = 38
+	IS_HDHDR = 39
+	VIDEO_INFORMATION = 40
 
 	def __init__(self, type):
 		Converter.__init__(self, type)
 		self.type, self.interesting_events = {
 				"HasTelext": (self.HAS_TELETEXT, (iPlayableService.evUpdatedInfo,)),
+				"HasTeletext": (self.HAS_TELETEXT, (iPlayableService.evUpdatedInfo,)),
 				"IsMultichannel": (self.IS_MULTICHANNEL, (iPlayableService.evUpdatedInfo,)),
 				"IsStereo": (self.IS_STEREO, (iPlayableService.evUpdatedInfo,)),
 				"IsCrypted": (self.IS_CRYPTED, (iPlayableService.evUpdatedInfo,)),
@@ -132,11 +135,13 @@ class ServiceInfo(Converter):
 				"Is720": (self.IS_720, (iPlayableService.evVideoSizeChanged, iPlayableService.evUpdatedInfo)),
 				"IsSDR": (self.IS_SDR, (iPlayableService.evVideoGammaChanged, iPlayableService.evUpdatedInfo)),
 				"IsHDR": (self.IS_HDR, (iPlayableService.evVideoGammaChanged, iPlayableService.evUpdatedInfo)),
+				"IsHDHDR": (self.IS_HDHDR, (iPlayableService.evVideoSizeChanged, iPlayableService.evVideoGammaChanged, iPlayableService.evUpdatedInfo)),
 				"IsHDR10": (self.IS_HDR10, (iPlayableService.evVideoGammaChanged, iPlayableService.evUpdatedInfo)),
 				"IsHLG": (self.IS_HLG, (iPlayableService.evVideoGammaChanged, iPlayableService.evUpdatedInfo)),
 				"IsVideoMPEG2": (self.IS_VIDEO_MPEG2, (iPlayableService.evUpdatedInfo,)),
 				"IsVideoAVC": (self.IS_VIDEO_AVC, (iPlayableService.evUpdatedInfo,)),
 				"IsVideoHEVC": (self.IS_VIDEO_HEVC, (iPlayableService.evUpdatedInfo,)),
+				"VideoInfo": (self.VIDEO_INFORMATION, (iPlayableService.evVideoSizeChanged, iPlayableService.evVideoFramerateChanged, iPlayableService.evVideoProgressiveChanged, iPlayableService.evVideoGammaChanged, iPlayableService.evUpdatedInfo)),
 			}[type]
 		if self.type in (self.IS_SD, self.IS_HD, self.IS_SD_AND_WIDESCREEN, self.IS_SD_AND_NOT_WIDESCREEN, self.IS_4K, self.IS_1080, self.IS_720):
 			self.videoHeight = 0
@@ -216,6 +221,9 @@ class ServiceInfo(Converter):
 					return info.getInfo(iServiceInformation.sGamma) == 1
 				elif self.type == self.IS_HDR10:
 					return info.getInfo(iServiceInformation.sGamma) == 2
+				elif self.type == self.IS_HDHDR:
+					videoWidth = info.getInfo(iServiceInformation.sVideoWidth)
+					return 720 < videoWidth < 1980 and info.getInfo(iServiceInformation.sGamma) > 0
 				elif self.type == self.IS_HLG:
 					return info.getInfo(iServiceInformation.sGamma) == 3
 				elif self.type == self.IS_WIDESCREEN:
@@ -284,6 +292,20 @@ class ServiceInfo(Converter):
 					return self.getServiceInfoString(info, iServiceInformation.sFrameRate, lambda x: _("%d fps") % ((x + 500) // 1000))
 				elif self.type == self.VPID:
 					return self.getServiceInfoString(info, iServiceInformation.sVideoPID)
+				elif self.type == self.VIDEO_INFORMATION:
+					videoWidth = info.getInfo(iServiceInformation.sVideoWidth)
+					videoHeight = info.getInfo(iServiceInformation.sVideoHeight)
+					if videoWidth <= 0 or videoHeight <= 0:
+						return ""
+					progressive = ("i", "p", "")[info.getInfo(iServiceInformation.sProgressive)] if info.getInfo(iServiceInformation.sProgressive) in (0, 1, 2) else ""
+					frameRate = info.getInfo(iServiceInformation.sFrameRate)
+					if frameRate > 0:
+						if progressive == "i":
+							frameRate *= 2
+						frameRate = f" {(frameRate + 500) // 1000}Hz"
+					else:
+						frameRate = ""
+					return f"{videoWidth}x{videoHeight}{progressive}{frameRate}"
 		return ""
 
 	text = property(getText)

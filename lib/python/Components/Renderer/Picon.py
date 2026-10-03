@@ -135,6 +135,7 @@ class Picon(Renderer):
 	def __init__(self):
 		Renderer.__init__(self)
 		self.pngname = None
+		self.mode = None  # Skin context ("infobar" or "channelselection"); there is a single picon path, so it is informational only.
 		self.defaultpngname = resolveFilename(SCOPE_CURRENT_SKIN, "picon_default.png")
 
 	def applySkin(self, desktop, parent):
@@ -142,6 +143,9 @@ class Picon(Renderer):
 		for (attrib, value) in self.skinAttributes:
 			if attrib == "path":
 				piconLocator.addSearchPath(value)
+				attribs.remove((attrib, value))
+			elif attrib == "mode":
+				self.mode = value
 				attribs.remove((attrib, value))
 		self.skinAttributes = attribs
 		rc = Renderer.applySkin(self, desktop, parent)

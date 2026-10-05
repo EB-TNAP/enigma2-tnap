@@ -61,6 +61,7 @@ void eFilePushThread::thread()
 	hasStarted(); /* "start()" blocks until we get here */
 	setIoPrio(prio_class, prio);
 	eDebug("[eFilePushThread] START thread");
+	bool sourceReady = !m_source->isStream();
 
 	do
 	{
@@ -74,6 +75,26 @@ void eFilePushThread::thread()
 
 		while (!m_stop)
 		{
+			if (!sourceReady)
+			{
+				if (m_source->isConnecting())
+				{
+					// Wait in the worker, without emitting EOF or polling the decoder.
+					usleep(100000);
+					continue;
+				}
+				if (!m_source->valid())
+				{
+					sendEvent(evtReadError);
+					// The initial connection failed; wait for stop/zap, not a busy loop.
+					while (!m_stop)
+						usleep(100000);
+					break;
+				}
+				sourceReady = true;
+				sendEvent(evtSourceReady);
+			}
+
 			// eTrace("[FilePushThread][DATA] Pumping data at pos=%lld", (long long)m_current_position);
 			if (m_sg && !current_span_remaining)
 			{

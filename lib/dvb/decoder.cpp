@@ -10,6 +10,8 @@
 #include <linux/dvb/audio.h>
 #include <linux/dvb/video.h>
 #include <linux/dvb/dmx.h>
+#include <poll.h>
+#include <string.h>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -44,7 +46,7 @@ DEFINE_REF(eDVBAudio);
 int eDVBAudio::m_debug = -1;
 
 eDVBAudio::eDVBAudio(eDVBDemux *demux, int dev)
-	:m_demux(demux), m_dev(dev), m_bypass(-1)
+	:m_demux(demux), m_dev(dev), m_bypass(-1), m_soft_timing(false), m_soft_samples(0)
 {
 	char filename[128];
 	sprintf(filename, "/dev/dvb/adapter%d/audio%d", demux ? demux->adapter : 0, dev);
@@ -77,8 +79,38 @@ eDVBAudio::eDVBAudio(eDVBDemux *demux, int dev)
 
 }
 
-int eDVBAudio::startPid(int pid, int type)
+int eDVBAudio::startPid(int pid, int type, bool soft_timing)
 {
+	if (soft_timing && m_fd >= 0 && m_demux)
+	{
+		/* The stream has no usable PCR/PTS: read the PES ourselves and write it to the
+		 * audio device from memory with generated timestamps, like dvbaudiosink does. */
+		::ioctl(m_fd, AUDIO_SELECT_SOURCE, AUDIO_SOURCE_MEMORY);
+		::fcntl(m_fd, F_SETFL, ::fcntl(m_fd, F_GETFL) | O_NONBLOCK);
+		if (::ioctl(m_fd, AUDIO_SET_BYPASS_MODE, 0xb) < 0)
+			eWarning("[eDVBAudio%d] soft timing: AUDIO_SET_BYPASS_MODE failed: %m", m_dev);
+		m_bypass = 0xb;
+		m_soft_pes.clear();
+		m_soft_es.clear();
+		m_soft_samples = 0;
+		if (!m_demux->createPESReader(eApp, m_soft_reader) && m_soft_reader)
+		{
+			m_soft_reader->connectRead(sigc::mem_fun(*this, &eDVBAudio::softData), m_soft_conn);
+			if (!m_soft_reader->start(pid))
+			{
+				eDebug("[eDVBAudio%d] soft timing audio started, pid=%04x", m_dev, pid);
+				m_soft_timing = true;
+				::ioctl(m_fd, AUDIO_PLAY);
+				return 0;
+			}
+		}
+		eWarning("[eDVBAudio%d] soft timing: PES reader failed, using demux path", m_dev);
+		m_soft_conn = 0;
+		m_soft_reader = 0;
+		::ioctl(m_fd, AUDIO_SELECT_SOURCE, AUDIO_SOURCE_DEMUX);
+		m_bypass = -1;
+	}
+
 	if (m_fd_demux >= 0)
 	{
 		dmx_pes_filter_params pes = {};
@@ -210,6 +242,24 @@ int eDVBAudio::startPid(int pid, int type)
 
 void eDVBAudio::stop()
 {
+	if (m_soft_timing)
+	{
+		m_soft_timing = false;
+		m_soft_conn = 0;
+		if (m_soft_reader)
+		{
+			m_soft_reader->stop();
+			m_soft_reader = 0;
+		}
+		m_soft_pes.clear();
+		m_soft_es.clear();
+		if (m_fd >= 0)
+		{
+			::ioctl(m_fd, AUDIO_STOP);
+			::ioctl(m_fd, AUDIO_SELECT_SOURCE, AUDIO_SOURCE_DEMUX);
+		}
+		return;
+	}
 	if (m_fd >= 0)
 	{
 		if(eDVBAudio::m_debug)
@@ -241,6 +291,109 @@ void eDVBAudio::stop()
 //		m_TsPaser->stop();
 //#endif
 	}
+}
+
+void eDVBAudio::softWriteFrame(const uint8_t *frame, int len, unsigned long long pts)
+{
+	uint8_t buf[14 + 8192];
+	int plen = len + 8;
+	if (len > 8192)
+		return;
+	buf[0] = 0; buf[1] = 0; buf[2] = 1; buf[3] = 0xc0;
+	buf[4] = (plen >> 8) & 0xff;
+	buf[5] = plen & 0xff;
+	buf[6] = 0x81;
+	buf[7] = 0x80; /* PTS only */
+	buf[8] = 5;
+	buf[9]  = 0x21 | ((pts >> 29) & 0x0e);
+	buf[10] = (pts >> 22) & 0xff;
+	buf[11] = ((pts >> 14) & 0xfe) | 1;
+	buf[12] = (pts >> 7) & 0xff;
+	buf[13] = ((pts << 1) & 0xfe) | 1;
+	memcpy(buf + 14, frame, len);
+
+	int total = len + 14, done = 0, retries = 0;
+	while (done < total)
+	{
+		int r = ::write(m_fd, buf + done, total - done);
+		if (r > 0)
+		{
+			done += r;
+			continue;
+		}
+		if (r < 0 && errno == EINTR)
+			continue;
+		if (r < 0 && errno == EAGAIN && retries++ < 5)
+		{
+			struct pollfd pfd = { m_fd, POLLOUT, 0 };
+			::poll(&pfd, 1, 20);
+			continue;
+		}
+		/* decoder not accepting data: drop the rest of this frame */
+		break;
+	}
+}
+
+void eDVBAudio::softData(const uint8_t *data, int len)
+{
+	static const int rates[16] = { 96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350, 0, 0, 0 };
+
+	if (!m_soft_timing || m_fd < 0)
+		return;
+	m_soft_pes.insert(m_soft_pes.end(), data, data + len);
+
+	/* split the byte stream into PES packets and collect their payload */
+	size_t pos = 0;
+	while (m_soft_pes.size() - pos >= 9)
+	{
+		const uint8_t *p = &m_soft_pes[pos];
+		if (p[0] || p[1] || p[2] != 1)
+		{
+			++pos; /* resync on the next start code */
+			continue;
+		}
+		size_t plen = (p[4] << 8) | p[5];
+		if (!plen)
+		{
+			++pos;
+			continue;
+		}
+		if (m_soft_pes.size() - pos < 6 + plen)
+			break;
+		size_t hdr = 9 + p[8];
+		if (hdr < 6 + plen)
+			m_soft_es.insert(m_soft_es.end(), p + hdr, p + 6 + plen);
+		pos += 6 + plen;
+	}
+	m_soft_pes.erase(m_soft_pes.begin(), m_soft_pes.begin() + pos);
+
+	/* split the elementary stream into ADTS frames and give each one a PTS */
+	pos = 0;
+	while (m_soft_es.size() - pos >= 7)
+	{
+		const uint8_t *a = &m_soft_es[pos];
+		if (a[0] != 0xff || (a[1] & 0xf6) != 0xf0)
+		{
+			++pos;
+			continue;
+		}
+		size_t flen = ((a[3] & 3) << 11) | (a[4] << 3) | (a[5] >> 5);
+		int rate = rates[(a[2] >> 2) & 15];
+		if (flen < 7 || !rate)
+		{
+			++pos;
+			continue;
+		}
+		if (m_soft_es.size() - pos < flen)
+			break;
+		unsigned long long pts = (m_soft_samples * 90000ULL) / rate;
+		softWriteFrame(a, flen, pts & 0x1ffffffffULL);
+		m_soft_samples += 1024ULL * ((a[6] & 3) + 1);
+		pos += flen;
+	}
+	m_soft_es.erase(m_soft_es.begin(), m_soft_es.begin() + pos);
+	if (m_soft_es.size() > 65536) /* never found a frame boundary */
+		m_soft_es.clear();
 }
 
 void eDVBAudio::flush()
@@ -1406,9 +1559,10 @@ int eTSMPEGDecoder::setState()
 		}
 		m_text = 0;
 	}
+	const bool softAudio = m_audio_soft_timing && m_atype == eDVBAudio::aAAC && !(m_vpid >= 0 && m_vpid < 0x1FFF) && !noaudio;
 	if (m_changed & changePCR)
 	{
-		if ((m_pcrpid >= 0) && (m_pcrpid < 0x1FFF))
+		if ((m_pcrpid >= 0) && (m_pcrpid < 0x1FFF) && !softAudio)
 		{
 			m_pcr = new eDVBPCR(m_demux, m_decoder);
 			if (m_pcr->startPid(m_pcrpid))
@@ -1421,7 +1575,7 @@ int eTSMPEGDecoder::setState()
 		if ((m_apid >= 0) && (m_apid < 0x1FFF) && !noaudio)
 		{
 			m_audio = new eDVBAudio(m_demux, m_decoder);
-			if (m_audio->startPid(m_apid, m_atype))
+			if (m_audio->startPid(m_apid, m_atype, softAudio))
 				res = -1;
 		}
 		m_changed &= ~changeAudio;
@@ -1539,7 +1693,7 @@ RESULT eTSMPEGDecoder::setAC3Delay(int delay)
 
 eTSMPEGDecoder::eTSMPEGDecoder(eDVBDemux *demux, int decoder)
 	: m_demux(demux),
-		m_vpid(-1), m_vtype(-1), m_apid(-1), m_atype(-1), m_pcrpid(-1), m_textpid(-1),
+		m_vpid(-1), m_vtype(-1), m_apid(-1), m_atype(-1), m_pcrpid(-1), m_textpid(-1), m_audio_soft_timing(false),
 		m_changed(0), m_decoder(decoder), m_video_clip_fd(-1), m_showSinglePicTimer(eTimer::create(eApp)),
 		m_fcc_fd(-1), m_fcc_enable(false), m_fcc_state(fcc_state_stop), m_fcc_feid(-1), m_fcc_vpid(-1), m_fcc_vtype(-1), m_fcc_pcrpid(-1)
 {

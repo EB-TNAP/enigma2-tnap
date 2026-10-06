@@ -808,6 +808,10 @@ public:
 		/** Set Displayed Audio PID and type */
 	virtual RESULT setAudioPID(int apid, int type)=0;
 
+		/** Feed audio-only AAC through the audio device with generated timestamps,
+		    for streams that carry neither PCR nor PTS. Call before setAudioPID(). */
+	virtual void setAudioSoftTiming(bool enable) {}
+
 	enum { ac_left, ac_stereo, ac_right };
 		/** Set Displayed Audio Channel */
 	virtual RESULT setAudioChannel(int channel)=0;

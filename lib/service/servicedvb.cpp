@@ -3785,6 +3785,25 @@ void eDVBServicePlay::updateDecoder(bool sendSeekableStateChanged)
 		m_current_video_pid_type = vpidtype;
 		m_have_video_pid = (vpid > 0 && vpid < 0x2000);
 
+		/* Audio-only service whose PMT names a PCR PID that is not one of its streams:
+		 * the hardware decoder has no clock to sync to, so generate the timing ourselves. */
+		bool soft_audio_timing = false;
+		if (!(m_is_pvr || m_is_stream || m_timeshift_active) && vpid < 0 && !m_noaudio
+			&& pcrpid >= 0 && pcrpid < 0x1FFF && !program.audioStreams.empty())
+		{
+			bool pcr_listed = (pcrpid == program.textPid);
+			for (auto &a : program.audioStreams)
+				pcr_listed = pcr_listed || (a.pid == pcrpid);
+			for (auto &sub : program.subtitleStreams)
+				pcr_listed = pcr_listed || (sub.pid == pcrpid);
+			for (auto &v : program.videoStreams)
+				pcr_listed = pcr_listed || (v.pid == pcrpid);
+			soft_audio_timing = !pcr_listed;
+			if (soft_audio_timing)
+				eDebug("[eDVBServicePlay] PCR pid %04x is not a stream of this audio-only service, using generated audio timing", pcrpid);
+		}
+		m_decoder->setAudioSoftTiming(soft_audio_timing);
+
 		if (!m_noaudio)
 		{
 			selectAudioStream();

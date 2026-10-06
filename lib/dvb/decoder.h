@@ -27,7 +27,7 @@ public:
 	enum { aMonoLeft, aStereo, aMonoRight };
 	void setChannel(int channel);
 	void stop();
-	int startPid(int pid, int type, bool audio_only = false);
+	int startPid(int pid, int type);
 	void flush();
 	void freeze();
 	void unfreeze();

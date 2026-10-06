@@ -77,7 +77,7 @@ eDVBAudio::eDVBAudio(eDVBDemux *demux, int dev)
 
 }
 
-int eDVBAudio::startPid(int pid, int type, bool audio_only)
+int eDVBAudio::startPid(int pid, int type)
 {
 	if (m_fd_demux >= 0)
 	{
@@ -147,9 +147,7 @@ int eDVBAudio::startPid(int pid, int type, bool audio_only)
 			bypass = 2;
 			break;
 		case aAAC:
-			/* Radio services may lack PCR and PTS; the AAC+ ADTS mode (0xb), as used by
-			 * dvbaudiosink for ADTS streams, is the one the decoder can free-run in. */
-			bypass = audio_only ? 0xb : 8;
+			bypass = 8;
 			break;
 		case aAACHE:
 			bypass = 9;
@@ -1423,7 +1421,7 @@ int eTSMPEGDecoder::setState()
 		if ((m_apid >= 0) && (m_apid < 0x1FFF) && !noaudio)
 		{
 			m_audio = new eDVBAudio(m_demux, m_decoder);
-			if (m_audio->startPid(m_apid, m_atype, !(m_vpid >= 0 && m_vpid < 0x1FFF)))
+			if (m_audio->startPid(m_apid, m_atype))
 				res = -1;
 		}
 		m_changed &= ~changeAudio;

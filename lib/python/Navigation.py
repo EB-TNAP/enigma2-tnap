@@ -13,6 +13,7 @@ from Components.config import config
 from Components.ImportChannels import ImportChannels
 from Components.ParentalControl import parentalControl
 from Components.PluginComponent import plugins
+from Components.ServiceEventTracker import ServiceEventTracker
 from Components.SystemInfo import BoxInfo
 from Plugins.Plugin import PluginDescriptor
 from Screens.InfoBar import InfoBar, MoviePlayer
@@ -69,6 +70,9 @@ class Navigation:
 		self.isCurrentServiceStreamRelay = False
 		self.skipServiceReferenceReset = False
 		self.retryServicePlayCount = 0
+		self.streamRetryTimer = None
+		self.streamRetryService = None
+		self.streamRetryCount = 0
 		for p in plugins.getPlugins(PluginDescriptor.WHERE_RECORDTIMER):  # Do we really need this?
 			self.RecordTimer = p()
 			if self.RecordTimer:
@@ -289,6 +293,12 @@ class Navigation:
 			Tools.Notifications.AddNotification(Screens.Standby.Standby)
 
 	def dispatchEvent(self, i):
+		if i == iPlayableService.evStreamError:
+			self.scheduleStreamRetry()
+		elif i == iPlayableService.evEOF and self.streamRetryService is not None:
+			return  # Do not let the failed stream's EOF pause the pending retry.
+		elif i == iPlayableService.evEnd:
+			self.cancelStreamRetry(reset=False)
 		for x in self.event:
 			x(i)
 		if i == iPlayableService.evEnd:
@@ -296,6 +306,61 @@ class Navigation:
 				self.currentlyPlayingServiceReference = None
 				self.currentlyPlayingServiceOrGroup = None
 			self.currentlyPlayingService = None
+
+	def cancelStreamRetry(self, reset=True):
+		if self.streamRetryTimer:
+			self.streamRetryTimer.stop()
+		self.streamRetryService = None
+		if reset:
+			self.streamRetryCount = 0
+
+	def getStreamRetryService(self):
+		bar = InfoBar.instance
+		ref = self.currentlyPlayingServiceOrGroup
+		if (not bar or ServiceEventTracker.getActiveInfoBar() is not bar or Screens.Standby.inStandby
+				or self.isCurrentServiceStreamRelay
+				or not ref or ref.flags & eServiceReference.isGroup or ref.type != 4097
+				or not ref.getPath().lower().startswith(("http://", "https://"))
+				or bar.seekstate != bar.SEEK_STATE_PLAY):
+			return None
+		service = self.getCurrentService()
+		seek = service and service.seek()
+		if not seek:
+			return None
+		length = seek.getLength()
+		if not length[0] and length[1] > 0:
+			return None  # A finite HTTP movie must not restart from the beginning.
+		timeshift = service.timeshift()
+		if timeshift and timeshift.isTimeshiftEnabled():
+			return None
+		return service, self.currentlyPlayingServiceReference, ref
+
+	def scheduleStreamRetry(self):
+		if self.streamRetryService is not None:
+			return
+		pending = self.getStreamRetryService()
+		if pending is None:
+			return
+		if self.streamRetryCount >= 3:
+			if self.streamRetryCount == 3:
+				InfoBar.instance.session.showError(_("Unable to reconnect to the stream. Please try the channel again later."))
+				self.streamRetryCount += 1
+			return
+		self.streamRetryService = pending
+		if self.streamRetryTimer is None:
+			self.streamRetryTimer = eTimer()
+			self.streamRetryTimer.callback.append(self.retryStream)
+		# Recreate the service outside its native event callback, as on a zap.
+		self.streamRetryTimer.start(2000 << self.streamRetryCount, True)
+
+	def retryStream(self):
+		pending = self.streamRetryService
+		self.cancelStreamRetry(reset=False)
+		if pending is None or pending != self.getStreamRetryService():
+			return  # Stopped, zapped, paused, in standby or another player took over.
+		self.streamRetryCount += 1
+		print(f"[Navigation] Reconnecting HTTP stream (attempt {self.streamRetryCount}/3).")
+		self.playService(pending[2], forceRestart=True, streamRetry=True)
 
 	def dispatchRecordEvent(self, rec_service, event):
 		# print(f"[Navigation] Record_event {rec_service}, {event}.")
@@ -308,7 +373,7 @@ class Navigation:
 	def restartService(self):
 		self.playService(self.currentlyPlayingServiceOrGroup, forceRestart=True)
 
-	def playService(self, ref, checkParentalControl=True, forceRestart=False, adjust=True, ignoreStreamRelay=False, event=None):
+	def playService(self, ref, checkParentalControl=True, forceRestart=False, adjust=True, ignoreStreamRelay=False, event=None, streamRetry=False):
 
 		if exists("/proc/stb/lcd/symbol_signal"):
 			signal = "1" if config.lcd.mode.value and ref and "0:0:0:0:0:0:0:0:0" not in ref.toString() else "0"
@@ -327,6 +392,8 @@ class Navigation:
 		if ref and oldref and ref == oldref and not forceRestart:
 			print("[Navigation] Ignore request to play already running service.  (1)")
 			return 1
+
+		self.cancelStreamRetry(reset=not streamRetry)
 
 		# from Components.ServiceEventTracker import InfoBarCount
 		# InfoBarInstance = InfoBarCount == 1 and InfoBar.instance
@@ -609,6 +676,7 @@ class Navigation:
 		return self.realRecordingsCount
 
 	def stopService(self):
+		self.cancelStreamRetry()
 		if self.pnav:
 			self.pnav.stopService()
 		self.currentlyPlayingServiceReference = None
@@ -620,6 +688,7 @@ class Navigation:
 		return self.pnav and self.pnav.pause(p)
 
 	def shutdown(self):
+		self.cancelStreamRetry()
 		self.RecordTimer.shutdown()
 		self.Scheduler.shutdown()
 		self.ServiceHandler = None

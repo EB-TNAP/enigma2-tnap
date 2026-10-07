@@ -1,7 +1,6 @@
 #ifndef __decoder_h
 #define __decoder_h
 
-#include <vector>
 #include <lib/base/object.h>
 #include <lib/dvb/demux.h>
 #ifdef DREAMNEXTGEN
@@ -19,14 +18,6 @@ private:
 	ePtr<eDVBDemux> m_demux;
 	int m_fd, m_fd_demux, m_dev, m_is_freezed, m_bypass;
 	static int m_debug;
-	/* soft timing: PES is read from the demux and re-injected with generated PTS */
-	bool m_soft_timing;
-	ePtr<iDVBPESReader> m_soft_reader;
-	ePtr<eConnection> m_soft_conn;
-	std::vector<uint8_t> m_soft_pes, m_soft_es;
-	unsigned long long m_soft_samples;
-	void softData(const uint8_t *data, int len);
-	void softWriteFrame(const uint8_t *frame, int len, unsigned long long pts);
 //#ifdef DREAMNEXTGEN
 //	eTsParser *m_TsPaser;
 //#endif
@@ -36,7 +27,7 @@ public:
 	enum { aMonoLeft, aStereo, aMonoRight };
 	void setChannel(int channel);
 	void stop();
-	int startPid(int pid, int type, bool soft_timing = false);
+	int startPid(int pid, int type);
 	void flush();
 	void freeze();
 	void unfreeze();
@@ -135,7 +126,6 @@ private:
 	ePtr<eDVBPCR> m_pcr;
 	ePtr<eDVBTText> m_text;
 	int m_vpid, m_vtype, m_apid, m_atype, m_pcrpid, m_textpid;
-	bool m_audio_soft_timing;
 #ifdef DREAMNEXTGEN
 	int m_width, m_height, m_framerate, m_aspect, m_progressive;
 #endif
@@ -180,7 +170,6 @@ public:
 	virtual ~eTSMPEGDecoder();
 	RESULT setVideoPID(int vpid, int type);
 	RESULT setAudioPID(int apid, int type);
-	void setAudioSoftTiming(bool enable) { m_audio_soft_timing = enable; }
 	RESULT setAudioChannel(int channel);
 	int getAudioChannel();
 	RESULT setPCMDelay(int delay);

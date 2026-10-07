@@ -180,14 +180,7 @@ public:
 	virtual ~eTSMPEGDecoder();
 	RESULT setVideoPID(int vpid, int type);
 	RESULT setAudioPID(int apid, int type);
-	void setAudioSoftTiming(bool enable)
-	{
-		if (m_audio_soft_timing != enable)
-		{
-			m_audio_soft_timing = enable;
-			m_changed |= changeAudio | changePCR;
-		}
-	}
+	void setAudioSoftTiming(bool enable) { m_audio_soft_timing = enable; }
 	RESULT setAudioChannel(int channel);
 	int getAudioChannel();
 	RESULT setPCMDelay(int delay);

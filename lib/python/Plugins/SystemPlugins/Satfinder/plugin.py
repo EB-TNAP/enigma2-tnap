@@ -617,6 +617,7 @@ SATFINDER_SKIN_BASE = (
 	+ _SAT_SKIN_READOUTS
 	+ _SAT_SKIN_MAIN
 	+ _SAT_SKIN_BUTTONS_RGB
+	+ _SAT_SKIN_BUTTON_YELLOW
 	+ _SAT_SKIN_BUTTON_BLUE
 	+ '</screen>'
 )
@@ -678,6 +679,7 @@ class Satfinder(ScanSetup, ServiceScan):
 		self.tuner = None
 		self.blindscan_transponders = None  # None = satellites.xml; list = blindscan loaded
 		self._blindscan_orbpos = None       # orbital position the loaded blindscan belongs to
+		self._list_source = None            # "blindscan" / "dropped" - which file the list came from
 		
 		# Initialize memory variables to prevent potential errors
 		self.is_id_memory = -1
@@ -694,6 +696,7 @@ class Satfinder(ScanSetup, ServiceScan):
 		self.setTitle(_("Signal finder") + " for " + BOX_MODEL + " " + BOX_NAME)
 		self["Frontend"] = FrontendStatus(frontend_source=lambda: self.frontend, update_interval=100)
 		self["key_blue"] = StaticText("")
+		self["key_yellow"] = StaticText("")
 
 		# Live AGC -- raw ioctl, NOT the lock-gated FrontendInfo path, so a
 		# value is shown at all times the driver reports one (i.e. below
@@ -730,6 +733,7 @@ class Satfinder(ScanSetup, ServiceScan):
 			"save": self.keyGoScan,
 			"ok": self.keyOK,
 			"cancel": self.keyCancel,
+			"yellow": self.keyYellow,
 			"blue": self.keyBlue,
 		}, -3)
 
@@ -767,6 +771,7 @@ class Satfinder(ScanSetup, ServiceScan):
 		self.onHide.append(self._tonePause)
 		# Hide the blue "Load Blindscan" key unless a blindscan file is present.
 		self._updateBlueButton()
+		self._updateYellowButton()
 
 	def openFrontend(self):
 		try:
@@ -1200,6 +1205,7 @@ class Satfinder(ScanSetup, ServiceScan):
 				self._updateBlindscanForSat()
 			self.createSetup()
 			self.retune()
+			self._updateYellowButton()
 
 		elif cur == self.satfinderTunerEntry: # switching tuners, update screen, get frontend, and retune (in prepareFrontend())
 			self.feid = int(self.satfinder_scan_nims.value)
@@ -1262,7 +1268,7 @@ class Satfinder(ScanSetup, ServiceScan):
 				self.tuning_type.value = "blindscan_transponder"
 			elif not blindscan_here and self.tuning_type.value == "blindscan_transponder":
 				self.tuning_type.value = "predefined_transponder"
-			self.typeOfTuningEntry = (_('Tune'), self.tuning_type)
+			self.typeOfTuningEntry = (_('Tune (dropped carriers)') if (blindscan_here and self._list_source == "dropped") else _('Tune'), self.tuning_type)
 			has_tps = (len(nimmanager.getTransponders(int(self.tuning_sat.value), self.feid)) > 0
 					   or blindscan_here)
 			if not has_tps:
@@ -1314,7 +1320,7 @@ class Satfinder(ScanSetup, ServiceScan):
 			elif self.tuning_type.value in ("predefined_transponder", "blindscan_transponder"):
 				self.scan_nims.value = self.satfinder_scan_nims.value
 				self.updatePreDefTransponders()
-				self.preDefTransponderEntry = (_("Transponder"), self.preDefTransponders)
+				self.preDefTransponderEntry = (_("Dropped carrier") if (self.tuning_type.value == "blindscan_transponder" and self._list_source == "dropped") else _("Transponder"), self.preDefTransponders)
 				self.list.append(self.preDefTransponderEntry)
 		elif self.DVB_type.value == "DVB-C":
 			if self.tuning_type.value == "blindscan_transponder":
@@ -1497,7 +1503,7 @@ class Satfinder(ScanSetup, ServiceScan):
 		"""Show the blue key only when there's something to load or clear.
 		Empty text -> the skin's ConditionalShowHide hides the key entirely."""
 		if self.blindscan_transponders is not None:
-			self["key_blue"].setText(_("Clear Blindscan"))
+			self["key_blue"].setText(_("Clear Dropped") if self._list_source == "dropped" else _("Clear Blindscan"))
 		elif self._hasBlindscanFiles():
 			self["key_blue"].setText(_("Load Blindscan"))
 		else:
@@ -1508,7 +1514,9 @@ class Satfinder(ScanSetup, ServiceScan):
 			# Clear blindscan — revert to satellites.xml transponders
 			self.blindscan_transponders = None
 			self._blindscan_orbpos = None
+			self._list_source = None
 			self._updateBlueButton()
+			self._updateYellowButton()
 			self.tuning_type.value = "predefined_transponder"
 			self.createSetup()
 			self.retune()
@@ -1541,6 +1549,49 @@ class Satfinder(ScanSetup, ServiceScan):
 			choices = [(os.path.basename(f), f) for f in matching]
 			self.session.openWithCallback(self._blindscanFileChosen, ChoiceBox,
 				title=_("Select blindscan file:"), list=choices)
+
+	# --- dropped carriers (yellow) ---------------------------------------------
+	# The TNAP blindscan writes /tmp/bsdropped_<satellite>.xml listing carriers
+	# its spectrum search detected but that failed confirmation. Loading it puts
+	# them in the transponder list through the same path as a blindscan file,
+	# so each one can be tuned and examined here at leisure. On SatfinderExtra
+	# yellow is also "Service list" once a locked transponder's services have
+	# been read; that use wins while it is available.
+
+	def _servicesAvailable(self):
+		return bool(getattr(self, "serviceList", None)) and "actions2" in self
+
+	def _droppedFileForSat(self):
+		try:
+			orbpos = int(self.tuning_sat.value)
+		except (ValueError, TypeError, AttributeError):
+			return None
+		matches = self._findAllBlindscanForOrbpos(orbpos, "bsdropped_")
+		return matches[0] if matches else None
+
+	def _updateYellowButton(self):
+		if self._servicesAvailable():
+			self["key_yellow"].setText(_("Service list"))
+		elif self._list_source == "dropped":
+			self["key_yellow"].setText("")  # blue clears the loaded list
+		elif getattr(self, "DVB_type", None) is not None and self.DVB_type.value == "DVB-S" and self._droppedFileForSat():
+			self["key_yellow"].setText(_("Load Dropped"))
+		else:
+			self["key_yellow"].setText("")
+
+	def keyYellow(self):
+		if self._servicesAvailable():
+			self.keyReadServices()
+			return
+		if self._list_source == "dropped":
+			return
+		path = self._droppedFileForSat()
+		if path is None:
+			self.session.open(MessageBox,
+				_("No dropped carriers for this satellite.\nThey are listed after a TNAP blindscan in /tmp/bsdropped_*.xml"),
+				MessageBox.TYPE_INFO, timeout=5)
+			return
+		self._loadBlindscanFile(path, source="dropped")
 
 	def keyRight(self):
 		# Mirror left-arrow behaviour: toggle between user-defined and predefined
@@ -1619,7 +1670,7 @@ class Satfinder(ScanSetup, ServiceScan):
 			return
 		self._loadBlindscanFile(answer[1])
 
-	def _loadBlindscanFile(self, filepath, show_message=True):
+	def _loadBlindscanFile(self, filepath, show_message=True, source="blindscan"):
 		try:
 			tree = ET.parse(filepath)
 			root = tree.getroot()
@@ -1683,11 +1734,13 @@ class Satfinder(ScanSetup, ServiceScan):
 			return
 
 		self.blindscan_transponders = tps
+		self._list_source = source
 		try:
 			self._blindscan_orbpos = int(self.tuning_sat.value)
 		except (ValueError, TypeError):
 			self._blindscan_orbpos = None
 		self._updateBlueButton()
+		self._updateYellowButton()
 		self.tuning_type.value = "blindscan_transponder"
 
 		if show_message:
@@ -1695,9 +1748,11 @@ class Satfinder(ScanSetup, ServiceScan):
 			self.createSetup()
 			self.retune()
 			sat_name = sat_elem.get("name", os.path.basename(filepath))
-			self.session.open(MessageBox,
-				_("Loaded %d transponders\n%s") % (len(tps), sat_name),
-				MessageBox.TYPE_INFO, timeout=3)
+			if source == "dropped":
+				text = _("Loaded %d dropped carriers\n%s\n\nThese did not confirm during the blindscan.\nModulation and FEC are unknown - tuned as Auto.") % (len(tps), sat_name)
+			else:
+				text = _("Loaded %d transponders\n%s") % (len(tps), sat_name)
+			self.session.open(MessageBox, text, MessageBox.TYPE_INFO, timeout=5)
 		# When show_message=False the caller (_updateBlindscanForSat via newConfig)
 		# will call createSetup() and retune() immediately after returning.
 
@@ -1709,12 +1764,13 @@ class Satfinder(ScanSetup, ServiceScan):
 			choices = [("0", _("No transponders"))]
 		self.preDefTransponders = ConfigSelection(choices=choices, default="0")
 
-	def _findAllBlindscanForOrbpos(self, orbpos):
-		"""Return list of /tmp/blindscan_*.xml paths (newest first) that contain a <sat> for orbpos."""
+	def _findAllBlindscanForOrbpos(self, orbpos, prefix="blindscan_"):
+		"""Return list of /tmp/<prefix>*.xml paths (newest first) that contain a <sat> for orbpos."""
 		blindscan_dir = "/tmp"
 		try:
 			files = sorted(
-				[f for f in os.listdir(blindscan_dir) if f.startswith("blindscan_") and f.endswith(".xml")],
+				[f for f in os.listdir(blindscan_dir) if f.startswith(prefix) and f.endswith(".xml")],
+				key=lambda f: os.path.getmtime(os.path.join(blindscan_dir, f)) if prefix != "blindscan_" else f,
 				reverse=True
 			)
 		except OSError:
@@ -1772,14 +1828,18 @@ class Satfinder(ScanSetup, ServiceScan):
 			orbpos = int(self.tuning_sat.value)
 		except (ValueError, TypeError):
 			return
-		match = self._findBlindscanForOrbpos(orbpos)
-		if match:
-			self._loadBlindscanFile(match, show_message=False)
+		source = self._list_source or "blindscan"
+		prefix = "bsdropped_" if source == "dropped" else "blindscan_"
+		matches = self._findAllBlindscanForOrbpos(orbpos, prefix)
+		if matches:
+			self._loadBlindscanFile(matches[0], show_message=False, source=source)
 		else:
-			# No blindscan for this satellite — fall back to satellites.xml
+			# No list of that kind for this satellite — fall back to satellites.xml
 			self.blindscan_transponders = None
 			self._blindscan_orbpos = None
+			self._list_source = None
 			self._updateBlueButton()
+			self._updateYellowButton()
 
 	def retuneCab(self):
 		if not self.initcomplete:
@@ -2054,7 +2114,7 @@ class SatfinderExtra(Satfinder):
 
 		self["actions2"] = ActionMap(["ColorActions"],
 		{
-			"yellow": self.keyReadServices,
+			"yellow": self.keyYellow,  # Service list when available, else Load Dropped
 		}, -3)
 		self["actions2"].setEnabled(False)
 
@@ -2065,6 +2125,7 @@ class SatfinderExtra(Satfinder):
 		self["onid"] = StaticText("")
 		self["pos"] = StaticText("")
 		self["network"] = StaticText("")  # NIT network_name, header sub-line
+		self._updateYellowButton()  # key_yellow was re-created above
 
 		# Register our close handler — must be done explicitly because Python
 		# name-mangling (__onClose → _SatfinderExtra__onClose) means the parent's
@@ -2181,9 +2242,9 @@ class SatfinderExtra(Satfinder):
 			self["onid"].setText("")
 			self["pos"].setText("")
 			self["network"].setText("")
-			self["key_yellow"].setText("")
 			self["actions2"].setEnabled(False)
 			self.serviceList = []
+			self._updateYellowButton()  # back to "Load Dropped" (or nothing)
 
 		if not dvbreader_available or self.frontend is None or self.demux < 0:
 			return
@@ -2308,8 +2369,8 @@ class SatfinderExtra(Satfinder):
 		with self.threadLock:
 			self.serviceList = sorted(sdt_current_content, key=lambda listItem: listItem["service_name"])
 			if self.serviceList:
-				self["key_yellow"].setText(_("Service list"))
 				self["actions2"].setEnabled(True)
+				self._updateYellowButton()  # "Service list" 
 				# Service readout: listing SIDs is pointless on a busy mux
 				# ("716 +11" tells you nothing), so show a plain count of the
 				# distinct services found instead. The full list -- names,

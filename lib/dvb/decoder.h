@@ -151,8 +151,6 @@ private:
 	sigc::signal<void(struct videoEvent)> m_video_event;
 	int m_video_clip_fd;
 	ePtr<eTimer> m_showSinglePicTimer;
-	ePtr<eTimer> m_radioPicTimer;
-	void showRadioPic(); // called by timer
 #ifdef DREAMNEXTGEN
 	void parseVideoInfo(); // called by timer
 #endif

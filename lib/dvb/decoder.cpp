@@ -1523,21 +1523,8 @@ int eTSMPEGDecoder::setState()
 		m_changed &= ~changeState;
 	}
 
-	if (!m_dummy_video)
-		m_radioPicTimer->stop();
-
-	if (changed && m_audio && m_radio_pic.length())
-	{
-		if (!m_video)
-			showSinglePic(m_radio_pic.c_str());
-		else if (m_dummy_video)
-		{
-			/* The driver attaches the audio to the player asynchronously after
-			 * AUDIO_PLAY. Switching the video source to the picture before that
-			 * has happened leaves the service silent, so show it a little later. */
-			m_radioPicTimer->start(3000, true);
-		}
-	}
+	if (changed && !m_video && m_audio && m_radio_pic.length())
+		showSinglePic(m_radio_pic.c_str());
 
 	return res;
 }
@@ -1594,8 +1581,6 @@ eTSMPEGDecoder::eTSMPEGDecoder(eDVBDemux *demux, int decoder)
 		m_demux->connectEvent(sigc::mem_fun(*this, &eTSMPEGDecoder::demux_event), m_demux_event_conn);
 	}
 	CONNECT(m_showSinglePicTimer->timeout, eTSMPEGDecoder::finishShowSinglePic);
-	m_radioPicTimer = eTimer::create(eApp);
-	CONNECT(m_radioPicTimer->timeout, eTSMPEGDecoder::showRadioPic);
 	m_state = stateStop;
 
 	char filename[128] = {};
@@ -1894,26 +1879,14 @@ RESULT eTSMPEGDecoder::showSinglePic(const char *filename)
 	return 0;
 }
 
-void eTSMPEGDecoder::showRadioPic()
-{
-	if (m_dummy_video && m_audio && m_radio_pic.length())
-		showSinglePic(m_radio_pic.c_str());
-}
-
 void eTSMPEGDecoder::finishShowSinglePic()
 {
 	if (m_video_clip_fd >= 0)
 	{
-		/* With the placeholder video of an audio-only service the player also
-		 * carries the audio, stopping it or switching its source would silence
-		 * the service. The next video decoder selects the demux source again. */
-		if (!m_dummy_video)
-		{
-			if (ioctl(m_video_clip_fd, VIDEO_STOP, 0) < 0)
-				eDebug("[eTSMPEGDecoder] VIDEO_STOP failed: %m");
-			if (ioctl(m_video_clip_fd, VIDEO_SELECT_SOURCE, VIDEO_SOURCE_DEMUX) < 0)
+		if (ioctl(m_video_clip_fd, VIDEO_STOP, 0) < 0)
+			eDebug("[eTSMPEGDecoder] VIDEO_STOP failed: %m");
+		if (ioctl(m_video_clip_fd, VIDEO_SELECT_SOURCE, VIDEO_SOURCE_DEMUX) < 0)
 				eDebug("[eTSMPEGDecoder] VIDEO_SELECT_SOURCE DEMUX failed: %m");
-		}
 		close(m_video_clip_fd);
 		m_video_clip_fd = -1;
 	}

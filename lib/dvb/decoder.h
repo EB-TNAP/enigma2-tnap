@@ -124,6 +124,9 @@ private:
 	ePtr<eDVBAudio> m_audio;
 	ePtr<eDVBVideo> m_video;
 	bool m_dummy_video = false; // m_video is a placeholder for an audio-only service
+	int m_radio_src_fd = -1; // video0 held with the vendor radio source (Qviart dual)
+	void enterRadioSource();
+	void leaveRadioSource();
 	ePtr<eDVBPCR> m_pcr;
 	ePtr<eDVBTText> m_text;
 	int m_vpid, m_vtype, m_apid, m_atype, m_pcrpid, m_textpid;

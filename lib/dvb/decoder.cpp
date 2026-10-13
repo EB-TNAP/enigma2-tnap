@@ -1371,6 +1371,59 @@ static bool needsDummyVideoForRadio()
 	return strcmp(BOXTYPE, "dual") == 0;
 }
 
+/* The video device of the Qviart driver (hi_drv_intf) knows a vendor source
+ * "no video" (255). With it selected the audio of a service without video is
+ * attached to the player, without a video decoder running. */
+#ifndef VIDEO_SOURCE_VENDOR_NONE
+#define VIDEO_SOURCE_VENDOR_NONE 255
+#endif
+
+/* config.misc.dual_radio_mode: 0 = vendor source and VIDEO_PLAY, 1 = placeholder
+ * video on the null PID, 2 = vendor source only */
+static int dualRadioMode()
+{
+	static int mode = -1;
+	if (mode < 0)
+		mode = eSimpleConfig::getInt("config.misc.dual_radio_mode", 0);
+	return mode;
+}
+
+void eTSMPEGDecoder::enterRadioSource()
+{
+	if (m_radio_src_fd >= 0)
+		return;
+	int fd = ::open("/dev/dvb/adapter0/video0", O_RDWR | O_CLOEXEC);
+	if (fd < 0)
+	{
+		eWarning("[eTSMPEGDecoder] radio source: open video0 failed: %m");
+		return;
+	}
+	if (::ioctl(fd, VIDEO_SELECT_SOURCE, VIDEO_SOURCE_VENDOR_NONE) < 0)
+		eDebug("[eTSMPEGDecoder] radio source: VIDEO_SELECT_SOURCE %d failed: %m", VIDEO_SOURCE_VENDOR_NONE);
+	else
+		eDebug("[eTSMPEGDecoder] radio source: VIDEO_SELECT_SOURCE %d ok", VIDEO_SOURCE_VENDOR_NONE);
+	if (dualRadioMode() == 0)
+	{
+		if (::ioctl(fd, VIDEO_PLAY) < 0)
+			eDebug("[eTSMPEGDecoder] radio source: VIDEO_PLAY failed: %m");
+		else
+			eDebug("[eTSMPEGDecoder] radio source: VIDEO_PLAY ok");
+	}
+	m_radio_src_fd = fd;
+}
+
+void eTSMPEGDecoder::leaveRadioSource()
+{
+	if (m_radio_src_fd < 0)
+		return;
+	if (dualRadioMode() == 0)
+		::ioctl(m_radio_src_fd, VIDEO_STOP, 0);
+	::ioctl(m_radio_src_fd, VIDEO_SELECT_SOURCE, VIDEO_SOURCE_DEMUX);
+	::close(m_radio_src_fd);
+	m_radio_src_fd = -1;
+	eDebug("[eTSMPEGDecoder] radio source: left");
+}
+
 int eTSMPEGDecoder::setState()
 {
 	int res = 0;
@@ -1433,6 +1486,18 @@ int eTSMPEGDecoder::setState()
 	if (needsDummyVideoForRadio())
 	{
 		bool want_dummy_video = !noaudio && !((m_vpid >= 0) && (m_vpid < 0x1FFF)) && (m_apid >= 0) && (m_apid < 0x1FFF);
+		if (dualRadioMode() != 1)
+		{
+			/* the radio source has to be selected before the audio is started,
+			 * and given up before a real video decoder opens video0 */
+			if (m_radio_src_fd >= 0 && (!want_dummy_video || m_video))
+				leaveRadioSource();
+			if (want_dummy_video && !m_video && m_radio_src_fd < 0)
+				enterRadioSource();
+			want_dummy_video = false;
+		}
+		else if (m_radio_src_fd >= 0)
+			leaveRadioSource();
 		if (m_dummy_video && !want_dummy_video)
 		{
 			if (m_video)
@@ -1523,7 +1588,7 @@ int eTSMPEGDecoder::setState()
 		m_changed &= ~changeState;
 	}
 
-	if (changed && !m_video && m_audio && m_radio_pic.length())
+	if (changed && !m_video && m_radio_src_fd < 0 && m_audio && m_radio_pic.length())
 		showSinglePic(m_radio_pic.c_str());
 
 	return res;

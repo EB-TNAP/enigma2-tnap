@@ -1523,7 +1523,7 @@ int eTSMPEGDecoder::setState()
 		m_changed &= ~changeState;
 	}
 
-	if (changed && !m_video && m_audio && m_radio_pic.length())
+	if (changed && (!m_video || m_dummy_video) && m_audio && m_radio_pic.length())
 		showSinglePic(m_radio_pic.c_str());
 
 	return res;
@@ -1883,10 +1883,16 @@ void eTSMPEGDecoder::finishShowSinglePic()
 {
 	if (m_video_clip_fd >= 0)
 	{
-		if (ioctl(m_video_clip_fd, VIDEO_STOP, 0) < 0)
-			eDebug("[eTSMPEGDecoder] VIDEO_STOP failed: %m");
-		if (ioctl(m_video_clip_fd, VIDEO_SELECT_SOURCE, VIDEO_SOURCE_DEMUX) < 0)
+		/* With the placeholder video of an audio-only service the player also
+		 * carries the audio, stopping it or switching its source would silence
+		 * the service. The next video decoder selects the demux source again. */
+		if (!m_dummy_video)
+		{
+			if (ioctl(m_video_clip_fd, VIDEO_STOP, 0) < 0)
+				eDebug("[eTSMPEGDecoder] VIDEO_STOP failed: %m");
+			if (ioctl(m_video_clip_fd, VIDEO_SELECT_SOURCE, VIDEO_SOURCE_DEMUX) < 0)
 				eDebug("[eTSMPEGDecoder] VIDEO_SELECT_SOURCE DEMUX failed: %m");
+		}
 		close(m_video_clip_fd);
 		m_video_clip_fd = -1;
 	}

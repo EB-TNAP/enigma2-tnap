@@ -1483,11 +1483,10 @@ int eTSMPEGDecoder::setState()
 		}
 		m_changed &= ~changePCR;
 	}
-	const bool is_dual = needsDummyVideoForRadio();
-	if (is_dual || eSimpleConfig::getBool("config.misc.radio_dummy_video", false))
+	if (needsDummyVideoForRadio())
 	{
 		bool want_dummy_video = !noaudio && !((m_vpid >= 0) && (m_vpid < 0x1FFF)) && (m_apid >= 0) && (m_apid < 0x1FFF);
-		if (is_dual && dualRadioMode() != 1)
+		if (dualRadioMode() != 1)
 		{
 			/* the radio source has to be selected before the audio is started,
 			 * and given up before a real video decoder opens video0 */
@@ -1499,7 +1498,6 @@ int eTSMPEGDecoder::setState()
 		}
 		else if (m_radio_src_fd >= 0)
 			leaveRadioSource();
-		/* other receivers: config.misc.radio_dummy_video runs the placeholder video channel only */
 		if (m_dummy_video && !want_dummy_video)
 		{
 			if (m_video)

@@ -11,6 +11,7 @@
 #include <linux/dvb/video.h>
 #include <linux/dvb/dmx.h>
 
+#include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -1358,6 +1359,18 @@ eDVBTText::~eDVBTText()
 
 DEFINE_REF(eTSMPEGDecoder);
 
+/*
+ * The Qviart Dual 4K (HiSilicon) demux driver only attaches the audio PID to
+ * the player once its video channel is running. Audio-only (radio) services
+ * without a video PID therefore stay silent: AVPLAY stays stopped and no audio
+ * channel is created. Services that happen to carry a dummy video PID play
+ * fine, so run the video channel on the null PID for audio-only services.
+ */
+static bool needsDummyVideoForRadio()
+{
+	return strcmp(BOXTYPE, "dual") == 0;
+}
+
 int eTSMPEGDecoder::setState()
 {
 	int res = 0;
@@ -1389,6 +1402,7 @@ int eTSMPEGDecoder::setState()
 			m_video = 0;
 			m_video_event_conn = 0;
 		}
+		m_dummy_video = false;
 	}
 	if (m_changed & changeAudio)
 	{
@@ -1415,6 +1429,25 @@ int eTSMPEGDecoder::setState()
 				res = -1;
 		}
 		m_changed &= ~changePCR;
+	}
+	if (needsDummyVideoForRadio())
+	{
+		bool want_dummy_video = !noaudio && !((m_vpid >= 0) && (m_vpid < 0x1FFF)) && (m_apid >= 0) && (m_apid < 0x1FFF);
+		if (m_dummy_video && !want_dummy_video)
+		{
+			if (m_video)
+				m_video->stop();
+			m_video = 0;
+			m_dummy_video = false;
+		}
+		if (want_dummy_video && !m_video)
+		{
+			m_video = new eDVBVideo(m_demux, m_decoder, m_fcc_enable);
+			if (m_video->startPid(0x1FFF, eDVBVideo::MPEG2))
+				res = -1;
+			m_video->unfreeze();
+			m_dummy_video = true;
+		}
 	}
 	if (m_changed & changeAudio)
 	{

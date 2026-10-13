@@ -123,6 +123,7 @@ private:
 	ePtr<eDVBDemux> m_demux;
 	ePtr<eDVBAudio> m_audio;
 	ePtr<eDVBVideo> m_video;
+	bool m_dummy_video = false; // m_video is a placeholder for an audio-only service
 	ePtr<eDVBPCR> m_pcr;
 	ePtr<eDVBTText> m_text;
 	int m_vpid, m_vtype, m_apid, m_atype, m_pcrpid, m_textpid;

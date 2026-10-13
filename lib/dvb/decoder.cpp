@@ -1523,8 +1523,21 @@ int eTSMPEGDecoder::setState()
 		m_changed &= ~changeState;
 	}
 
-	if (changed && (!m_video || m_dummy_video) && m_audio && m_radio_pic.length())
-		showSinglePic(m_radio_pic.c_str());
+	if (!m_dummy_video)
+		m_radioPicTimer->stop();
+
+	if (changed && m_audio && m_radio_pic.length())
+	{
+		if (!m_video)
+			showSinglePic(m_radio_pic.c_str());
+		else if (m_dummy_video)
+		{
+			/* The driver attaches the audio to the player asynchronously after
+			 * AUDIO_PLAY. Switching the video source to the picture before that
+			 * has happened leaves the service silent, so show it a little later. */
+			m_radioPicTimer->start(3000, true);
+		}
+	}
 
 	return res;
 }
@@ -1581,6 +1594,8 @@ eTSMPEGDecoder::eTSMPEGDecoder(eDVBDemux *demux, int decoder)
 		m_demux->connectEvent(sigc::mem_fun(*this, &eTSMPEGDecoder::demux_event), m_demux_event_conn);
 	}
 	CONNECT(m_showSinglePicTimer->timeout, eTSMPEGDecoder::finishShowSinglePic);
+	m_radioPicTimer = eTimer::create(eApp);
+	CONNECT(m_radioPicTimer->timeout, eTSMPEGDecoder::showRadioPic);
 	m_state = stateStop;
 
 	char filename[128] = {};
@@ -1877,6 +1892,12 @@ RESULT eTSMPEGDecoder::showSinglePic(const char *filename)
 		return -1;
 	}
 	return 0;
+}
+
+void eTSMPEGDecoder::showRadioPic()
+{
+	if (m_dummy_video && m_audio && m_radio_pic.length())
+		showSinglePic(m_radio_pic.c_str());
 }
 
 void eTSMPEGDecoder::finishShowSinglePic()

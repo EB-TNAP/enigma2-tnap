@@ -1361,32 +1361,19 @@ DEFINE_REF(eTSMPEGDecoder);
 
 /*
  * The Qviart Dual 4K (HiSilicon) demux driver only attaches the audio PID to
- * the player once its video channel is running. Audio-only (radio) services
- * without a video PID therefore stay silent: AVPLAY stays stopped and no audio
- * channel is created. Services that happen to carry a dummy video PID play
- * fine, so run the video channel on the null PID for audio-only services.
+ * the player once its video channel is running, so audio-only (radio) services
+ * without a video PID stay silent. The video device of its driver
+ * (hi_drv_intf) knows a vendor source "no video" (255) for this: selecting it
+ * attaches the audio of a service without video to the player.
  */
-static bool needsDummyVideoForRadio()
+static bool needsRadioVideoSource()
 {
 	return strcmp(BOXTYPE, "dual") == 0;
 }
 
-/* The video device of the Qviart driver (hi_drv_intf) knows a vendor source
- * "no video" (255). With it selected the audio of a service without video is
- * attached to the player, without a video decoder running. */
 #ifndef VIDEO_SOURCE_VENDOR_NONE
 #define VIDEO_SOURCE_VENDOR_NONE 255
 #endif
-
-/* config.misc.dual_radio_mode: 0 = vendor source and VIDEO_PLAY, 1 = placeholder
- * video on the null PID, 2 = vendor source only */
-static int dualRadioMode()
-{
-	static int mode = -1;
-	if (mode < 0)
-		mode = eSimpleConfig::getInt("config.misc.dual_radio_mode", 0);
-	return mode;
-}
 
 void eTSMPEGDecoder::enterRadioSource()
 {
@@ -1402,13 +1389,10 @@ void eTSMPEGDecoder::enterRadioSource()
 		eDebug("[eTSMPEGDecoder] radio source: VIDEO_SELECT_SOURCE %d failed: %m", VIDEO_SOURCE_VENDOR_NONE);
 	else
 		eDebug("[eTSMPEGDecoder] radio source: VIDEO_SELECT_SOURCE %d ok", VIDEO_SOURCE_VENDOR_NONE);
-	if (dualRadioMode() == 0)
-	{
-		if (::ioctl(fd, VIDEO_PLAY) < 0)
-			eDebug("[eTSMPEGDecoder] radio source: VIDEO_PLAY failed: %m");
-		else
-			eDebug("[eTSMPEGDecoder] radio source: VIDEO_PLAY ok");
-	}
+	if (::ioctl(fd, VIDEO_PLAY) < 0)
+		eDebug("[eTSMPEGDecoder] radio source: VIDEO_PLAY failed: %m");
+	else
+		eDebug("[eTSMPEGDecoder] radio source: VIDEO_PLAY ok");
 	m_radio_src_fd = fd;
 }
 
@@ -1416,8 +1400,7 @@ void eTSMPEGDecoder::leaveRadioSource()
 {
 	if (m_radio_src_fd < 0)
 		return;
-	if (dualRadioMode() == 0)
-		::ioctl(m_radio_src_fd, VIDEO_STOP, 0);
+	::ioctl(m_radio_src_fd, VIDEO_STOP, 0);
 	::ioctl(m_radio_src_fd, VIDEO_SELECT_SOURCE, VIDEO_SOURCE_DEMUX);
 	::close(m_radio_src_fd);
 	m_radio_src_fd = -1;
@@ -1455,7 +1438,6 @@ int eTSMPEGDecoder::setState()
 			m_video = 0;
 			m_video_event_conn = 0;
 		}
-		m_dummy_video = false;
 	}
 	if (m_changed & changeAudio)
 	{
@@ -1483,36 +1465,15 @@ int eTSMPEGDecoder::setState()
 		}
 		m_changed &= ~changePCR;
 	}
-	if (needsDummyVideoForRadio())
+	if (needsRadioVideoSource())
 	{
-		bool want_dummy_video = !noaudio && !((m_vpid >= 0) && (m_vpid < 0x1FFF)) && (m_apid >= 0) && (m_apid < 0x1FFF);
-		if (dualRadioMode() != 1)
-		{
-			/* the radio source has to be selected before the audio is started,
-			 * and given up before a real video decoder opens video0 */
-			if (m_radio_src_fd >= 0 && (!want_dummy_video || m_video))
-				leaveRadioSource();
-			if (want_dummy_video && !m_video && m_radio_src_fd < 0)
-				enterRadioSource();
-			want_dummy_video = false;
-		}
-		else if (m_radio_src_fd >= 0)
+		bool want_radio_source = !noaudio && !((m_vpid >= 0) && (m_vpid < 0x1FFF)) && (m_apid >= 0) && (m_apid < 0x1FFF);
+		/* the radio source has to be selected before the audio is started,
+		 * and given up before a real video decoder opens video0 */
+		if (m_radio_src_fd >= 0 && (!want_radio_source || m_video))
 			leaveRadioSource();
-		if (m_dummy_video && !want_dummy_video)
-		{
-			if (m_video)
-				m_video->stop();
-			m_video = 0;
-			m_dummy_video = false;
-		}
-		if (want_dummy_video && !m_video)
-		{
-			m_video = new eDVBVideo(m_demux, m_decoder, m_fcc_enable);
-			if (m_video->startPid(0x1FFF, eDVBVideo::MPEG2))
-				res = -1;
-			m_video->unfreeze();
-			m_dummy_video = true;
-		}
+		if (want_radio_source && !m_video && m_radio_src_fd < 0)
+			enterRadioSource();
 	}
 	if (m_changed & changeAudio)
 	{

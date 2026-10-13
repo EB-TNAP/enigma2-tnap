@@ -2679,6 +2679,7 @@ RESULT eDVBServicePlay::selectTrack(unsigned int i)
 	{
 		if (m_decoder->set())
 			return -5;
+		startRdsDecoder();
 	}
 	else if (m_soft_decoder)
 	{
@@ -2820,7 +2821,60 @@ int eDVBServicePlay::selectAudioStream(int i)
 		eDebug("[eDVBServicePlay] seekTo ret %d", ret);
 	}
 
-	int rdsPid = apid;
+	/* With a hardware decoder the rds reader is started by the caller once the
+	 * decoder has been committed, see startRdsDecoder(). */
+	if (!m_decoder)
+		startRdsDecoder();
+
+			/* store new pid as default only when:
+				a.) we have an entry in the service db for the current service,
+				b.) we are not playing back something,
+				c.) we are not selecting the default entry. (we wouldn't change
+					anything in the best case, or destroy the default setting in
+					case the real default is not yet available.)
+				d.) we have only one audiostream (overwrite the cache to make sure
+					the cache contains the correct audio pid and type)
+			*/
+	if (m_dvb_service && (i != -1 || program.audioStreams.size() == 1
+		|| m_dvb_service->cacheAudioEmpty()))
+	{
+		updateAudioCache(apid, apidtype);
+	}
+
+	h.resetCachedProgram();
+
+	return 0;
+}
+
+/*
+ * The rds reader taps the audio PID. On some demux drivers (e.g. HiSilicon
+ * based Qviart receivers) a tap on the audio PID that exists before the audio
+ * decoder channel is set up prevents the decoder from attaching to that PID,
+ * and radio services without a video PID stay silent. Start the reader only
+ * after the decoder has been committed.
+ */
+void eDVBServicePlay::startRdsDecoder()
+{
+	eDVBServicePMTHandler &h = m_timeshift_active ? m_service_handler_timeshift : m_service_handler;
+	eDVBServicePMTHandler::program program;
+
+	if (h.getProgramInfo(program))
+		return;
+
+	int stream = -1;
+	for (unsigned int i = 0; i < program.audioStreams.size(); ++i)
+	{
+		if (program.audioStreams[i].pid == m_current_audio_pid)
+		{
+			stream = i;
+			break;
+		}
+	}
+	if (stream < 0)
+		return;
+
+	int apidtype = program.audioStreams[stream].type;
+	int rdsPid = m_current_audio_pid;
 
 	/* if timeshift is not active and we are not in pip mode, check if we need to enable the rds reader */
 	if (!(m_timeshift_active || m_decoder_index || m_have_video_pid || !m_is_primary))
@@ -2841,25 +2895,6 @@ int eDVBServicePlay::selectAudioStream(int i)
 			}
 		}
 	}
-
-			/* store new pid as default only when:
-				a.) we have an entry in the service db for the current service,
-				b.) we are not playing back something,
-				c.) we are not selecting the default entry. (we wouldn't change
-					anything in the best case, or destroy the default setting in
-					case the real default is not yet available.)
-				d.) we have only one audiostream (overwrite the cache to make sure
-					the cache contains the correct audio pid and type)
-			*/
-	if (m_dvb_service && (i != -1 || program.audioStreams.size() == 1
-		|| m_dvb_service->cacheAudioEmpty()))
-	{
-		updateAudioCache(apid, apidtype);
-	}
-
-	h.resetCachedProgram();
-
-	return 0;
 }
 
 void eDVBServicePlay::updateAudioCache(int apid, int apidtype)
@@ -3813,7 +3848,10 @@ void eDVBServicePlay::updateDecoder(bool sendSeekableStateChanged)
 			m_decoder->set();
 
 		if (!m_noaudio)
+		{
+			startRdsDecoder();
 			m_decoder->setAudioChannel(achannel);
+		}
 
 		if (mustPlay && m_decode_demux && m_decoder_index == 0)
 		{
@@ -4477,6 +4515,8 @@ void eDVBServicePlay::setQpipMode(bool value, bool audio)
 			m_decoder->setAudioPID(-1, -1);
 
 		m_decoder->set();
+		if (!m_noaudio)
+			startRdsDecoder();
 	}
 
 	if (m_soft_decoder)

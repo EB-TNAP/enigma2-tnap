@@ -39,6 +39,7 @@ from Tools.LoadPixmap import LoadPixmap
 from Tools.MultiBoot import MultiBoot
 from Tools.StbHardware import getBoxProc, getBoxProcType, getBoxRCType, getFPVersion, getHWSerial
 from Tools.Transponder import ConvertToHumanReadable
+from Tools.TunerChips import getTunerChips
 
 MODULE_NAME = __name__.split(".")[-1]
 
@@ -1420,9 +1421,18 @@ class ReceiverInformation(InformationBase):
 		info.append(formatLine("S", _("Tuner information")))
 		if self.extraSpacing:
 			info.append("")
-		for count, nim in enumerate(nimmanager.nimListCompressed()):
-			tuner, type = (x.strip() for x in nim.split(":", 1))
+		# TNAP: under each tuner, the demodulator and RF tuner chips doing the work
+		# (Tools/TunerChips.py), so the hardware can be looked up.
+		for slot in nimmanager.nim_slots:
+			if slot.isNotFirstFBCTuner() or slot.internally_connectable is not None:
+				continue
+			tuner, type = (x.strip() for x in slot.friendly_full_description_compressed.split(":", 1))
 			info.append(formatLine("P1", tuner, type))
+			chips = getTunerChips(slot.slot, slot.description)
+			if chips["demod"]:
+				info.append(formatLine("P2", _("Demodulator"), chips["demod"]))
+			if chips["tuner"]:
+				info.append(formatLine("P2", _("Tuner chip"), chips["tuner"]))
 		info.append("")
 		info.append(formatLine("S", _("Storage / Drive information")))
 		if self.extraSpacing:

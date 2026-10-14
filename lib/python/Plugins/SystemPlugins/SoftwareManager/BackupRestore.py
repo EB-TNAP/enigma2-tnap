@@ -7,6 +7,7 @@ from Components.Pixmap import Pixmap
 from Components.Label import Label
 from Components.Sources.StaticText import StaticText
 from Components.MenuList import MenuList
+from Components.SystemInfo import BoxInfo
 from Components.config import config, configfile, ConfigSubsection, ConfigText, ConfigLocations
 from Components.ConfigList import ConfigList, ConfigListScreen
 from Components.FileList import MultiFileSelectList
@@ -36,7 +37,6 @@ def getBackupPath():
 def getBackupFilename():
 	# TNAP: Create descriptive backup filename with image, model, and date
 	# Format: TNAP-7-sf8008-20260216-0829.tar.gz
-	from Tools.HardwareInfo import HardwareInfo
 	from time import strftime
 
 	# Get image name from /etc/issue
@@ -50,18 +50,14 @@ def getBackupFilename():
 	except:
 		pass
 
-	# Get box model
-	boxModel = "unknown"
-	try:
-		# Try /proc/stb/info/boxtype first (more reliable)
-		with open('/proc/stb/info/boxtype', 'r') as f:
-			boxModel = f.read().strip()
-	except:
+	# Get box model. machinebuild is authoritative: some vendor kernels (e.g. the
+	# Vu+ ARM kernels) report a bogus value such as "dm8000" in /proc/stb/info/model.
+	boxModel = BoxInfo.getItem("machinebuild") or "unknown"
+	if boxModel == "unknown":
 		try:
-			# Fallback to HardwareInfo
-			hwinfo = HardwareInfo()
-			boxModel = hwinfo.get_device_name()
-		except:
+			with open('/proc/stb/info/boxtype', 'r') as f:
+				boxModel = f.read().strip() or "unknown"
+		except OSError:
 			pass
 
 	# Get current date and time in format: YYYYMMDD-HHMM

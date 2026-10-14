@@ -500,7 +500,21 @@ class AutoInstallWizard(Screen):
 					self.start_timer.start(5000, True)
 					return
 
-		self.abort()
+		# Nothing to install (e.g. empty autoinstall file). Screens cannot open other
+		# screens from __init__ (not modal yet), and no reboot is needed, so just clear
+		# the flag and close once the screen is running.
+		self.finish_timer = eTimer()
+		self.finish_timer.callback.append(self.nothingToInstall)
+		self.finish_timer.start(0, True)
+
+	def nothingToInstall(self):
+		self.logfile.close()
+		self.container = None
+		try:
+			os.unlink("/etc/.doAutoinstall")
+		except OSError:
+			pass
+		self.close()
 
 	def _doUpdate(self):
 		self.container.execute("opkg update")

@@ -33,6 +33,7 @@ from Components.ActionMap import ActionMap
 from Components.Sources.FrontendInfo import FrontendInfo
 from Components.config import config
 from enigma import eServiceReference, eDVBDB
+from Components.SystemInfo import BoxInfo
 from Tools.Directories import fileExists  # extra import
 
 BOX_MODEL = ""
@@ -65,6 +66,10 @@ if fileExists("/proc/stb/info/boxtype") and not fileExists("/proc/stb/info/hwmod
 # which /proc/stb/info node this box exposes. The block above only fills
 # BOX_NAME on a narrow set of boxes; fall back to the usual model nodes so a
 # posted screenshot always identifies the receiver that ran the scan.
+if not BOX_NAME:
+	# machinebuild first: some vendor kernels report a wrong name in /proc/stb/info/model
+	# (the Vu+ ARM kernels report "dm8000").
+	BOX_NAME = BoxInfo.getItem("machinebuild") or ""
 if not BOX_NAME:
 	for _bp in ("/proc/stb/info/model", "/proc/stb/info/boxtype", "/proc/stb/info/hwmodel", "/proc/stb/info/gbmodel", "/proc/stb/info/vumodel"):
 		try:

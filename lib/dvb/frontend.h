@@ -112,6 +112,7 @@ private:
 	ePtr<iDVBSatelliteEquipmentControl> m_sec;
 	ePtr<eSocketNotifier> m_sn;
 	int m_tuning;
+	bool m_tune_rejected = false; // driver refused the last FE_SET_PROPERTY: demod is still on the previous transponder
 	ePtr<eTimer> m_timeout, m_tuneTimer;
 
 	eSecCommandList m_sec_sequence;

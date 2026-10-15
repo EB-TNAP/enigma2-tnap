@@ -48,6 +48,49 @@ static void blindscanReadbackDebug(int fd, int dvbid, unsigned int req_freq, uns
 		echo ? " ECHO(driver reported the request, not the carrier)" : "");
 }
 
+/*
+ * Same readback for ordinary (non-blindscan) satellite tunes. Log only: it does
+ * not change what enigma2 does with the lock. A MISMATCH line means the driver
+ * reports a different carrier than the one requested, i.e. the lock is stale
+ * (seen on Vu+ Si2166, where a service scan after a refused 16APSK tune read the
+ * previous transponder's PAT/SDT).
+ */
+static void tuneReadbackDebug(int fd, int dvbid, unsigned int req_freq, unsigned int req_sr, unsigned int req_sys, int req_mod)
+{
+	struct dtv_property p[4] = {};
+	struct dtv_properties cmdseq = {};
+	p[0].cmd = DTV_DELIVERY_SYSTEM;
+	p[1].cmd = DTV_FREQUENCY;
+	p[2].cmd = DTV_SYMBOL_RATE;
+	p[3].cmd = DTV_MODULATION;
+	cmdseq.props = p;
+	cmdseq.num = 4;
+	if (::ioctl(fd, FE_GET_PROPERTY, &cmdseq) < 0)
+	{
+		eDebug("[eDVBFrontend%d] TUNEDIAG lock readback failed: %m", dvbid);
+		return;
+	}
+	unsigned int freq_diff = p[1].u.data > req_freq ? p[1].u.data - req_freq : req_freq - p[1].u.data;
+	/* modulation is only compared when a specific one was requested; AUTO and
+	   QAM16 have no useful counterpart in what the driver reports */
+	bool mod_known = req_mod == eDVBFrontendParametersSatellite::Modulation_QPSK ||
+		req_mod == eDVBFrontendParametersSatellite::Modulation_8PSK ||
+		req_mod == eDVBFrontendParametersSatellite::Modulation_16APSK ||
+		req_mod == eDVBFrontendParametersSatellite::Modulation_32APSK;
+	unsigned int want_mod = 0;
+	switch (req_mod)
+	{
+		case eDVBFrontendParametersSatellite::Modulation_QPSK: want_mod = QPSK; break;
+		case eDVBFrontendParametersSatellite::Modulation_8PSK: want_mod = PSK_8; break;
+		case eDVBFrontendParametersSatellite::Modulation_16APSK: want_mod = APSK_16; break;
+		case eDVBFrontendParametersSatellite::Modulation_32APSK: want_mod = APSK_32; break;
+	}
+	bool mismatch = freq_diff > 5000 || (mod_known && p[3].u.data != want_mod);
+	eDebug("[eDVBFrontend%d] TUNEDIAG lock: requested IF %u kHz SR %u sys %u mod %u -> driver IF %u kHz SR %u sys %u mod %u%s",
+		dvbid, req_freq, req_sr, req_sys, mod_known ? want_mod : 0, p[1].u.data, p[2].u.data, p[0].u.data, p[3].u.data,
+		mismatch ? " MISMATCH(driver reports a different carrier than requested)" : "");
+}
+
 // Define DTV_STAT_MODCOD if not defined in the DVB API
 #ifndef DTV_STAT_MODCOD
 #define DTV_STAT_MODCOD 92
@@ -1001,6 +1044,18 @@ void eDVBFrontend::feEvent(int w)
 			continue;
 
 		eDebug("[eDVBFrontend%d] fe event: status %x, inversion %s, m_tuning %d", m_dvbid, event.status, (event.parameters.inversion == INVERSION_ON) ? "on" : "off", m_tuning);
+		if ((event.status & FE_HAS_LOCK) && m_tune_rejected)
+		{
+			/*
+			 * The driver refused our last tune, so the demod is still holding
+			 * (or auto-reacquiring) the PREVIOUS transponder. Any lock now is
+			 * that old carrier, not the one we asked for. Accepting it makes
+			 * the service scan read the old PAT/SDT under the new frequency
+			 * (seen on Vu+ Si2166: 16APSK tp listed with the 8PSK tp's services).
+			 */
+			eWarning("[eDVBFrontend%d] ignoring lock after rejected tune (stale transponder)", m_dvbid);
+			continue;
+		}
 		if (event.status & FE_HAS_LOCK)
 		{
 			state = stateLock;
@@ -1015,6 +1070,19 @@ void eDVBFrontend::feEvent(int w)
 					oparm.getDVBS(req);
 					blindscanReadbackDebug(m_fd, m_dvbid, (unsigned int)satfrequency, (unsigned int)req.symbol_rate,
 						req.system == eDVBFrontendParametersSatellite::System_DVB_S2 ? (unsigned int)SYS_DVBS2 : (unsigned int)SYS_DVBS);
+				}
+			}
+			else if (m_tuning)
+			{
+				int fetype = -1;
+				oparm.getSystem(fetype);
+				if (fetype == feSatellite)
+				{
+					eDVBFrontendParametersSatellite req;
+					oparm.getDVBS(req);
+					tuneReadbackDebug(m_fd, m_dvbid, (unsigned int)satfrequency, (unsigned int)req.symbol_rate,
+						req.system == eDVBFrontendParametersSatellite::System_DVB_S2 ? (unsigned int)SYS_DVBS2 : (unsigned int)SYS_DVBS,
+						req.modulation);
 				}
 			}
 		}
@@ -2366,6 +2434,7 @@ void eDVBFrontend::setFrontend(bool recvEvents)
 		if (recvEvents)
 			m_sn->start();
 		feEvent(-1); // flush events
+		m_tune_rejected = false;
 		struct dtv_property p[18] = {};
 		struct dtv_properties cmdseq = {};
 		cmdseq.props = p;
@@ -2702,7 +2771,22 @@ void eDVBFrontend::setFrontend(bool recvEvents)
 		p[cmdseq.num].cmd = DTV_TUNE, cmdseq.num++;
 		if (ioctl(m_fd, FE_SET_PROPERTY, &cmdseq) == -1)
 		{
-			perror("FE_SET_PROPERTY failed");
+			/*
+			 * Previously this was only a perror(): the tune carried on waiting
+			 * for events, and the driver's auto-reacquire of the old transponder
+			 * produced a lock that enigma2 credited to the new one. Fail it.
+			 */
+			eWarning("[eDVBFrontend%d] FE_SET_PROPERTY failed: %m - tune rejected by driver", m_dvbid);
+			if (type == iDVBFrontend::feSatellite)
+			{
+				eDVBFrontendParametersSatellite parm{};
+				oparm.getDVBS(parm);
+				eWarning("[eDVBFrontend%d] rejected: freq %d sr %d sys %d mod %d fec %d pilot %d rolloff %d", m_dvbid,
+					satfrequency, parm.symbol_rate, parm.system, parm.modulation, parm.fec, parm.pilot, parm.rolloff);
+			}
+			m_tune_rejected = true;
+			m_timeout->stop();
+			timeout(); // stateTuning -> stateFailed, scan skips this tp
 			return;
 		}
 	}

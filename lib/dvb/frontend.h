@@ -50,6 +50,11 @@ public:
 #ifndef SWIG
 
 #include <lib/dvb/sec.h>
+/* Vu+ Broadcom drivers: vendor delivery system for DVB-S2X (APSK) tuning */
+#ifndef SYS_DVBS2X_VUPLUS
+#define SYS_DVBS2X_VUPLUS ((fe_delivery_system_t)21)
+#endif
+
 class eSecCommandList;
 
 class eDVBFrontend: public iDVBFrontend, public sigc::trackable

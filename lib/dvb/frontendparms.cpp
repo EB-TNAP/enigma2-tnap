@@ -442,7 +442,8 @@ int eDVBSatelliteTransponderData::getSystem() const
 	default: eDebug("[eDVBSatelliteTransponderData] got unsupported system from frontend! report as DVBS!");
 	[[fallthrough]];
 	case SYS_DVBS: return eDVBFrontendParametersSatellite::System_DVB_S;
-	case SYS_DVBS2: return eDVBFrontendParametersSatellite::System_DVB_S2;
+	case SYS_DVBS2:
+	case SYS_DVBS2X_VUPLUS: return eDVBFrontendParametersSatellite::System_DVB_S2;
 	}
 }
 

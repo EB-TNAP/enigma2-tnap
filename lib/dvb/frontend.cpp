@@ -2455,6 +2455,7 @@ void eDVBFrontend::setFrontend(bool recvEvents)
 				case eDVBFrontendParametersSatellite::System_DVB_S: system = SYS_DVBS; break;
 				case eDVBFrontendParametersSatellite::System_DVB_S2: system = SYS_DVBS2; break;
 			}
+			int delsys_idx = cmdseq.num;
 			p[cmdseq.num].cmd = DTV_DELIVERY_SYSTEM, p[cmdseq.num].u.data = system, cmdseq.num++;
 
 			p[cmdseq.num].cmd = DTV_INVERSION;
@@ -2474,6 +2475,24 @@ void eDVBFrontend::setFrontend(bool recvEvents)
 				case eDVBFrontendParametersSatellite::Modulation_QAM16: modulation = QAM_16; break;
 				case eDVBFrontendParametersSatellite::Modulation_16APSK: modulation = APSK_16; break;
 				case eDVBFrontendParametersSatellite::Modulation_32APSK: modulation = APSK_32; break;
+			}
+			/*
+			 * Vu+ Broadcom frontends (dvb-bcm*.ko, "Vuplus FE") advertise delivery
+			 * systems {DVBS, DVBS2, 21}. Their set_frontend only accepts QPSK/8PSK
+			 * for SYS_DVBS2 and returns -EOPNOTSUPP for APSK without ever calling
+			 * NEXUS_Frontend_TuneSatellite. dvb-core runs set_frontend in its
+			 * thread, so FE_SET_PROPERTY still succeeds and the demod silently
+			 * stays on the previous transponder. APSK must go via delsys 21
+			 * (Vu's DVB-S2X path, brcm_set_s2x_frontend).
+			 */
+			if (system == SYS_DVBS2 && (modulation == APSK_16 || modulation == APSK_32))
+			{
+				std::map<fe_delivery_system_t, bool>::iterator it = m_delsys.find(SYS_DVBS2X_VUPLUS);
+				if (it != m_delsys.end() && it->second)
+				{
+					eDebug("[eDVBFrontend%d] APSK: using Vu+ DVB-S2X delivery system (%d)", m_dvbid, (int)SYS_DVBS2X_VUPLUS);
+					p[delsys_idx].u.data = SYS_DVBS2X_VUPLUS;
+				}
 			}
 			switch (parm.pilot)
 			{
@@ -3586,6 +3605,7 @@ std::string eDVBFrontend::getCapabilities()
 		case SYS_DVBH:		ss << " DVBH"; break;
 		case SYS_DVBS:		ss << " DVBS"; break;
 		case SYS_DVBS2:		ss << " DVBS2"; break;
+		case SYS_DVBS2X_VUPLUS:	ss << " DVBS2X"; break;
 		case SYS_DVBT:		ss << " DVBT"; break;
 		case SYS_ISDBC:		ss << " ISDBC"; break;
 		case SYS_ISDBS:		ss << " ISDBS"; break;

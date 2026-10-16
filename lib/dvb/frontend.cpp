@@ -49,13 +49,17 @@ static void blindscanReadbackDebug(int fd, int dvbid, unsigned int req_freq, uns
 }
 
 /*
- * Same readback for ordinary (non-blindscan) satellite tunes. Log only: it does
- * not change what enigma2 does with the lock. A MISMATCH line means the driver
- * reports a different carrier than the one requested, i.e. the lock is stale
- * (seen on Vu+ Si2166, where a service scan after a refused 16APSK tune read the
- * previous transponder's PAT/SDT).
+ * Same readback for ordinary (non-blindscan) satellite tunes. A MISMATCH line
+ * means the driver reports a different carrier than the one requested. Returns
+ * true when the reported frequency is so far from the request that the lock
+ * cannot belong to the requested transponder: it is the demod still sitting on
+ * the previous one (seen on Vu+ Si2166, where a service scan after a refused
+ * 16APSK tune read the previous transponder's PAT/SDT; the driver reported the
+ * old carrier 26 MHz away). The limit is far wider than any real lock offset
+ * (max of 20 MHz and twice the symbol rate), and a reported frequency of 0 is
+ * treated as "driver does not say".
  */
-static void tuneReadbackDebug(int fd, int dvbid, unsigned int req_freq, unsigned int req_sr, unsigned int req_sys, int req_mod)
+static bool tuneReadbackDebug(int fd, int dvbid, unsigned int req_freq, unsigned int req_sr, unsigned int req_sys, int req_mod)
 {
 	struct dtv_property p[4] = {};
 	struct dtv_properties cmdseq = {};
@@ -68,7 +72,7 @@ static void tuneReadbackDebug(int fd, int dvbid, unsigned int req_freq, unsigned
 	if (::ioctl(fd, FE_GET_PROPERTY, &cmdseq) < 0)
 	{
 		eDebug("[eDVBFrontend%d] TUNEDIAG lock readback failed: %m", dvbid);
-		return;
+		return false;
 	}
 	unsigned int freq_diff = p[1].u.data > req_freq ? p[1].u.data - req_freq : req_freq - p[1].u.data;
 	/* modulation is only compared when a specific one was requested; AUTO and
@@ -89,6 +93,10 @@ static void tuneReadbackDebug(int fd, int dvbid, unsigned int req_freq, unsigned
 	eDebug("[eDVBFrontend%d] TUNEDIAG lock: requested IF %u kHz SR %u sys %u mod %u -> driver IF %u kHz SR %u sys %u mod %u%s",
 		dvbid, req_freq, req_sr, req_sys, mod_known ? want_mod : 0, p[1].u.data, p[2].u.data, p[0].u.data, p[3].u.data,
 		mismatch ? " MISMATCH(driver reports a different carrier than requested)" : "");
+	unsigned int stale_limit = req_sr / 1000 * 2;
+	if (stale_limit < 20000)
+		stale_limit = 20000;
+	return p[1].u.data != 0 && freq_diff > stale_limit;
 }
 
 // Define DTV_STAT_MODCOD if not defined in the DVB API
@@ -1080,9 +1088,13 @@ void eDVBFrontend::feEvent(int w)
 				{
 					eDVBFrontendParametersSatellite req;
 					oparm.getDVBS(req);
-					tuneReadbackDebug(m_fd, m_dvbid, (unsigned int)satfrequency, (unsigned int)req.symbol_rate,
+					if (tuneReadbackDebug(m_fd, m_dvbid, (unsigned int)satfrequency, (unsigned int)req.symbol_rate,
 						req.system == eDVBFrontendParametersSatellite::System_DVB_S2 ? (unsigned int)SYS_DVBS2 : (unsigned int)SYS_DVBS,
-						req.modulation);
+						req.modulation))
+					{
+						eWarning("[eDVBFrontend%d] ignoring lock: driver reports a different carrier than requested (stale transponder)", m_dvbid);
+						continue;
+					}
 				}
 			}
 		}

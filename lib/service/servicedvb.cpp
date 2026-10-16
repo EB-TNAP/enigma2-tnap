@@ -3766,6 +3766,16 @@ void eDVBServicePlay::updateDecoder(bool sendSeekableStateChanged)
 		tpid = program.textPid;
 	}
 
+	/* Some radio services (e.g. Mood Music 80's Hits) carry a placeholder video
+	 * PID in the reserved range (PID 1). No video ever arrives on it, so the
+	 * screen would stay black. Treat it as an audio-only service instead. */
+	if (vpid > 0 && vpid < 0x10)
+	{
+		eDebug("[eDVBServicePlay] ignoring reserved video pid %04x", vpid);
+		vpid = -1;
+		vpidtype = -1;
+	}
+
 	m_have_video_pid = 0;
 
 	if (!m_decoder)

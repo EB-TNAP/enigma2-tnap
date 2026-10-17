@@ -1062,7 +1062,7 @@ class NetworkInformation(InformationBase):
 		info.append(formatLine("H", _("Network information for %s %s") % getBoxDisplayName()))
 		info.append("")
 		hostname = fileReadLine("/proc/sys/kernel/hostname", source=MODULE_NAME)
-		info.append(self.formatLine("S0S", _("Hostname"), hostname))
+		info.append(formatLine("S0S", _("Hostname"), hostname))
 		adapters = networkManager.getAdapters()
 		for interface in sorted(adapters.keys()):
 			adapter = adapters[interface]

@@ -876,6 +876,10 @@ class NetworkManager:
 			adapter.present = False
 			adapter.netInfo.up = False
 			adapter.netInfo.link = False
+		# Symmetric with onIfaceAdd: a removed VPN interface isn't in
+		# self.adapters to begin with, so it can only be dropped from
+		# vpnInterfaces by re-deriving it from current netinfo.
+		self.applyNetinfo()
 		self.notifyAdaptersChanged()
 
 	def onScanTrigger(self, interface: str):

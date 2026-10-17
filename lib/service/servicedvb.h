@@ -270,7 +270,7 @@ protected:
 
 	int m_current_audio_stream;
 	int selectAudioStream(int n = -1);
-	void startRdsDecoder();
+	void startRdsDecoder(bool decoderCommitted);
 	RESULT setFastForward_internal(int ratio, bool final_seek = false);
 
 	/* timeshift */

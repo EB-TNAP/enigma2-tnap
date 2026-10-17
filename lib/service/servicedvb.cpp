@@ -2,6 +2,7 @@
 #include <lib/base/object.h>
 #include <lib/base/modelinformation.h>
 #include <string>
+#include <string.h>
 #include <lib/service/servicedvb.h>
 #include <lib/service/service.h>
 #include <lib/dvb/csasession.h>
@@ -2679,7 +2680,7 @@ RESULT eDVBServicePlay::selectTrack(unsigned int i)
 	{
 		if (m_decoder->set())
 			return -5;
-		startRdsDecoder();
+		startRdsDecoder(true);
 	}
 	else if (m_soft_decoder)
 	{
@@ -2821,10 +2822,9 @@ int eDVBServicePlay::selectAudioStream(int i)
 		eDebug("[eDVBServicePlay] seekTo ret %d", ret);
 	}
 
-	/* With a hardware decoder the rds reader is started by the caller once the
-	 * decoder has been committed, see startRdsDecoder(). */
-	if (!m_decoder)
-		startRdsDecoder();
+	/* The rds reader is started here, ahead of the decoder, unless the machine
+	 * needs it after the decoder has been committed, see startRdsDecoder(). */
+	startRdsDecoder(false);
 
 			/* store new pid as default only when:
 				a.) we have an entry in the service db for the current service,
@@ -2847,14 +2847,25 @@ int eDVBServicePlay::selectAudioStream(int i)
 }
 
 /*
- * The rds reader taps the audio PID. On some demux drivers (e.g. HiSilicon
- * based Qviart receivers) a tap on the audio PID that exists before the audio
- * decoder channel is set up prevents the decoder from attaching to that PID,
- * and radio services without a video PID stay silent. Start the reader only
- * after the decoder has been committed.
+ * The rds reader taps the audio PID. On the HiSilicon based Qviart Dual 4K a
+ * tap on the audio PID that exists before the audio decoder channel is set up
+ * prevents the decoder from attaching to that PID, and radio services without
+ * a video PID stay silent, so there the reader must start after the decoder
+ * has been committed. Other demux drivers (e.g. the Broadcom based Vu+ 4K) go
+ * silent the other way round, when the tap is added to a PID the decoder
+ * already uses, and keep the original order: tap first, decoder second.
  */
-void eDVBServicePlay::startRdsDecoder()
+static bool rdsAfterDecoder()
 {
+	return strcmp(BOXTYPE, "dual") == 0;
+}
+
+void eDVBServicePlay::startRdsDecoder(bool decoderCommitted)
+{
+	/* without a hardware decoder there is nothing to wait for */
+	if (m_decoder && decoderCommitted != rdsAfterDecoder())
+		return;
+
 	eDVBServicePMTHandler &h = m_timeshift_active ? m_service_handler_timeshift : m_service_handler;
 	eDVBServicePMTHandler::program program;
 
@@ -3859,7 +3870,7 @@ void eDVBServicePlay::updateDecoder(bool sendSeekableStateChanged)
 
 		if (!m_noaudio)
 		{
-			startRdsDecoder();
+			startRdsDecoder(true);
 			m_decoder->setAudioChannel(achannel);
 		}
 
@@ -4526,7 +4537,7 @@ void eDVBServicePlay::setQpipMode(bool value, bool audio)
 
 		m_decoder->set();
 		if (!m_noaudio)
-			startRdsDecoder();
+			startRdsDecoder(true);
 	}
 
 	if (m_soft_decoder)

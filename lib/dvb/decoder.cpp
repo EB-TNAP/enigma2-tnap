@@ -1371,6 +1371,17 @@ static bool needsRadioVideoSource()
 	return strcmp(BOXTYPE, "dual") == 0;
 }
 
+/*
+ * Octagon SF4008: the patched linuxtv.ko starts the audio decoder without an STC channel
+ * only when no video pid is set on the demux (audio-only service without audio PTS stays
+ * silent otherwise). TV keeps timestamp management, so the video pid has to be programmed
+ * before the audio is started.
+ */
+static bool needsVideoBeforeAudio()
+{
+	return strcmp(BOXTYPE, "sf4008") == 0;
+}
+
 #ifndef VIDEO_SOURCE_VENDOR_NONE
 #define VIDEO_SOURCE_VENDOR_NONE 255
 #endif
@@ -1475,6 +1486,24 @@ int eTSMPEGDecoder::setState()
 		if (want_radio_source && !m_video && m_radio_src_fd < 0)
 			enterRadioSource();
 	}
+	auto startVideo = [&]()
+	{
+		if (m_changed & changeVideo)
+		{
+			if ((m_vpid >= 0) && (m_vpid < 0x1FFF))
+			{
+				m_video = new eDVBVideo(m_demux, m_decoder, m_fcc_enable);
+				m_video->connectEvent(sigc::mem_fun(*this, &eTSMPEGDecoder::video_event), m_video_event_conn);
+				if (m_video->startPid(m_vpid, m_vtype))
+					res = -1;
+			}
+			m_changed &= ~changeVideo;
+		}
+	};
+	/* the driver decides at audio start whether the audio is audio-only, so the video pid has to be set first */
+	const bool videoFirst = needsVideoBeforeAudio();
+	if (videoFirst)
+		startVideo();
 	if (m_changed & changeAudio)
 	{
 		if ((m_apid >= 0) && (m_apid < 0x1FFF) && !noaudio)
@@ -1485,17 +1514,8 @@ int eTSMPEGDecoder::setState()
 		}
 		m_changed &= ~changeAudio;
 	}
-	if (m_changed & changeVideo)
-	{
-		if ((m_vpid >= 0) && (m_vpid < 0x1FFF))
-		{
-			m_video = new eDVBVideo(m_demux, m_decoder, m_fcc_enable);
-			m_video->connectEvent(sigc::mem_fun(*this, &eTSMPEGDecoder::video_event), m_video_event_conn);
-			if (m_video->startPid(m_vpid, m_vtype))
-				res = -1;
-		}
-		m_changed &= ~changeVideo;
-	}
+	if (!videoFirst)
+		startVideo();
 	if (m_changed & changeText)
 	{
 		if ((m_textpid >= 0) && (m_textpid < 0x1FFF) && !nott)

@@ -1143,6 +1143,12 @@ eDVBServicePlay::eDVBServicePlay(const eServiceReference &ref, eDVBService *serv
 	m_subtitle_sync_timer(eTimer::create(eApp)),
 	m_nownext_timer(eTimer::create(eApp)),
 	m_precise_recovery_timer(eTimer::create(eApp)),
+	m_cw_wait_timer(eTimer::create(eApp)),
+	m_cw_wait_active(false),
+	m_cw_wait_elapsed_ms(0),
+	m_cw_wait_settle_at_ms(-1),
+	m_cw_wait_settle_ms(0),
+	m_cw_wait_max_ms(0),
 	m_stream_corruption_detected(false),
 	m_original_timeshift_delay(0)
 {
@@ -1159,6 +1165,7 @@ eDVBServicePlay::eDVBServicePlay(const eServiceReference &ref, eDVBService *serv
 	CONNECT(m_passthrough_fix_timer->timeout, eDVBServicePlay::forcePassthrough);
 #endif
 	CONNECT(m_precise_recovery_timer->timeout, eDVBServicePlay::startPreciseRecoveryCheck);
+	CONNECT(m_cw_wait_timer->timeout, eDVBServicePlay::cwWaitPoll);
 }
 
 eDVBServicePlay::~eDVBServicePlay()
@@ -1773,6 +1780,7 @@ RESULT eDVBServicePlay::start()
 
 RESULT eDVBServicePlay::stop()
 {
+	cwWaitStop();
 		/* add bookmark for last play position */
 		/* m_cutlist_enabled bit 2 is the "don't remember bit" */
 	if (m_is_pvr && ((m_cutlist_enabled & 2) == 0))
@@ -3726,6 +3734,103 @@ void eDVBServicePlay::switchToTimeshift()
 	updateDecoder(true); /* mainly to switch off PCR, and to set pause */
 }
 
+static bool zapWaitForKeyEnabled()
+{
+	/* default on for the Octagon SF4008 only: its decoder shows block garbage until the
+	 * first control word of a scrambled service arrives */
+	return eSimpleConfig::getBool("config.misc.zapwaitcw", strcmp(BOXTYPE, "sf4008") == 0);
+}
+
+void eDVBServicePlay::cwWaitStart(const std::vector<std::pair<int, int> > &ecms)
+{
+	m_cw_wait_ecms = ecms;
+	m_cw_wait_elapsed_ms = 0;
+	m_cw_wait_settle_at_ms = -1;
+	m_cw_wait_settle_ms = eSimpleConfig::getInt("config.misc.zapwaitcw_settle", 700);
+	m_cw_wait_max_ms = eSimpleConfig::getInt("config.misc.zapwaitcw_max", 3000);
+	/* ecm.info written by a softcam is only trusted when it is newer than this moment,
+	 * with a little slack for the filesystem timestamp granularity */
+	clock_gettime(CLOCK_REALTIME, &m_cw_wait_start);
+	if (m_cw_wait_start.tv_nsec >= 50000000)
+		m_cw_wait_start.tv_nsec -= 50000000;
+	else
+	{
+		m_cw_wait_start.tv_sec -= 1;
+		m_cw_wait_start.tv_nsec += 950000000;
+	}
+	m_cw_wait_active = true;
+	m_cw_wait_timer->start(100, false);
+	eDebug("[eDVBServicePlay] zap: holding the decoder until a control word is written (settle %d ms, max %d ms)",
+		m_cw_wait_settle_ms, m_cw_wait_max_ms);
+}
+
+void eDVBServicePlay::cwWaitStop()
+{
+	m_cw_wait_timer->stop();
+	m_cw_wait_active = false;
+}
+
+/* true when /tmp/ecm.info was rewritten after the zap (the softcam removes it on a service
+ * change), belongs to a CAID of this program and carries a control word that is not all zero.
+ * The ECM pid is not compared: the PMT parser does not always know it. */
+bool eDVBServicePlay::cwWaitKeyReady()
+{
+	struct stat st;
+	if (stat("/tmp/ecm.info", &st) != 0)
+		return false;
+	if (st.st_mtim.tv_sec < m_cw_wait_start.tv_sec ||
+		(st.st_mtim.tv_sec == m_cw_wait_start.tv_sec && st.st_mtim.tv_nsec <= m_cw_wait_start.tv_nsec))
+		return false;
+	std::ifstream f("/tmp/ecm.info");
+	if (!f.is_open())
+		return false;
+	std::string line;
+	int caid = -1;
+	bool keyset = false;
+	while (std::getline(f, line))
+	{
+		unsigned int v = 0;
+		if (line.compare(0, 5, "caid:") == 0 && sscanf(line.c_str() + 5, " 0x%x", &v) == 1)
+			caid = v;
+		else if (line.compare(0, 4, "cw0:") == 0 || line.compare(0, 4, "cw1:") == 0)
+		{
+			for (size_t i = 4; i < line.size(); ++i)
+				if (line[i] != ' ' && line[i] != '0')
+				{
+					keyset = true;
+					break;
+				}
+		}
+	}
+	if (!keyset || caid < 0)
+		return false;
+	for (const auto &e : m_cw_wait_ecms)
+		if (e.first == caid)
+			return true;
+	return false;
+}
+
+void eDVBServicePlay::cwWaitPoll()
+{
+	if (!m_cw_wait_active)
+		return;
+	m_cw_wait_elapsed_ms += 100;
+	if (m_cw_wait_settle_at_ms < 0 && cwWaitKeyReady())
+	{
+		m_cw_wait_settle_at_ms = m_cw_wait_elapsed_ms;
+		eDebug("[eDVBServicePlay] zap: control word seen after %d ms", m_cw_wait_elapsed_ms);
+	}
+	bool settled = m_cw_wait_settle_at_ms >= 0 && (m_cw_wait_elapsed_ms - m_cw_wait_settle_at_ms) >= m_cw_wait_settle_ms;
+	bool timeout = m_cw_wait_elapsed_ms >= m_cw_wait_max_ms;
+	if (!settled && !timeout)
+		return;
+	if (timeout && !settled)
+		eDebug("[eDVBServicePlay] zap: no control word after %d ms, starting the decoder anyway", m_cw_wait_elapsed_ms);
+	cwWaitStop();
+	if (m_decoder)
+		m_decoder->play();
+}
+
 void eDVBServicePlay::updateDecoder(bool sendSeekableStateChanged)
 {
 	int vpid = -1, vpidtype = -1, pcrpid = -1, tpid = -1, achannel = -1, ac3_delay=-1, pcm_delay=-1;
@@ -3863,7 +3968,24 @@ void eDVBServicePlay::updateDecoder(bool sendSeekableStateChanged)
 			m_decoder->setRadioPic(radio_pic);
 		}
 
-		if (mustPlay)
+		bool holdForKey = false;
+		if (mustPlay && m_decoder_index == 0 && !(m_is_pvr || m_is_stream || m_timeshift_active) && zapWaitForKeyEnabled())
+		{
+			std::vector<std::pair<int, int> > ecms;
+			for (const auto &ca : program.caids)
+				ecms.push_back(std::make_pair((int)ca.caid, (int)ca.capid));
+			if (!ecms.empty())
+			{
+				cwWaitStart(ecms);
+				holdForKey = true;
+			}
+		}
+		else if (m_cw_wait_active)
+			holdForKey = true; /* pids changed while waiting: the decoder starts when the key is there */
+
+		if (holdForKey)
+			;
+		else if (mustPlay)
 			m_decoder->play();
 		else
 			m_decoder->set();

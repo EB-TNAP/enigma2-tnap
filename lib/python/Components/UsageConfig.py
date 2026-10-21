@@ -1577,6 +1577,12 @@ def InitUsageConfig():
 			("mute", _("Black screen")), ("hold", _("Hold screen")), ("mutetilllock", _("Black screen till locked")), ("holdtilllock", _("Hold till locked"))])
 		config.misc.zapmode.addNotifier(setZapmode, immediate_feedback=False)
 
+	# Hold the decoder after a zap to a scrambled service until the softcam has written a control word,
+	# so no block garbage is shown while the first key is still on its way. Read by eDVBServicePlay.
+	config.misc.zapwaitcw = ConfigYesNo(default=(BoxInfo.getItem("machinebuild") == "sf4008"))
+	config.misc.zapwaitcw_settle = ConfigSelection(default=700, choices=[(0, _("None")), (300, _("0.3 s")), (700, _("0.7 s")), (1000, _("1 s")), (1500, _("1.5 s")), (2000, _("2 s"))])
+	config.misc.zapwaitcw_max = ConfigSelection(default=3000, choices=[(1500, _("1.5 s")), (3000, _("3 s")), (5000, _("5 s"))])
+
 	config.usage.historymode = ConfigSelection(default='1', choices=[('0', _('Just zap')), ('1', _('Show menu'))])
 	config.usage.zapHistorySort = ConfigSelection(default=0, choices=[(0, _("Most recent first")), (1, _("Most recent last"))])
 

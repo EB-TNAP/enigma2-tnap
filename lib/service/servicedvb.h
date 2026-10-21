@@ -333,6 +333,22 @@ protected:
 	ePtr<eTimer> m_nownext_timer;
 	void updateEpgCacheNowNext();
 
+	/* Keep the decoder stopped after a zap to a scrambled service until the softcam has
+	 * written a control word for it (ecm.info), so the decoder never ingests scrambled
+	 * data and shows block garbage until the first key arrives. */
+	ePtr<eTimer> m_cw_wait_timer;
+	bool m_cw_wait_active;
+	struct timespec m_cw_wait_start;
+	int m_cw_wait_elapsed_ms;
+	int m_cw_wait_settle_at_ms;
+	int m_cw_wait_settle_ms;
+	int m_cw_wait_max_ms;
+	std::vector<std::pair<int, int> > m_cw_wait_ecms; /* caid, ecm pid of the current program */
+	void cwWaitStart(const std::vector<std::pair<int, int> > &ecms);
+	void cwWaitPoll();
+	void cwWaitStop();
+	bool cwWaitKeyReady();
+
 #ifdef PASSTHROUGH_FIX
 	ePtr<eTimer> m_passthrough_fix_timer;
 	void forcePassthrough();

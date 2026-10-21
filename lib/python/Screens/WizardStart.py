@@ -445,11 +445,13 @@ class AutoRestoreWizard(Screen):
 				# immediate crash on the next start (enigma2 enters "UI restart mode" expecting
 				# prior session shared state that no longer exists after SIGKILL).
 				print("[AutoRestore] Restoring backup:", self.filename)
+				from Plugins.SystemPlugins.SoftwareManager.BackupRestore import getNetworkRestartCommand
 				self.session.open(Console, title=_("Restoring..."),
 					cmdlist=[
 						"tar -xzvf " + self.filename + " -C /",
 						"sed -i 's/config\\.misc\\.RestartUI=.*/config.misc.RestartUI=False/' /etc/enigma2/settings 2>/dev/null || true",
 						"sync",
+						getNetworkRestartCommand(self.filename),
 						"killall -9 enigma2",
 					])
 		else:

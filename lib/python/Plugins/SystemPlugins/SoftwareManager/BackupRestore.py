@@ -34,6 +34,14 @@ def getBackupPath():
 		return backuppath + '/backup'
 
 
+def getNetworkRestartCommand(archive):
+	# A restore rewrites /etc/network/interfaces and the wpa_supplicant files on disk, but the running
+	# adapters keep the address they got before the restore (for example a DHCP lease on a fresh image)
+	# until the network is restarted.  Restart it before enigma2 is killed, but only when the archive
+	# actually contains network configuration.
+	return "if tar -tzf '" + archive + "' 2>/dev/null | grep -qE '^(\\./)?etc/(network/interfaces|wpa_supplicant)'; then [ -x /etc/init.d/netrestarter ] && /etc/init.d/netrestarter restart; fi; true"
+
+
 def getBackupFilename():
 	# TNAP: Create descriptive backup filename with image, model, and date
 	# Format: TNAP-7-sf8008-20260216-0829.tar.gz
@@ -395,6 +403,7 @@ class RestoreMenu(Screen):
 				"tar -xzvf " + self.path + "/" + self.sel + " -C /",
 				"sed -i 's/config\\.misc\\.RestartUI=.*/config.misc.RestartUI=False/' /etc/enigma2/settings 2>/dev/null || true",
 				"sync",
+				getNetworkRestartCommand(self.path + "/" + self.sel),
 				"killall -9 enigma2",
 			])
 
@@ -446,9 +455,9 @@ class RestoreScreen(ConfigListScreen, Screen):
 
 	def doRestore(self):
 		if path.exists("/proc/stb/vmpeg/0/dst_width"):
-			restorecmdlist = ["tar -xzvf " + self.fullbackupfilename + " -C /", "echo 0 > /proc/stb/vmpeg/0/dst_height", "echo 0 > /proc/stb/vmpeg/0/dst_left", "echo 0 > /proc/stb/vmpeg/0/dst_top", "echo 0 > /proc/stb/vmpeg/0/dst_width", "killall -9 enigma2"]
+			restorecmdlist = ["tar -xzvf " + self.fullbackupfilename + " -C /", "echo 0 > /proc/stb/vmpeg/0/dst_height", "echo 0 > /proc/stb/vmpeg/0/dst_left", "echo 0 > /proc/stb/vmpeg/0/dst_top", "echo 0 > /proc/stb/vmpeg/0/dst_width", getNetworkRestartCommand(self.fullbackupfilename), "killall -9 enigma2"]
 		else:
-			restorecmdlist = ["tar -xzvf " + self.fullbackupfilename + " -C /", "killall -9 enigma2"]
+			restorecmdlist = ["tar -xzvf " + self.fullbackupfilename + " -C /", getNetworkRestartCommand(self.fullbackupfilename), "killall -9 enigma2"]
 		if self.finished_cb:
 			self.session.openWithCallback(self.finished_cb, Console, title=_("Restoring..."), cmdlist=restorecmdlist)
 		else:

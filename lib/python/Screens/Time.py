@@ -49,31 +49,33 @@ class Time(Setup):
 		Setup.selectionChanged(self)
 
 	def useGeolocation(self):
-		geolocationData = geolocation.getGeolocationData(fields="status,message,timezone,proxy")
-		if geolocationData.get("proxy", True):
-			self.setFootnote(_("Geolocation data is not available."))
-			return
-		tz = geolocationData.get("timezone", None)
-		if tz is None:
-			self.setFootnote(_("Geolocation data does not contain time zone information."))
-		else:
-			areaItem = None
-			valItem = None
-			for item in self["config"].list:
-				if item[1] is config.timezone.area:
-					areaItem = item
-				if item[1] is config.timezone.val:
-					valItem = item
-			area, zone = tz.split("/", 1)
-			config.timezone.area.value = area
-			if areaItem is not None:
-				areaItem[1].changed()
-			self["config"].invalidate(areaItem)
-			config.timezone.val.value = zone
-			if valItem is not None:
-				valItem[1].changed()
-			self["config"].invalidate(valItem)
-			self.setFootnote(_("Geolocation data has been used to set the time zone."))
+		def useGeolocationCallback(geolocationData):
+			if geolocationData.get("proxy", True):
+				self.setFootnote(_("Geolocation data is not available."))
+				return
+			tz = geolocationData.get("timezone", None)
+			if tz is None:
+				self.setFootnote(_("Geolocation data does not contain time zone information."))
+			else:
+				areaItem = None
+				valItem = None
+				for item in self["config"].list:
+					if item[1] is config.timezone.area:
+						areaItem = item
+					if item[1] is config.timezone.val:
+						valItem = item
+				area, zone = tz.split("/", 1)
+				config.timezone.area.value = area
+				if areaItem is not None:
+					areaItem[1].changed()
+				self["config"].invalidate(areaItem)
+				config.timezone.val.value = zone
+				if valItem is not None:
+					valItem[1].changed()
+				self["config"].invalidate(valItem)
+				self.setFootnote(_("Geolocation data has been used to set the time zone."))
+
+		geolocation.getGeolocationData(fields="status,message,timezone,proxy", screen=self, callback=useGeolocationCallback)
 
 	def yellow(self):  # Invoked from the Wizard.
 		self.useGeolocation()
@@ -243,32 +245,34 @@ class TimeWizard(ConfigListScreen, Screen, Rc):
 		self["config"].setList(self.list)
 
 	def useGeolocation(self):
-		geolocationData = geolocation.getGeolocationData(fields="status,message,timezone,proxy")
-		if geolocationData.get("proxy", True):
-			self["text"].setText(_("Geolocation is not available."))
-			return
-		tz = geolocationData.get("timezone", None)
-		if not tz:
-			self["text"].setText(_("Geolocation does not contain time zone information."))
-		else:
-			areaItem = None
-			valItem = None
-			for item in self["config"].list:
-				if item[1] is config.timezone.area:
-					areaItem = item
-				if item[1] is config.timezone.val:
-					valItem = item
-			area, zone = tz.split("/", 1)
-			config.timezone.area.value = area
-			if areaItem:
-				areaItem[1].changed()
-			self["config"].invalidate(areaItem)
-			config.timezone.val.value = zone
-			if valItem:
-				valItem[1].changed()
-			self["config"].invalidate(valItem)
-			self.updateTimeList()
-			self["text"].setText(_("Your local time has been set successfully. Settings has been saved.\n\nPress \"OK\" to continue wizard."))
+		def useGeolocationCallback(geolocationData):
+			if geolocationData.get("proxy", True):
+				self["text"].setText(_("Geolocation is not available."))
+				return
+			tz = geolocationData.get("timezone", None)
+			if not tz:
+				self["text"].setText(_("Geolocation does not contain time zone information."))
+			else:
+				areaItem = None
+				valItem = None
+				for item in self["config"].list:
+					if item[1] is config.timezone.area:
+						areaItem = item
+					if item[1] is config.timezone.val:
+						valItem = item
+				area, zone = tz.split("/", 1)
+				config.timezone.area.value = area
+				if areaItem:
+					areaItem[1].changed()
+				self["config"].invalidate(areaItem)
+				config.timezone.val.value = zone
+				if valItem:
+					valItem[1].changed()
+				self["config"].invalidate(valItem)
+				self.updateTimeList()
+				self["text"].setText(_("Your local time has been set successfully. Settings has been saved.\n\nPress \"OK\" to continue wizard."))
+
+		geolocation.getGeolocationData(fields="status,message,timezone,proxy", screen=self, callback=useGeolocationCallback)
 
 	def red(self):
 		self.close()

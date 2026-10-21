@@ -790,13 +790,26 @@ class GeolocationInformation(InformationBase):
 		self.setTitle(_("Geolocation Information"))
 		self.skinName.insert(0, "GeolocationInformation")
 		self.skinName.insert(0, "InformationGeolocation")
+		self.geolocationData = None
+
+	def fetchInformation(self):
+		def fetchInformationCallback(geolocationData):
+			self.geolocationData = geolocationData
+			for callback in self.onInformationUpdated:
+				if callable(callback):
+					callback()
+
+		self.informationTimer.stop()
+		geolocation.getGeolocationData(fields="continent,country,regionName,city,lat,lon,timezone,currency,isp,org,mobile,proxy,query", useCache=False, screen=self, callback=fetchInformationCallback)
 
 	def displayInformation(self):
 		info = []
 		info.append(formatLine("H", _("Geolocation information for %s %s") % getBoxDisplayName()))
 		info.append("")
-		geolocationData = geolocation.getGeolocationData(fields="continent,country,regionName,city,lat,lon,timezone,currency,isp,org,mobile,proxy,query", useCache=False)
-		if geolocationData.get("status", None) == "success":
+		geolocationData = self.geolocationData
+		if geolocationData is None:
+			info.append(formatLine("P1", _("Retrieving geolocation information...")))
+		elif geolocationData.get("status", None) == "success":
 			info.append(formatLine("S", _("Location information")))
 			if self.extraSpacing:
 				info.append("")
@@ -1022,7 +1035,9 @@ class NetworkInformation(InformationBase):
 		self.geolocationData = []
 
 	def useGeolocation(self):
-		geolocationData = geolocation.getGeolocationData(fields="isp,org,mobile,proxy,query", useCache=False)
+		geolocation.getGeolocationData(fields="isp,org,mobile,proxy,query", useCache=False, screen=self, callback=self.fetchGeolocationCallback)
+
+	def fetchGeolocationCallback(self, geolocationData):
 		info = []
 		if geolocationData.get("status", None) == "success":
 			info.append("")

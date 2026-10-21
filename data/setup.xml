@@ -635,7 +635,7 @@
 		<item text="Root squash" description="When enabled, map root to nobody (more secure). When disabled, full root access is available.">self.nfsRootSquash</item>
 	</setup>
 	<setup key="NetworkSamba" title="Samba Settings" allowDefault="yes">
-		<item text="Enable automatic shares" description="Select 'Yes' to allow each storage device detected to be authasMultiplePrioritiesomatically exported as samba share.">config.samba.enableAutoShare</item>
+		<item text="Enable automatic shares" description="Select 'Yes' to allow each storage device detected to be automatically exported as samba share.">config.samba.enableAutoShare</item>
 		<item text="Access mode" description="Select the mode of access, Read/Write or Read-Only, applied to all automatically exported Samba shares." conditional="config.samba.enableAutoShare.value">config.samba.autoShareAccess</item>
 		<item text="Allow guest access" description="When enabled, allow Samba network access without a password.">self.guest</item>
 		<item text="Workgroup name" description="Enter the workgroup name to be used by this receiver for Samba based connections. (Default is 'WORKGROUP'.)">self.workgroup</item>

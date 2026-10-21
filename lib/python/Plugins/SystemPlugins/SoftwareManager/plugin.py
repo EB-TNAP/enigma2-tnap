@@ -33,7 +33,7 @@ from Tools.LoadPixmap import LoadPixmap
 from Tools.NumericalTextInput import NumericalTextInput
 from enigma import ePicLoad, eRCInput, getPrevAsciiCode, eEnv
 from treq import collect, get
-from Plugins.SystemPlugins.SoftwareManager.BackupRestore import BackupSelection, RestoreMenu, BackupScreen, getBackupPath, getBackupFilename
+from Plugins.SystemPlugins.SoftwareManager.BackupRestore import BackupSelection, RestoreMenu, BackupScreen, RestoreScreen, getBackupPath, getBackupFilename
 from Plugins.SystemPlugins.SoftwareManager.SoftwareTools import iSoftwareTools
 from .ImageBackup import ImageBackup
 from Screens.FlashManager import FlashManager

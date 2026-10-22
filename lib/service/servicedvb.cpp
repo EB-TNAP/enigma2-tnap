@@ -3972,8 +3972,14 @@ void eDVBServicePlay::updateDecoder(bool sendSeekableStateChanged)
 		if (mustPlay && m_decoder_index == 0 && !(m_is_pvr || m_is_stream || m_timeshift_active) && zapWaitForKeyEnabled())
 		{
 			std::vector<std::pair<int, int> > ecms;
+			/* BISS (CAID 26xx) has no ECM stream: the softcam writes its fixed control word at
+			 * once and attaches the descrambler to the pids before the decoder is started.
+			 * Starting the decoder afterwards (what the hold does) leaves the picture black on
+			 * the SF4008, so BISS services are never held. Systems that send a fresh control
+			 * word every few seconds (PowerVu) recover and keep the hold. */
 			for (const auto &ca : program.caids)
-				ecms.push_back(std::make_pair((int)ca.caid, (int)ca.capid));
+				if ((ca.caid >> 8) != 0x26)
+					ecms.push_back(std::make_pair((int)ca.caid, (int)ca.capid));
 			if (!ecms.empty())
 			{
 				cwWaitStart(ecms);

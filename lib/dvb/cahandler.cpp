@@ -17,6 +17,17 @@
 #include <map>
 #include <vector>
 
+/* The satellite namespace carries a "frequency has a kHz fraction" flag in bit 14
+ * (see eDVBFrontendParameters::getHash). Softcam emulators (oscam-emu BISS hash)
+ * read the low 15 bits as a plain frequency in MHz and discard the namespace as
+ * invalid when it is outside a satellite band, so hand them the classic namespace. */
+static uint32_t softcamNamespace(uint32_t ns)
+{
+	if (((ns >> 16) & 0xFFFF) < 0xEEEE)
+		ns &= ~0x4000u;
+	return ns;
+}
+
 // Cache serviceId per DVB service reference to ensure softcam always sees the same ID
 // This prevents CW delivery issues when switching between StreamRelay and Live-TV
 static std::map<eServiceReferenceDVB, uint32_t> s_serviceId_cache;
@@ -1104,10 +1115,11 @@ int eDVBCAService::buildCAPMT(eTable<ProgramMapSection> *ptr)
 
 		tmp[0] = 0x81; // dvbnamespace
 		tmp[1] = 0x08;
-		tmp[2] = m_service.getDVBNamespace().get()>>24;
-		tmp[3]=(m_service.getDVBNamespace().get()>>16)&0xFF;
-		tmp[4]=(m_service.getDVBNamespace().get()>>8)&0xFF;
-		tmp[5]=m_service.getDVBNamespace().get()&0xFF;
+		const uint32_t ens = softcamNamespace(m_service.getDVBNamespace().get());
+		tmp[2] = ens>>24;
+		tmp[3]=(ens>>16)&0xFF;
+		tmp[4]=(ens>>8)&0xFF;
+		tmp[5]=ens&0xFF;
 		tmp[6]=m_service.getTransportStreamID().get()>>8;
 		tmp[7]=m_service.getTransportStreamID().get()&0xFF;
 		tmp[8]=m_service.getOriginalNetworkID().get()>>8;
@@ -1234,10 +1246,11 @@ int eDVBCAService::buildCAPMT(ePtr<eDVBService> &dvbservice)
 
 	m_capmt[pos++] = 0x81; // dvbnamespace
 	m_capmt[pos++] = 0x08;
-	m_capmt[pos++] = m_service.getDVBNamespace().get()>>24;
-	m_capmt[pos++] = (m_service.getDVBNamespace().get()>>16)&0xFF;
-	m_capmt[pos++] = (m_service.getDVBNamespace().get()>>8)&0xFF;
-	m_capmt[pos++] = m_service.getDVBNamespace().get()&0xFF;
+	const uint32_t ens = softcamNamespace(m_service.getDVBNamespace().get());
+	m_capmt[pos++] = ens>>24;
+	m_capmt[pos++] = (ens>>16)&0xFF;
+	m_capmt[pos++] = (ens>>8)&0xFF;
+	m_capmt[pos++] = ens&0xFF;
 	m_capmt[pos++] = m_service.getTransportStreamID().get()>>8;
 	m_capmt[pos++] = m_service.getTransportStreamID().get()&0xFF;
 	m_capmt[pos++] = m_service.getOriginalNetworkID().get()>>8;

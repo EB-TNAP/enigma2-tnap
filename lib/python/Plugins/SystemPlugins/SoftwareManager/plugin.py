@@ -33,7 +33,7 @@ from Tools.LoadPixmap import LoadPixmap
 from Tools.NumericalTextInput import NumericalTextInput
 from enigma import ePicLoad, eRCInput, getPrevAsciiCode, eEnv
 from treq import collect, get
-from Plugins.SystemPlugins.SoftwareManager.BackupRestore import BackupSelection, RestoreMenu, BackupScreen, RestoreScreen, getBackupPath, getBackupFilename, getBackupLocations
+from Plugins.SystemPlugins.SoftwareManager.BackupRestore import BackupSelection, RestoreMenu, BackupScreen, RestoreScreen, getBackupPath, getBackupFilename, getBackupLocations, getLatestBackup, getBackupArchiveProblem
 from Plugins.SystemPlugins.SoftwareManager.SoftwareTools import iSoftwareTools
 from .ImageBackup import ImageBackup
 from Screens.FlashManager import FlashManager
@@ -1802,9 +1802,14 @@ class BackupHelper(Screen):
 			self.session.openWithCallback(self.backupDone, BackupScreen, runBackup=True, closeOnSuccess=5)
 			doClose = False
 		elif self.args == 2:
-			if isfile(self.fullbackupfilename):
-				self.session.openWithCallback(self.startRestore, MessageBox, _("Are you sure you want to restore the backup?\nYour receiver will restart after the backup has been restored!"), default=False)
-				doClose = False
+			self.restoreArchive = getLatestBackup()
+			if self.restoreArchive:
+				problem = getBackupArchiveProblem(self.restoreArchive, needSettings=False)
+				if problem:
+					self.session.open(MessageBox, _("The newest backup %s is damaged (%s) and cannot be restored.") % (os.path.basename(self.restoreArchive), problem), MessageBox.TYPE_ERROR)
+				else:
+					self.session.openWithCallback(self.startRestore, MessageBox, _("Are you sure you want to restore the backup?\n%s\nYour receiver will restart after the backup has been restored!") % os.path.basename(self.restoreArchive), default=False)
+					doClose = False
 			else:
 				self.session.open(MessageBox, _("Sorry, no backups found!"), MessageBox.TYPE_INFO, timeout=10)
 		elif self.args == 3:
@@ -1856,7 +1861,7 @@ class BackupHelper(Screen):
 	def startRestore(self, ret=False):
 		if (ret is True):
 			self.exe = True
-			self.session.open(RestoreScreen, runRestore=True)
+			self.session.open(RestoreScreen, runRestore=True, archive=self.restoreArchive)
 		self.close()
 
 	def backupDone(self, retval=None):

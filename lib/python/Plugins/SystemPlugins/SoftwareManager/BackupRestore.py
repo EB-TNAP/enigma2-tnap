@@ -166,6 +166,24 @@ def publishBackupAlias(target, alias):
 		shutil.copyfile(target, alias)
 
 
+def getLatestBackup():
+	"""Full path of the newest settings backup in the backup folder, or None. Backup file names carry
+	the time they were made, so the file a restore needs cannot be derived from the current time.
+	The alias names (PLi-AutoBackup*, enigma2settingsbackup) are only used when nothing else is there."""
+	folder = getBackupPath()
+	found = []
+	aliases = []
+	try:
+		for name in listdir(folder):
+			full = path.join(folder, name)
+			if name.endswith(".tar.gz") and path.isfile(full):
+				(aliases if name.startswith(("PLi-AutoBackup", "enigma2settingsbackup")) else found).append((path.getmtime(full), full))
+	except OSError:
+		return None
+	candidates = found or aliases
+	return max(candidates)[1] if candidates else None
+
+
 def getBackupLocations():
 	"""[(description, mountpoint/)] of every mounted, writeable, non-memory storage under /media or
 	/mnt. Built from /proc/mounts as well as the harddisk manager: the manager lists a partition
@@ -606,7 +624,7 @@ class RestoreScreen(ConfigListScreen, Screen):
 		<widget name="config" position="10,10" size="330,250" transparent="1" scrollbarMode="showOnDemand" />
 		</screen>"""
 
-	def __init__(self, session, runRestore=False):
+	def __init__(self, session, runRestore=False, archive=None):
 		Screen.__init__(self, session)
 		self.setTitle(_("Restoring..."))
 		self.runRestore = runRestore
@@ -619,7 +637,7 @@ class RestoreScreen(ConfigListScreen, Screen):
 		self.finished_cb = None
 		self.backuppath = getBackupPath()
 		self.backupfile = getBackupFilename()
-		self.fullbackupfilename = self.backuppath + "/" + self.backupfile
+		self.fullbackupfilename = archive or self.backuppath + "/" + self.backupfile
 		self.list = []
 		ConfigListScreen.__init__(self, self.list)
 		if self.runRestore:

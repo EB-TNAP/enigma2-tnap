@@ -162,8 +162,10 @@ class NetworkManager:
 		try:
 			from Screens.MessageBox import MessageBox
 			from Tools.Notifications import AddNotification
-			text = "\n".join(_("Wi-Fi %s is enabled, but its Wi-Fi settings file %s is missing.") % (interface, conf) for interface, conf in missing)
-			text += "\n\n" + _("This usually happens after restoring a settings backup that did not include the Wi-Fi settings. Wi-Fi cannot connect until you set up the Wi-Fi network again in the network setup.")
+			# Short lines and the path on a line of its own: a long unbroken path cannot wrap
+			# and was cut off at the right edge of the MessageBox.
+			parts = [_("The Wi-Fi settings for %s are missing:") % interface + "\n" + conf for interface, conf in missing]
+			text = "\n\n".join(parts) + "\n\n" + _("Wi-Fi cannot connect.") + "\n" + _("This usually happens after restoring a settings backup\nthat did not include the Wi-Fi settings.") + "\n\n" + _("Please set up your Wi-Fi network again\nin the network setup.")
 			AddNotification(MessageBox, text, type=MessageBox.TYPE_WARNING, timeout=30)
 		except Exception as err:
 			print(f"[{MODULE_NAME}] warnMissingWpaConfigs: Error '{err}'!")

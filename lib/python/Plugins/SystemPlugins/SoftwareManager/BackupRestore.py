@@ -166,22 +166,28 @@ def publishBackupAlias(target, alias):
 		shutil.copyfile(target, alias)
 
 
-def getLatestBackup():
-	"""Full path of the newest settings backup in the backup folder, or None. Backup file names carry
-	the time they were made, so the file a restore needs cannot be derived from the current time.
-	The alias names (PLi-AutoBackup*, enigma2settingsbackup) are only used when nothing else is there."""
+def listBackups():
+	"""[(mtime, file name)] of the settings backups in the backup folder, newest first. The alias names
+	(PLi-AutoBackup*, enigma2settingsbackup) are copies of a backup on file systems without symlinks
+	(vfat), so they are only listed when nothing else is there; symlinks are never listed."""
 	folder = getBackupPath()
 	found = []
 	aliases = []
 	try:
 		for name in listdir(folder):
 			full = path.join(folder, name)
-			if name.endswith(".tar.gz") and path.isfile(full):
-				(aliases if name.startswith(("PLi-AutoBackup", "enigma2settingsbackup")) else found).append((path.getmtime(full), full))
+			if name.endswith(".tar.gz") and path.isfile(full) and not path.islink(full):
+				(aliases if name.startswith(("PLi-AutoBackup", "enigma2settingsbackup")) else found).append((path.getmtime(full), name))
 	except OSError:
-		return None
-	candidates = found or aliases
-	return max(candidates)[1] if candidates else None
+		return []
+	return sorted(found or aliases, reverse=True)
+
+
+def getLatestBackup():
+	"""Full path of the newest settings backup, or None. Backup file names carry the time they were made,
+	so the file a restore needs cannot be derived from the current time."""
+	backups = listBackups()
+	return path.join(getBackupPath(), backups[0][1]) if backups else None
 
 
 def getBackupLocations():
@@ -552,14 +558,8 @@ class RestoreMenu(Screen):
 		self.path = getBackupPath()
 		if (path.exists(self.path) == False):
 			makedirs(self.path)
-		for file in listdir(self.path):
-			if (file.endswith(".tar.gz")):
-				fullpath = path.join(self.path, file)
-				# Skip symlinks to avoid showing duplicates
-				if not path.islink(fullpath):
-					self.flist.append((file))
-					self.entry = True
-		self.flist.sort(reverse=True)
+		self.flist = [name for _mtime, name in listBackups()]
+		self.entry = bool(self.flist)
 		self["filelist"].l.setList(self.flist)
 
 	def KeyOk(self):
@@ -567,7 +567,11 @@ class RestoreMenu(Screen):
 			self.sel = self["filelist"].getCurrent()
 			if self.sel:
 				self.val = self.path + "/" + self.sel
-				self.session.openWithCallback(self.startRestore, MessageBox, _("Are you sure you want to restore\nthe following backup:\n%s\nYour receiver will restart after the backup has been restored!") % (self.sel))
+				problem = getBackupArchiveProblem(self.val, needSettings=False)
+				if problem:
+					self.session.open(MessageBox, _("The backup %s is damaged (%s) and cannot be restored.") % (self.sel, problem), MessageBox.TYPE_ERROR)
+					return
+				self.session.openWithCallback(self.startRestore, MessageBox, _("Are you sure you want to restore\nthe following backup:\n%s\nYour receiver will restart after the backup has been restored!") % (self.sel), default=False)
 
 	def keyCancel(self):
 		self.close()

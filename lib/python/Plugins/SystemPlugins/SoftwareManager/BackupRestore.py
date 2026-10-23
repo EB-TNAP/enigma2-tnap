@@ -45,7 +45,28 @@ def getBackupDirs():
 		for conf in sorted(extra):
 			if path.isfile(conf) and conf not in dirs:
 				dirs.append(conf)
-	return dirs
+	# The default list names files that most boxes do not have (for example /etc/wpa_supplicant.ath0.conf).
+	# tar reports those as errors and exits non-zero even though the backup is complete, so leave them out.
+	return [x for x in dirs if path.lexists(x)]
+
+
+def getBackupSetSize(dirs):
+	"""Uncompressed size in bytes of everything the backup will contain."""
+	total = 0
+	for item in dirs:
+		try:
+			if path.isdir(item) and not path.islink(item):
+				for root, subdirs, files in os.walk(item):
+					for name in files:
+						try:
+							total += os.lstat(path.join(root, name)).st_size
+						except OSError:
+							pass
+			else:
+				total += os.lstat(item).st_size
+		except OSError:
+			pass
+	return total
 
 
 def getBackupPath():
@@ -87,8 +108,8 @@ def findMount(pathname):
 	return best
 
 
-def getBackupLocationProblem(backuppath):
-	"""None when backuppath can take a settings backup, else the reason (translated)."""
+def getBackupLocationProblem(backuppath, needed=0):
+	"""None when backuppath can take a settings backup of needed bytes (uncompressed), else the reason (translated)."""
 	probe = backuppath
 	while probe and not path.exists(probe):
 		probe = path.dirname(probe)
@@ -101,23 +122,30 @@ def getBackupLocationProblem(backuppath):
 		return _("The backup location %s is not writeable.") % backuppath
 	try:
 		fs = os.statvfs(probe)
-		if fs.f_bavail * fs.f_frsize < MIN_BACKUP_FREE_BYTES:
-			return _("The backup location %s has less than %d MB free.") % (backuppath, MIN_BACKUP_FREE_BYTES // (1024 * 1024))
+		required = max(MIN_BACKUP_FREE_BYTES, 2 * needed)
+		if fs.f_bavail * fs.f_frsize < required:
+			return _("The backup location %s has %d MB free, but %d MB are needed for the backup.") % (backuppath, fs.f_bavail * fs.f_frsize // (1024 * 1024), (required + 1024 * 1024 - 1) // (1024 * 1024))
 	except OSError:
 		pass
 	return None
 
 
-def getBackupArchiveProblem(archive):
+def getBackupArchiveProblem(archive, needSettings=True):
 	"""None when the archive reads back completely, else the reason (a failed or cut-off write)."""
 	import subprocess
 	try:
-		result = subprocess.run(["tar", "-tzf", archive], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=300)
+		result = subprocess.run(["gzip", "-t", archive], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=300)
+		if result.returncode:
+			lines = result.stderr.decode("utf-8", "replace").strip().splitlines()
+			return lines[0] if lines else "gzip returned %d" % result.returncode
+		result = subprocess.run(["tar", "-tzf", archive], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
 	except Exception as err:
 		return str(err)
 	if result.returncode:
 		lines = result.stderr.decode("utf-8", "replace").strip().splitlines()
 		return lines[0] if lines else "tar returned %d" % result.returncode
+	if needSettings and not any(x.lstrip("./") == "etc/enigma2/settings" for x in result.stdout.decode("utf-8", "replace").splitlines()):
+		return "etc/enigma2/settings is missing from the archive"
 	return None
 
 
@@ -230,7 +258,8 @@ class BackupScreen(ConfigListScreen, Screen):
 		configfile.save()
 		if config.plugins.softwaremanager.epgcache.value:
 			eEPGCache.getInstance().save()
-		problem = getBackupLocationProblem(self.backuppath)
+		self.backupdirs = ' '.join(getBackupDirs())
+		problem = getBackupLocationProblem(self.backuppath, getBackupSetSize(self.backupdirs.split(' ')))
 		if problem:
 			print("[BackupRestore] doBackup: %s" % problem.replace("\n", " "))
 			if self.finished_cb:
@@ -241,7 +270,6 @@ class BackupScreen(ConfigListScreen, Screen):
 		try:
 			if (path.exists(self.backuppath) == False):
 				makedirs(self.backuppath)
-			self.backupdirs = ' '.join(getBackupDirs())
 			# TNAP: Filename already includes date, no need to rename old backup
 			if self.finished_cb:
 				self.session.openWithCallback(self.finished_cb, Console, title=_("Backup is running..."), cmdlist=["tar -czvf " + self.fullbackupfilename + " " + self.backupdirs], finishedCallback=self.backupFinishedCB, closeOnSuccess=True)
@@ -273,8 +301,7 @@ class BackupScreen(ConfigListScreen, Screen):
 					remove(self.fullbackupfilename)
 				except OSError:
 					pass
-				self.session.open(MessageBox, _("The backup was not completed and has been deleted (%s).\nCheck that the backup location has enough free space.") % problem, MessageBox.TYPE_ERROR)
-				self.close(False)
+				self.session.openWithCallback(self.backupErrorCB, MessageBox, _("The backup was not completed and has been deleted (%s).\nCheck that the backup location has enough free space.") % problem, MessageBox.TYPE_ERROR)
 				return
 
 			# Get MAC address for PLi-AutoBackup naming

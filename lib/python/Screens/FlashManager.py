@@ -496,9 +496,22 @@ class FlashImage(Screen):
 	def startBackupSettings(self, answer):
 		if answer:
 			if answer == "backup" or answer is True:
-				self.session.openWithCallback(self.flashPostAction, BackupScreen, runBackup=True)
+				self.session.openWithCallback(self.backupSettingsDone, BackupScreen, runBackup=True)
 			else:
 				self.flashPostAction()
+		else:
+			self.keyCancel()
+
+	def backupSettingsDone(self, retVal=True):
+		if retVal:
+			self.flashPostAction()
+		else:
+			# Never carry on silently: the settings would be lost if the flash goes ahead without a backup.
+			self.session.openWithCallback(self.flashWithoutBackupAnswer, MessageBox, _("The settings backup failed. Flash anyway?"), default=False, title=self.getTitle())
+
+	def flashWithoutBackupAnswer(self, answer):
+		if answer:
+			self.flashPostAction()
 		else:
 			self.keyCancel()
 

@@ -149,6 +149,19 @@ def getBackupArchiveProblem(archive, needSettings=True):
 	return None
 
 
+def publishBackupAlias(target, alias):
+	"""Make alias point at the backup file target: a symlink, or on a file system that cannot hold one
+	(vfat, the usual format of USB sticks) a copy. The first-boot auto restore and the restore wizard
+	look the backup up by these alias names, and by .timestamp, so they must exist on every stick."""
+	import shutil
+	if path.lexists(alias):
+		remove(alias)
+	try:
+		os.symlink(path.basename(target), alias)
+	except OSError:
+		shutil.copyfile(target, alias)
+
+
 def getBackupLocations():
 	"""[(description, mountpoint/)] of every mounted, writeable, non-memory storage under /media or
 	/mnt. Built from /proc/mounts as well as the harddisk manager: the manager lists a partition
@@ -304,6 +317,11 @@ class BackupScreen(ConfigListScreen, Screen):
 				self.session.openWithCallback(self.backupErrorCB, MessageBox, _("The backup was not completed and has been deleted (%s).\nCheck that the backup location has enough free space.") % problem, MessageBox.TYPE_ERROR)
 				return
 
+			# The auto restore only trusts a backup directory that has a .timestamp file
+			timestamp_file = path.join(self.backuppath, ".timestamp")
+			with open(timestamp_file, "w") as f:
+				f.write(str(int(time.time())))
+
 			# Get MAC address for PLi-AutoBackup naming
 			macaddr = ""
 			try:
@@ -314,11 +332,8 @@ class BackupScreen(ConfigListScreen, Screen):
 
 			# Create enigma2settingsbackup.tar.gz symlink (for old restore scripts)
 			enigma2_link = path.join(self.backuppath, "enigma2settingsbackup.tar.gz")
-			if path.exists(enigma2_link):
-				if path.islink(enigma2_link) or path.isfile(enigma2_link):
-					os.remove(enigma2_link)
-			os.symlink(self.backupfile, enigma2_link)
-			print("[BackupRestore] Created symlink: enigma2settingsbackup.tar.gz ->", self.backupfile)
+			publishBackupAlias(self.fullbackupfilename, enigma2_link)
+			print("[BackupRestore] Published enigma2settingsbackup.tar.gz ->", self.backupfile)
 
 			# Create PLi-AutoBackup symlink (for OpenPli restore compatibility)
 			if macaddr:
@@ -326,16 +341,8 @@ class BackupScreen(ConfigListScreen, Screen):
 			else:
 				autobackup_link = path.join(self.backuppath, "PLi-AutoBackup.tar.gz")
 
-			if path.exists(autobackup_link):
-				if path.islink(autobackup_link) or path.isfile(autobackup_link):
-					os.remove(autobackup_link)
-			os.symlink(self.backupfile, autobackup_link)
-			print("[BackupRestore] Created symlink: PLi-AutoBackup ->", self.backupfile)
-
-			# Create timestamp file
-			timestamp_file = path.join(self.backuppath, ".timestamp")
-			with open(timestamp_file, "w") as f:
-				f.write(str(int(time.time())))
+			publishBackupAlias(self.fullbackupfilename, autobackup_link)
+			print("[BackupRestore] Published PLi-AutoBackup ->", self.backupfile)
 
 			# TNAP: Create autoinstall file with package list
 			print("[BackupRestore] Creating autoinstall file...")
@@ -367,10 +374,7 @@ class BackupScreen(ConfigListScreen, Screen):
 				# Create autoinstall symlink (without MAC address for compatibility)
 				autoinstall_link = path.join(self.backuppath, "autoinstall")
 				if macaddr and autoinstall_file != autoinstall_link:
-					if path.exists(autoinstall_link):
-						if path.islink(autoinstall_link) or path.isfile(autoinstall_link):
-							os.remove(autoinstall_link)
-					os.symlink(path.basename(autoinstall_file), autoinstall_link)
+					publishBackupAlias(autoinstall_file, autoinstall_link)
 
 				print("[BackupRestore] Created autoinstall file with %d packages" % len(extra_packages))
 			else:

@@ -45,6 +45,10 @@ def getBackupDirs():
 		for conf in sorted(extra):
 			if path.isfile(conf) and conf not in dirs:
 				dirs.append(conf)
+	# Softcam keys (SoftCam.Key and any other key file) must survive a flash even when a saved selection
+	# from an older image does not name /usr/keys/.
+	if "/usr/keys" not in dirs and "/usr/keys/" not in dirs:
+		dirs.extend(x for x in sorted(glob("/usr/keys/*")) if x not in dirs and " " not in x)
 	# The default list names files that most boxes do not have (for example /etc/wpa_supplicant.ath0.conf).
 	# tar reports those as errors and exits non-zero even though the backup is complete, so leave them out.
 	return [x for x in dirs if path.lexists(x)]

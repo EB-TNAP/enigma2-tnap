@@ -13,6 +13,7 @@ from Components.ConfigList import ConfigList, ConfigListScreen
 from Components.FileList import MultiFileSelectList
 from enigma import eEnv, eEPGCache
 from Tools.Directories import *
+import os
 from os import path, makedirs, listdir, stat, rename, remove
 from glob import glob
 from datetime import date
@@ -53,6 +54,100 @@ def getBackupPath():
 		return backuppath + 'backup'
 	else:
 		return backuppath + '/backup'
+
+
+# File systems that live in memory: a backup written there is lost at the next reboot, and the
+# small ones (/media is a 64 KB tmpfs on TNAP until a disk is mounted) cut the archive off.
+VOLATILE_FILESYSTEMS = ("tmpfs", "ramfs", "devtmpfs")
+MIN_BACKUP_FREE_BYTES = 8 * 1024 * 1024
+
+
+def readMounts():
+	mounts = []
+	try:
+		with open("/proc/mounts") as fd:
+			for line in fd:
+				fields = line.split()
+				if len(fields) >= 3:
+					mounts.append((fields[0], fields[1].replace("\\040", " "), fields[2]))
+	except OSError:
+		pass
+	return mounts
+
+
+def findMount(pathname):
+	"""The (device, mountpoint, filesystem) the given path lives on, or None."""
+	pathname = path.realpath(pathname)
+	best = None
+	for mount in readMounts():
+		mountpoint = mount[1]
+		if pathname == mountpoint or pathname.startswith(mountpoint.rstrip("/") + "/"):
+			if best is None or len(mountpoint) >= len(best[1]):
+				best = mount
+	return best
+
+
+def getBackupLocationProblem(backuppath):
+	"""None when backuppath can take a settings backup, else the reason (translated)."""
+	probe = backuppath
+	while probe and not path.exists(probe):
+		probe = path.dirname(probe)
+	if not probe:
+		return _("The backup location does not exist.")
+	mount = findMount(probe)
+	if mount and mount[2] in VOLATILE_FILESYSTEMS:
+		return _("The backup location %s is in the receiver's memory (%s), not on a disk or USB stick. A backup saved there would be incomplete and lost at the next restart.\n\nSelect a backup location first: Software management - Advanced options - Select backup location.") % (backuppath, mount[2])
+	if not os.access(probe, os.W_OK):
+		return _("The backup location %s is not writeable.") % backuppath
+	try:
+		fs = os.statvfs(probe)
+		if fs.f_bavail * fs.f_frsize < MIN_BACKUP_FREE_BYTES:
+			return _("The backup location %s has less than %d MB free.") % (backuppath, MIN_BACKUP_FREE_BYTES // (1024 * 1024))
+	except OSError:
+		pass
+	return None
+
+
+def getBackupArchiveProblem(archive):
+	"""None when the archive reads back completely, else the reason (a failed or cut-off write)."""
+	import subprocess
+	try:
+		result = subprocess.run(["tar", "-tzf", archive], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=300)
+	except Exception as err:
+		return str(err)
+	if result.returncode:
+		lines = result.stderr.decode("utf-8", "replace").strip().splitlines()
+		return lines[0] if lines else "tar returned %d" % result.returncode
+	return None
+
+
+def getBackupLocations():
+	"""[(description, mountpoint/)] of every mounted, writeable, non-memory storage under /media or
+	/mnt. Built from /proc/mounts as well as the harddisk manager: the manager lists a partition
+	under the mount point it has in /etc/fstab, and drops it when the stick is mounted elsewhere
+	(for example an fstab entry for /media/hdd while udev mounted the stick on /media/usb)."""
+	locations = {}
+	try:
+		from Components.Harddisk import harddiskmanager
+		for part in harddiskmanager.getMountedPartitions(onlyhotplug=False):
+			if part.mountpoint and part.mountpoint != "/":
+				locations[path.join(part.mountpoint, "")] = part.description or part.mountpoint
+	except Exception as err:
+		print("[BackupRestore] getBackupLocations: Error '%s'!" % err)
+	for device, mountpoint, fstype in readMounts():
+		if fstype in VOLATILE_FILESYSTEMS or not mountpoint.startswith(("/media/", "/mnt/")):
+			continue
+		if not (device.startswith("/dev/") or fstype in ("nfs", "nfs4", "cifs", "smb3", "fuse", "fuseblk")):
+			continue
+		locations.setdefault(path.join(mountpoint, ""), "%s (%s)" % (path.basename(mountpoint.rstrip("/")), device))
+	result = []
+	for mountpoint in sorted(locations):
+		mount = findMount(mountpoint)
+		if mount and mount[2] in VOLATILE_FILESYSTEMS:
+			continue
+		if path.isdir(mountpoint) and os.access(mountpoint, os.W_OK):
+			result.append((locations[mountpoint] + "\t" + mountpoint, mountpoint))
+	return result
 
 
 def getNetworkRestartCommand(archive):
@@ -135,6 +230,14 @@ class BackupScreen(ConfigListScreen, Screen):
 		configfile.save()
 		if config.plugins.softwaremanager.epgcache.value:
 			eEPGCache.getInstance().save()
+		problem = getBackupLocationProblem(self.backuppath)
+		if problem:
+			print("[BackupRestore] doBackup: %s" % problem.replace("\n", " "))
+			if self.finished_cb:
+				self.session.openWithCallback(self.finished_cb, MessageBox, problem, MessageBox.TYPE_ERROR)
+			else:
+				self.session.openWithCallback(self.backupErrorCB, MessageBox, problem, MessageBox.TYPE_ERROR)
+			return
 		try:
 			if (path.exists(self.backuppath) == False):
 				makedirs(self.backuppath)
@@ -158,6 +261,19 @@ class BackupScreen(ConfigListScreen, Screen):
 
 			if not path.exists(self.fullbackupfilename):
 				print("[BackupRestore] Backup file not found:", self.fullbackupfilename)
+				self.close(False)
+				return
+
+			# A full disk or a killed tar leaves a cut-off archive that still exists: never keep it,
+			# and never point the restore symlinks at it.
+			problem = getBackupArchiveProblem(self.fullbackupfilename)
+			if problem:
+				print("[BackupRestore] Backup %s is incomplete: %s" % (self.fullbackupfilename, problem))
+				try:
+					remove(self.fullbackupfilename)
+				except OSError:
+					pass
+				self.session.open(MessageBox, _("The backup was not completed and has been deleted (%s).\nCheck that the backup location has enough free space.") % problem, MessageBox.TYPE_ERROR)
 				self.close(False)
 				return
 

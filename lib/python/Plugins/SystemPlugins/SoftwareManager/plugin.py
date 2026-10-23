@@ -33,7 +33,7 @@ from Tools.LoadPixmap import LoadPixmap
 from Tools.NumericalTextInput import NumericalTextInput
 from enigma import ePicLoad, eRCInput, getPrevAsciiCode, eEnv
 from treq import collect, get
-from Plugins.SystemPlugins.SoftwareManager.BackupRestore import BackupSelection, RestoreMenu, BackupScreen, RestoreScreen, getBackupPath, getBackupFilename
+from Plugins.SystemPlugins.SoftwareManager.BackupRestore import BackupSelection, RestoreMenu, BackupScreen, RestoreScreen, getBackupPath, getBackupFilename, getBackupLocations
 from Plugins.SystemPlugins.SoftwareManager.SoftwareTools import iSoftwareTools
 from .ImageBackup import ImageBackup
 from Screens.FlashManager import FlashManager
@@ -294,10 +294,11 @@ class UpdatePluginMenu(Screen):
 				if (currentEntry == "opkg-manager"):
 					self.session.open(PacketManager, self.skin_path)
 				elif (currentEntry == "backuplocation"):
-					parts = [(r.description, r.mountpoint, self.session) for r in harddiskmanager.getMountedPartitions(onlyhotplug=False)]
-					parts = [x for x in parts if os.access(x[1], os.F_OK | os.R_OK | os.W_OK) and x[1] != '/']
+					parts = getBackupLocations()
 					if len(parts):
 						self.session.openWithCallback(self.backuplocation_choosen, ChoiceBox, title=_("Please select medium to use as backup location"), list=parts)
+					else:
+						self.session.open(MessageBox, _("No writeable disk, USB stick or network share is mounted.\nConnect a storage device and try again."), MessageBox.TYPE_INFO, timeout=10)
 				elif (currentEntry == "backupfiles"):
 					self.session.openWithCallback(self.backupfiles_choosen, BackupSelection)
 				elif (currentEntry == "advancedrestore"):
@@ -1814,12 +1815,11 @@ class BackupHelper(Screen):
 			except ImportError:
 				self.session.open(MessageBox, _("Sorry, %s has not been installed!") % ("MediaScanner"), MessageBox.TYPE_INFO, timeout=10)
 		elif self.args == 5:
-			parts = [(r.description, r.mountpoint, self.session) for r in harddiskmanager.getMountedPartitions(onlyhotplug=False)]
-			for x in parts:
-				if not os.access(x[1], os.F_OK | os.R_OK | os.W_OK) or x[1] == '/':
-					parts.remove(x)
+			parts = getBackupLocations()
 			if len(parts):
 				self.session.openWithCallback(self.backuplocation_choosen, ChoiceBox, title=_("Please select medium to use as backup location"), list=parts)
+			else:
+				self.session.open(MessageBox, _("No writeable disk, USB stick or network share is mounted.\nConnect a storage device and try again."), MessageBox.TYPE_INFO, timeout=10)
 		elif self.args == 6:
 			self.session.openWithCallback(self.backupfiles_choosen, BackupSelection)
 		elif self.args == 7:

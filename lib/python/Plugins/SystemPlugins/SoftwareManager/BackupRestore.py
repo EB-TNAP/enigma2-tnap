@@ -14,6 +14,7 @@ from Components.FileList import MultiFileSelectList
 from enigma import eEnv, eEPGCache
 from Tools.Directories import *
 from os import path, makedirs, listdir, stat, rename, remove
+from glob import glob
 from datetime import date
 
 config.plugins.configurationbackup = ConfigSubsection()
@@ -24,6 +25,26 @@ config.plugins.configurationbackup.backuplocation = ConfigText(default='/media/h
 # restoring after an image upgrade overwrites the new kernel's modules with
 # incompatible ones, causing enigma2 or the system to crash at boot.
 config.plugins.configurationbackup.backupdirs = ConfigLocations(default=[eEnv.resolve('${sysconfdir}/enigma2/'), '/etc/network/interfaces', '/etc/wpa_supplicant.conf', '/etc/wpa_supplicant.ath0.conf', '/etc/wpa_supplicant.wlan0.conf', "/etc/resolv.conf", '/etc/enigma2/nameserversdns.conf', '/etc/default_gw', '/etc/hostname', '/etc/wireguard/', '/etc/tuxbox/config/', '/etc/samba/', '/etc/epgimport/', '/etc/exports', '/etc/hosts', '/usr/script/', '/usr/keys/', '/home/root/.ssh/'])
+
+
+def getBackupDirs():
+	# The user's saved backup selection overrides the default list above, and saved selections from
+	# older images (or customised ones) lack /etc/wpa_supplicant.<iface>.conf. Such a backup restores an
+	# /etc/network/interfaces whose pre-up starts wpa_supplicant with a config file that is not there,
+	# leaving the box with no Wi-Fi after the restore. So whenever the interfaces file is backed up,
+	# every wpa_supplicant config it references, and every one present in /etc, goes with it.
+	dirs = list(config.plugins.configurationbackup.backupdirs.value)
+	if "/etc/network/interfaces" in dirs:
+		extra = set(glob("/etc/wpa_supplicant*.conf"))
+		try:
+			from Components.NetworkManager import wpaConfigsReferenced
+			extra.update(conf for interface, conf, auto in wpaConfigsReferenced())
+		except Exception as err:
+			print("[BackupRestore] getBackupDirs: Error '%s'!" % err)
+		for conf in sorted(extra):
+			if path.isfile(conf) and conf not in dirs:
+				dirs.append(conf)
+	return dirs
 
 
 def getBackupPath():
@@ -117,7 +138,7 @@ class BackupScreen(ConfigListScreen, Screen):
 		try:
 			if (path.exists(self.backuppath) == False):
 				makedirs(self.backuppath)
-			self.backupdirs = ' '.join(config.plugins.configurationbackup.backupdirs.value)
+			self.backupdirs = ' '.join(getBackupDirs())
 			# TNAP: Filename already includes date, no need to rename old backup
 			if self.finished_cb:
 				self.session.openWithCallback(self.finished_cb, Console, title=_("Backup is running..."), cmdlist=["tar -czvf " + self.fullbackupfilename + " " + self.backupdirs], finishedCallback=self.backupFinishedCB, closeOnSuccess=True)

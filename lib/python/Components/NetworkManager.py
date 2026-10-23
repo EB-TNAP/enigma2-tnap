@@ -147,6 +147,26 @@ class NetworkManager:
 		self.loadNameservers()
 		self.networkCheck = NetworkCheck()
 		self.networkCheck.start()
+		self.warnMissingWpaConfigs()
+
+	def warnMissingWpaConfigs(self):
+		# A settings backup made with a saved (older or customised) backup selection may hold
+		# /etc/network/interfaces but not /etc/wpa_supplicant.<iface>.conf. Restoring it leaves
+		# an "auto" Wi-Fi interface whose pre-up starts wpa_supplicant with a file that is not
+		# there: Wi-Fi never associates and the box has no network after the restore.
+		missing = [(interface, conf) for interface, conf in missingWpaConfigs() if exists(f"{sysfsNet}/{interface}")]
+		if not missing:
+			return
+		for interface, conf in missing:
+			print(f"[{MODULE_NAME}] Wi-Fi {interface} is enabled but '{conf}' is missing - Wi-Fi cannot connect.")
+		try:
+			from Screens.MessageBox import MessageBox
+			from Tools.Notifications import AddNotification
+			text = "\n".join(_("Wi-Fi %s is enabled, but its Wi-Fi settings file %s is missing.") % (interface, conf) for interface, conf in missing)
+			text += "\n\n" + _("This usually happens after restoring a settings backup that did not include the Wi-Fi settings. Wi-Fi cannot connect until you set up the Wi-Fi network again in the network setup.")
+			AddNotification(MessageBox, text, type=MessageBox.TYPE_WARNING, timeout=30)
+		except Exception as err:
+			print(f"[{MODULE_NAME}] warnMissingWpaConfigs: Error '{err}'!")
 
 	def load(self):
 		self.log("load: Starting full configuration/state load.")
@@ -1541,6 +1561,39 @@ def readNetinfoInterfaces() -> dict:
 
 def isWirelessName(iface: str) -> bool:
 	return bool(match(r"(wlan|ath|ra|wl)\d+", iface))
+
+
+def wpaConfigsReferenced(text: str | None = None) -> list[tuple[str, str, bool]]:
+	"""(interface, wpa_supplicant config path, interface is "auto") for every
+	wpa_supplicant start found in /etc/network/interfaces (or in text)."""
+	if text is None:
+		try:
+			with open(interfacesFile, encoding="utf-8", errors="replace") as fd:
+				text = fd.read()
+		except OSError:
+			return []
+	autoIfaces = set()
+	result = []
+	current = ""
+	for line in text.splitlines():
+		words = line.split()
+		if not words or words[0].startswith("#"):
+			continue
+		if words[0] in ("auto", "allow-hotplug"):
+			autoIfaces.update(words[1:])
+		elif words[0] == "iface" and len(words) > 1:
+			current = words[1]
+		elif "wpa_supplicant" in line:
+			conf = compile(r"\s-c\s*(\S+)").search(line)
+			iface = compile(r"\s-i\s*(\S+)").search(line)
+			if conf:
+				result.append(((iface.group(1) if iface else current), conf.group(1)))
+	return [(interface, conf, interface in autoIfaces) for interface, conf in result]
+
+
+def missingWpaConfigs(text: str | None = None) -> list[tuple[str, str]]:
+	"""Enabled ("auto") interfaces whose wpa_supplicant config file does not exist."""
+	return [(interface, conf) for interface, conf, auto in wpaConfigsReferenced(text) if auto and not exists(conf)]
 
 
 def parseIp4(text: str) -> list[int]:

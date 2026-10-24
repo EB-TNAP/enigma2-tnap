@@ -648,7 +648,7 @@
 		<item level="0" text="Enabled" description="When enabled, connection via saved network is attempted when the Wi-Fi adapter connects.">self.cfgEnabled</item>
 		<item level="0" text="Priority" description="Preferred connection priority when multiple Wi-Fi profiles are configured. Lower numbers have a higher priority." conditional="self.hasMultiplePriorities">self.cfgPriority</item>
 		<item level="1" text="Hidden network" description="When enabled, allow connection to access points that don't broadcast their SSID.">self.cfgHidden</item>
-		<item level="0" text="Encryption" description="Select the security protocol that will be used to access the selected wireless network.">self.cfgEncryption</item>
+		<item level="0" text="Encryption" description="Select the security protocol that will be used to access the selected wireless network. WPA2 works with WPA2 and WPA2/WPA3 routers and is recommended. WPA2/WPA3 uses WPA3 whenever the router offers it; choose WPA2 if the connection drops under load. Use WPA3 only for a router that accepts WPA3 alone.">self.cfgEncryption</item>
 		<if conditional="self.cfgEncryption.value != 'none'">
 			<item level="0" text="Password / Key" description="Enter the password, pass-phrase or pre-shared key for the selected wireless network.">self.cfgKey</item>
 		</if>

@@ -83,8 +83,20 @@ def applyAdapterChange(interface: str, change: int, callback):
 			afterRestartCallback()
 
 
+# Encryption a new connection starts with, given what the access point offers. A router in WPA3
+# transition mode (often labelled "WPA3-Personal") offers SAE and PSK side by side; with
+# "WPA2/WPA3" wpa_supplicant then prefers SAE, and the Wi-Fi drivers on several receivers
+# associate with SAE but drop the link as soon as traffic flows. Plain WPA2 is accepted by every
+# such router and is stable, so it is the default. WPA2/WPA3 stays selectable by hand, and an
+# access point that offers SAE only still gets WPA3.
+defaultEncryptionForScan = {
+	Encryption.WPA2_WPA3: Encryption.WPA2,
+}
+
+
 def scanResultToConnection(scanResult, adapter):
-	return Connection(adapter=adapter, name=scanResult.ssid, dhcp=True, enabled=True, priority=0, wifi=WiFiConfig(ssid=scanResult.ssid, encryption=scanResult.encryption))
+	encryption = defaultEncryptionForScan.get(scanResult.encryption, scanResult.encryption)
+	return Connection(adapter=adapter, name=scanResult.ssid, dhcp=True, enabled=True, priority=0, wifi=WiFiConfig(ssid=scanResult.ssid, encryption=encryption))
 
 
 # Adapters (top list) and Saved Wi-Fi Networks for the selected adapter (bottom list).
